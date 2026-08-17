@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -18,111 +19,287 @@ class MainShell extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
   ) {
+    final currentIndex =
+        navigationShell.currentIndex;
+
     return Scaffold(
       body: navigationShell,
+
       bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(
-          18,
-          20,
-          18,
-          10,
-        ),
-        child: DecoratedBox(
+        top: false,
+
+        child: Container(
+          height: 58,
+
           decoration: BoxDecoration(
-            color: AppColors.glass,
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x52000000),
-                blurRadius: 20,
-                offset: Offset(0, 10),
+            color: AppColors.background.withValues(
+              alpha: 0.98,
+            ),
+
+            border: Border(
+              top: BorderSide(
+                color: AppColors.outline.withValues(
+                  alpha: 0.26,
+                ),
+                width: 0.5,
+              ),
+            ),
+          ),
+
+          child: Row(
+            children: [
+              Expanded(
+                child: _NavItem(
+                  icon: Icons.home_outlined,
+                  selectedIcon: Icons.home_rounded,
+                  selected:
+                      currentIndex == 0,
+                  onTap: () {
+                    _selectDestination(
+                      ref,
+                      0,
+                    );
+                  },
+                ),
+              ),
+
+              Expanded(
+                child: _NavItem(
+                  icon:
+                      Icons.auto_awesome_outlined,
+                  selectedIcon:
+                      Icons.auto_awesome_rounded,
+                  selected:
+                      currentIndex == 1,
+                  onTap: () {
+                    _selectDestination(
+                      ref,
+                      1,
+                    );
+                  },
+                ),
+              ),
+
+              Expanded(
+                child: _NavItem(
+                  icon:
+                      Icons.search_rounded,
+                  selectedIcon:
+                      Icons.search_rounded,
+                  selected:
+                      currentIndex == 2,
+                  onTap: () {
+                    _selectDestination(
+                      ref,
+                      2,
+                    );
+                  },
+                ),
+              ),
+
+              Expanded(
+                child: _NavItem(
+                  icon:
+                      Icons.bookmark_border_rounded,
+                  selectedIcon:
+                      Icons.bookmark_rounded,
+                  selected:
+                      currentIndex == 3,
+                  onTap: () {
+                    _selectDestination(
+                      ref,
+                      3,
+                    );
+                  },
+                ),
               ),
             ],
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(24),
-            child: NavigationBar(
-              height: 58,
-              labelBehavior:
-                  NavigationDestinationLabelBehavior.alwaysHide,
-              selectedIndex: navigationShell.currentIndex,
+        ),
+      ),
+    );
+  }
 
-              onDestinationSelected: (index) {
-                final currentIndex =
-                    navigationShell.currentIndex;
+  void _selectDestination(
+    WidgetRef ref,
+    int index,
+  ) {
+    final currentIndex =
+        navigationShell.currentIndex;
 
-                const discoverIndex = 1;
+    const discoverIndex = 1;
 
-                final enteringDiscover =
-                    index == discoverIndex &&
-                    currentIndex != discoverIndex;
+    final enteringDiscover =
+        index == discoverIndex &&
+        currentIndex != discoverIndex;
 
-                // Only reset Discover when entering it
-                // from another MAIN navigation tab.
-                //
-                // Home -> Discover
-                // Search -> Discover
-                // Library -> Discover
-                //
-                // This does NOT happen when:
-                //
-                // Trending -> Popular
-                // Popular -> Top Rated
-                // manga details -> Back
-                // tapping Discover while already on Discover
-                if (enteringDiscover) {
-                  ref
-                      .read(
-                        discoverResetProvider.notifier,
-                      )
-                      .state++;
-                }
+    if (enteringDiscover) {
+      ref
+          .read(
+            discoverResetProvider.notifier,
+          )
+          .state++;
+    }
 
-                navigationShell.goBranch(
-                  index,
-                  initialLocation:
-                      index == currentIndex,
-                );
-              },
+    navigationShell.goBranch(
+      index,
+      initialLocation:
+          index == currentIndex,
+    );
+  }
+}
 
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(
-                    Icons.home_outlined,
-                  ),
-                  selectedIcon: Icon(
-                    Icons.home_rounded,
-                  ),
-                  label: 'Home',
-                ),
-                NavigationDestination(
-                  icon: Icon(
-                    Icons.explore_outlined,
-                  ),
-                  selectedIcon: Icon(
-                    Icons.explore_rounded,
-                  ),
-                  label: 'Discover',
-                ),
-                NavigationDestination(
-                  icon: Icon(
-                    Icons.search_rounded,
-                  ),
-                  selectedIcon: Icon(
-                    Icons.manage_search_rounded,
-                  ),
-                  label: 'Search',
-                ),
-                NavigationDestination(
-                  icon: Icon(
-                    Icons.bookmarks_outlined,
-                  ),
-                  selectedIcon: Icon(
-                    Icons.bookmarks_rounded,
-                  ),
-                  label: 'Library',
-                ),
-              ],
+class _NavItem extends StatefulWidget {
+  const _NavItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final IconData selectedIcon;
+
+  final bool selected;
+
+  final VoidCallback onTap;
+
+  @override
+  State<_NavItem> createState() =>
+      _NavItemState();
+}
+
+class _NavItemState extends State<_NavItem>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController
+      _controller;
+
+  late final Animation<double>
+      _scaleAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller =
+        AnimationController(
+      vsync: this,
+      duration:
+          const Duration(
+        milliseconds: 180,
+      ),
+    );
+
+    _scaleAnimation =
+        TweenSequence<double>(
+      [
+        TweenSequenceItem(
+          tween:
+              Tween<double>(
+            begin: 1.0,
+            end: 1.08,
+          ).chain(
+            CurveTween(
+              curve:
+                  Curves.easeOutCubic,
+            ),
+          ),
+          weight: 45,
+        ),
+
+        TweenSequenceItem(
+          tween:
+              Tween<double>(
+            begin: 1.08,
+            end: 1.0,
+          ).chain(
+            CurveTween(
+              curve:
+                  Curves.easeOutCubic,
+            ),
+          ),
+          weight: 55,
+        ),
+      ],
+    ).animate(
+      _controller,
+    );
+  }
+
+  @override
+  void didUpdateWidget(
+    covariant _NavItem oldWidget,
+  ) {
+    super.didUpdateWidget(
+      oldWidget,
+    );
+
+    if (!oldWidget.selected &&
+        widget.selected) {
+      _controller.forward(
+        from: 0.0,
+      );
+    }
+  }
+
+  void _handleTap() {
+    if (!widget.selected) {
+      HapticFeedback
+          .selectionClick();
+    }
+
+    widget.onTap();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    return GestureDetector(
+      behavior:
+          HitTestBehavior.opaque,
+
+      onTap:
+          _handleTap,
+
+      child: Center(
+        child: ScaleTransition(
+          scale:
+              _scaleAnimation,
+
+          child: AnimatedContainer(
+            duration:
+                const Duration(
+              milliseconds: 160,
+            ),
+
+            curve:
+                Curves.easeOutCubic,
+
+            child: Icon(
+              widget.selected
+                  ? widget.selectedIcon
+                  : widget.icon,
+
+              size:
+                  widget.selected
+                      ? 27
+                      : 24,
+
+              color:
+                  widget.selected
+                      ? AppColors.accent
+                      : AppColors.muted
+                          .withValues(
+                          alpha: 0.78,
+                        ),
             ),
           ),
         ),

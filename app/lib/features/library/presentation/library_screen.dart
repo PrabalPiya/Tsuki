@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -10,6 +9,7 @@ import '../../../core/models/manga.dart';
 import '../../../core/state/providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/cover_art.dart';
+import '../../../shared/widgets/one_time_hint.dart';
 
 /* ===========================================================
  * LIBRARY PROVIDER
@@ -26,7 +26,8 @@ final libraryItemsProvider =
     ),
   );
 
-  final repository = ref.watch(catalogProvider);
+  final repository =
+      ref.watch(catalogProvider);
 
   final items = <Manga>[];
 
@@ -42,7 +43,7 @@ final libraryItemsProvider =
         items.add(manga);
       }
     } catch (_) {
-      // Keep loading other bookmarks if one fails.
+      // Keep loading other bookmarks.
     }
   }
 
@@ -84,8 +85,7 @@ class LibraryScreen extends ConsumerStatefulWidget {
 }
 
 class _LibraryScreenState
-    extends ConsumerState<LibraryScreen>
-    with SingleTickerProviderStateMixin {
+    extends ConsumerState<LibraryScreen> {
   bool _dragging = false;
   bool _removeActive = false;
 
@@ -97,96 +97,6 @@ class _LibraryScreenState
 
   static const double _deleteDistance =
       78.0;
-
-  late final AnimationController
-      _hintController;
-
-  Timer? _hintTimer;
-
-  /* =========================================================
-   * INIT
-   * ======================================================= */
-
-  @override
-  void initState() {
-    super.initState();
-
-    /*
-     * EXACT SAME TIMING AS DISCOVER.
-     */
-    _hintController =
-        AnimationController(
-      vsync: this,
-      duration: const Duration(
-        milliseconds: 900,
-      ),
-    );
-
-    WidgetsBinding.instance
-        .addPostFrameCallback(
-      (_) => _showLibraryHint(),
-    );
-  }
-
-  /* =========================================================
-   * HINT
-   * ======================================================= */
-
-  void _showLibraryHint() {
-    if (!mounted) {
-      return;
-    }
-
-    _hintTimer?.cancel();
-
-    /*
-     * Same blinking/fading behavior as Discover.
-     */
-    _hintController.repeat(
-      reverse: true,
-    );
-
-    /*
-     * Same 5 second lifetime as Discover.
-     */
-    _hintTimer = Timer(
-      const Duration(
-        seconds: 5,
-      ),
-      () {
-        if (mounted) {
-          _hintController.animateTo(
-            0.0,
-          );
-        }
-      },
-    );
-  }
-
-  void _hideLibraryHint() {
-    _hintTimer?.cancel();
-
-    _hintController.animateTo(
-      0.0,
-    );
-  }
-
-  /* =========================================================
-   * DISPOSE
-   * ======================================================= */
-
-  @override
-  void dispose() {
-    _hintTimer?.cancel();
-
-    _hintController.dispose();
-
-    super.dispose();
-  }
-
-  /* =========================================================
-   * REMOVE TARGET CENTER
-   * ======================================================= */
 
   Offset? _removeTargetCenter() {
     final targetContext =
@@ -213,32 +123,16 @@ class _LibraryScreenState
     );
   }
 
-  /* =========================================================
-   * START DRAG
-   * ======================================================= */
-
   void _startDrag() {
-    /*
-     * Same idea as Discover:
-     * interaction immediately hides the hint.
-     */
-    _hideLibraryHint();
-
     HapticFeedback.mediumImpact();
 
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
     setState(() {
       _dragging = true;
       _removeActive = false;
     });
   }
-
-  /* =========================================================
-   * MAGNETIC PULL
-   * ======================================================= */
 
   _DragMetrics _dragMetrics(
     Offset finger,
@@ -262,8 +156,7 @@ class _LibraryScreenState
 
     double pull = 0.0;
 
-    if (distance <=
-        _deleteDistance) {
+    if (distance <= _deleteDistance) {
       pull = 1.0;
     } else if (distance <
         _pullStartDistance) {
@@ -274,39 +167,30 @@ class _LibraryScreenState
               (_pullStartDistance -
                   _deleteDistance));
 
-      pull = Curves.easeInCubic
-          .transform(
-        raw
-            .clamp(
-              0.0,
-              1.0,
-            )
-            .toDouble(),
+      pull = Curves.easeInCubic.transform(
+        raw.clamp(
+          0.0,
+          1.0,
+        ).toDouble(),
       );
     }
 
-    if (active !=
-        _removeActive) {
+    if (active != _removeActive) {
       WidgetsBinding.instance
           .addPostFrameCallback(
         (_) {
-          if (!mounted) {
-            return;
-          }
+          if (!mounted) return;
 
-          if (_removeActive ==
-              active) {
+          if (_removeActive == active) {
             return;
           }
 
           setState(() {
-            _removeActive =
-                active;
+            _removeActive = active;
           });
 
           if (active) {
-            HapticFeedback
-                .selectionClick();
+            HapticFeedback.selectionClick();
           }
         },
       );
@@ -319,24 +203,14 @@ class _LibraryScreenState
     );
   }
 
-  /* =========================================================
-   * CANCEL
-   * ======================================================= */
-
   void _cancelDrag() {
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
     setState(() {
       _dragging = false;
       _removeActive = false;
     });
   }
-
-  /* =========================================================
-   * REMOVE
-   * ======================================================= */
 
   void _removeManga(
     Manga manga,
@@ -351,19 +225,13 @@ class _LibraryScreenState
           manga,
         );
 
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
     setState(() {
       _dragging = false;
       _removeActive = false;
     });
   }
-
-  /* =========================================================
-   * BUILD
-   * ======================================================= */
 
   @override
   Widget build(
@@ -379,24 +247,17 @@ class _LibraryScreenState
       libraryItemsProvider,
     );
 
-    /*
-     * ALL bookmarked manga.
-     *
-     * Adult titles remain bookmarked even
-     * when adult content is turned off.
-     */
     final allItems =
         itemsState.valueOrNull ??
         const <Manga>[];
 
     /*
-     * Visibility filter only.
+     * Adult visibility filter only.
      */
     final items = allItems
         .where(
           (manga) =>
-              libraryState
-                  .adultContent ||
+              libraryState.adultContent ||
               !manga.isAdult,
         )
         .toList();
@@ -427,8 +288,7 @@ class _LibraryScreenState
                 Icons.settings_outlined,
               ),
 
-              tooltip:
-                  'Settings',
+              tooltip: 'Settings',
             ),
           ),
         ],
@@ -436,10 +296,6 @@ class _LibraryScreenState
 
       body: Stack(
         children: [
-          /* ===============================================
-           * LIBRARY
-           * ============================================= */
-
           Positioned.fill(
             child: _buildContent(
               libraryState,
@@ -449,142 +305,57 @@ class _LibraryScreenState
             ),
           ),
 
-          /* ===============================================
-           * DISCOVER-STYLE HINT
-           * ============================================= */
-
+          /*
+           * ONE-TIME HINT.
+           *
+           * SharedPreferences ensures this is
+           * shown only once per installation.
+           */
           if (items.isNotEmpty &&
               !_dragging)
-            Positioned(
+            const Positioned(
               left: 0,
               right: 0,
-
-              /*
-               * Floating above the bottom nav / cards,
-               * just like Discover's floating hint.
-               */
               bottom: 28,
-
-              child: IgnorePointer(
-                child: Center(
-                  child: FadeTransition(
-                    opacity:
-                        CurvedAnimation(
-                      parent:
-                          _hintController,
-
-                      curve:
-                          Curves.easeInOut,
-                    ),
-
-                    child: Container(
-                      padding:
-                          const EdgeInsets
-                              .symmetric(
-                        horizontal:
-                            14,
-                        vertical:
-                            9,
-                      ),
-
-                      decoration:
-                          BoxDecoration(
-                        color:
-                            AppColors.glass,
-
-                        borderRadius:
-                            BorderRadius
-                                .circular(
-                          24,
-                        ),
-
-                        border:
-                            Border.all(
-                          color:
-                              AppColors
-                                  .outline,
-                        ),
-                      ),
-
-                      child:
-                          const Row(
-                        mainAxisSize:
-                            MainAxisSize.min,
-
-                        children: [
-                          Icon(
-                            Icons
-                                .touch_app_rounded,
-
-                            size:
-                                18,
-
-                            color:
-                                Colors.white,
-                          ),
-
-                          SizedBox(
-                            width:
-                                8,
-                          ),
-
-                          Text(
-                            'Hold & drag down to remove',
-
-                            style:
-                                TextStyle(
-                              color:
-                                  Colors.white,
-
-                              fontSize:
-                                  12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+              child: Center(
+                child: OneTimeHint(
+                  id:
+                      'library_drag_remove',
+                  icon:
+                      Icons.touch_app_rounded,
+                  text:
+                      'Hold & drag down to remove',
                 ),
               ),
             ),
 
-          /* ===============================================
-           * BLUR / DARKEN
-           * ============================================= */
-
+          /*
+           * Background blur.
+           */
           Positioned.fill(
             child: IgnorePointer(
               child: AnimatedOpacity(
                 duration:
                     const Duration(
-                  milliseconds:
-                      180,
+                  milliseconds: 180,
                 ),
-
                 curve:
                     Curves.easeOutCubic,
-
                 opacity:
                     _dragging
                         ? 1.0
                         : 0.0,
-
                 child: BackdropFilter(
                   filter:
                       ImageFilter.blur(
-                    sigmaX:
-                        5.0,
-
-                    sigmaY:
-                        5.0,
+                    sigmaX: 5.0,
+                    sigmaY: 5.0,
                   ),
-
                   child: Container(
                     color:
                         Colors.black
                             .withValues(
-                      alpha:
-                          0.48,
+                      alpha: 0.48,
                     ),
                   ),
                 ),
@@ -592,51 +363,35 @@ class _LibraryScreenState
             ),
           ),
 
-          /* ===============================================
-           * REMOVE TARGET
-           * ============================================= */
-
+          /*
+           * Delete target.
+           */
           AnimatedPositioned(
             duration:
                 const Duration(
-              milliseconds:
-                  240,
+              milliseconds: 240,
             ),
-
             curve:
                 Curves.easeOutBack,
-
-            left:
-                0.0,
-
-            right:
-                0.0,
-
-            /*
-             * Kept low as requested.
-             */
+            left: 0.0,
+            right: 0.0,
             bottom:
                 _dragging
                     ? 12.0
                     : -90.0,
-
             child: IgnorePointer(
               child: AnimatedOpacity(
                 duration:
                     const Duration(
-                  milliseconds:
-                      150,
+                  milliseconds: 150,
                 ),
-
                 opacity:
                     _dragging
                         ? 1.0
                         : 0.0,
-
                 child: _RemoveButton(
                   key:
                       _removeTargetKey,
-
                   active:
                       _removeActive,
                 ),
@@ -647,10 +402,6 @@ class _LibraryScreenState
       ),
     );
   }
-
-  /* =========================================================
-   * CONTENT
-   * ======================================================= */
 
   Widget _buildContent(
     dynamic libraryState,
@@ -671,16 +422,12 @@ class _LibraryScreenState
       return _LibraryMessage(
         icon:
             Icons.cloud_off_rounded,
-
         title:
             'Library unavailable',
-
         message:
             'Your library could not be loaded right now.',
-
         actionLabel:
             'Retry',
-
         onAction: () {
           ref.invalidate(
             libraryItemsProvider,
@@ -689,45 +436,29 @@ class _LibraryScreenState
       );
     }
 
-    /* =======================================================
-     * ONLY HIDDEN ADULT BOOKMARKS
-     * ===================================================== */
-
     if (items.isEmpty &&
         allItems.isNotEmpty &&
         !libraryState.adultContent) {
       return const _LibraryMessage(
         icon:
             Icons.visibility_off_rounded,
-
         title:
             'Adult titles hidden',
-
         message:
             'Your bookmarked adult manga will appear again when Adult Content is enabled.',
       );
     }
 
-    /* =======================================================
-     * ACTUALLY EMPTY
-     * ===================================================== */
-
     if (items.isEmpty) {
       return const _LibraryMessage(
         icon:
             Icons.bookmark_border_rounded,
-
         title:
             'Your library is empty',
-
         message:
             'Manga you bookmark will appear here.',
       );
     }
-
-    /* =======================================================
-     * GRID
-     * ===================================================== */
 
     return GridView.builder(
       padding:
@@ -737,42 +468,29 @@ class _LibraryScreenState
         16,
         18,
       ),
-
       gridDelegate:
           const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount:
-            2,
-
-        childAspectRatio:
-            0.60,
-
-        crossAxisSpacing:
-            14,
-
-        mainAxisSpacing:
-            18,
+        crossAxisCount: 2,
+        childAspectRatio: 0.60,
+        crossAxisSpacing: 14,
+        mainAxisSpacing: 18,
       ),
-
       itemCount:
           items.length,
-
-      itemBuilder: (
+      itemBuilder:
+          (
         context,
         index,
       ) {
         return _LibraryItem(
           manga:
               items[index],
-
           onDragStarted:
               _startDrag,
-
           dragMetrics:
               _dragMetrics,
-
           onCancel:
               _cancelDrag,
-
           onRemove:
               _removeManga,
         );
@@ -811,35 +529,26 @@ class _LibraryItem
       onRemove;
 
   @override
-  State<_LibraryItem>
-      createState() =>
-          _LibraryItemState();
+  State<_LibraryItem> createState() =>
+      _LibraryItemState();
 }
 
 class _LibraryItemState
     extends State<_LibraryItem> {
   OverlayEntry? _overlay;
 
-  bool _dragging =
-      false;
-
-  bool _deleting =
-      false;
+  bool _dragging = false;
+  bool _deleting = false;
 
   Offset _finger =
       Offset.zero;
 
-  double _pull =
-      0.0;
+  double _pull = 0.0;
 
   Offset? _target;
 
   Size _size =
       Size.zero;
-
-  /* =========================================================
-   * LONG PRESS START
-   * ======================================================= */
 
   void _onLongPressStart(
     LongPressStartDetails details,
@@ -848,18 +557,13 @@ class _LibraryItemState
         context.findRenderObject()
             as RenderBox?;
 
-    if (box == null) {
-      return;
-    }
+    if (box == null) return;
 
-    _size =
-        box.size;
-
+    _size = box.size;
     _finger =
         details.globalPosition;
 
-    _dragging =
-        true;
+    _dragging = true;
 
     widget.onDragStarted();
 
@@ -874,19 +578,14 @@ class _LibraryItemState
         return _FloatingManga(
           manga:
               widget.manga,
-
           finger:
               _finger,
-
           size:
               _size,
-
           target:
               _target,
-
           pull:
               _pull,
-
           deleting:
               _deleting,
         );
@@ -899,10 +598,6 @@ class _LibraryItemState
 
     setState(() {});
   }
-
-  /* =========================================================
-   * DRAG
-   * ======================================================= */
 
   void _onLongPressMove(
     LongPressMoveUpdateDetails
@@ -939,10 +634,6 @@ class _LibraryItemState
         metrics.target;
   }
 
-  /* =========================================================
-   * RELEASE
-   * ======================================================= */
-
   Future<void> _onLongPressEnd(
     LongPressEndDetails details,
   ) async {
@@ -970,27 +661,18 @@ class _LibraryItemState
     }
   }
 
-  /* =========================================================
-   * DELETE SUCTION
-   * ======================================================= */
-
   Future<void> _animateDelete() async {
-    _deleting =
-        true;
-
-    _pull =
-        1.0;
+    _deleting = true;
+    _pull = 1.0;
 
     _overlay
         ?.markNeedsBuild();
 
-    HapticFeedback
-        .selectionClick();
+    HapticFeedback.selectionClick();
 
     await Future.delayed(
       const Duration(
-        milliseconds:
-            220,
+        milliseconds: 220,
       ),
     );
 
@@ -998,11 +680,8 @@ class _LibraryItemState
 
     if (mounted) {
       setState(() {
-        _dragging =
-            false;
-
-        _deleting =
-            false;
+        _dragging = false;
+        _deleting = false;
       });
     }
 
@@ -1011,18 +690,11 @@ class _LibraryItemState
     );
   }
 
-  /* =========================================================
-   * CANCEL
-   * ======================================================= */
-
   void _cancel() {
     _removeOverlay();
 
-    _dragging =
-        false;
-
-    _deleting =
-        false;
+    _dragging = false;
+    _deleting = false;
 
     if (mounted) {
       setState(() {});
@@ -1034,8 +706,7 @@ class _LibraryItemState
   void _removeOverlay() {
     _overlay?.remove();
 
-    _overlay =
-        null;
+    _overlay = null;
   }
 
   @override
@@ -1044,10 +715,6 @@ class _LibraryItemState
 
     super.dispose();
   }
-
-  /* =========================================================
-   * BUILD
-   * ======================================================= */
 
   @override
   Widget build(
@@ -1069,8 +736,7 @@ class _LibraryItemState
       child: AnimatedOpacity(
         duration:
             const Duration(
-          milliseconds:
-              180,
+          milliseconds: 180,
         ),
 
         curve:
@@ -1107,15 +773,10 @@ class _FloatingManga
   });
 
   final Manga manga;
-
   final Offset finger;
-
   final Size size;
-
   final Offset? target;
-
   final double pull;
-
   final bool deleting;
 
   @override
@@ -1126,8 +787,7 @@ class _FloatingManga
 
 class _FloatingMangaState
     extends State<_FloatingManga> {
-  bool _entered =
-      false;
+  bool _entered = false;
 
   @override
   void initState() {
@@ -1136,13 +796,10 @@ class _FloatingMangaState
     WidgetsBinding.instance
         .addPostFrameCallback(
       (_) {
-        if (!mounted) {
-          return;
-        }
+        if (!mounted) return;
 
         setState(() {
-          _entered =
-              true;
+          _entered = true;
         });
       },
     );
@@ -1262,8 +919,7 @@ class _FloatingMangaState
             child: AnimatedContainer(
               duration:
                   const Duration(
-                milliseconds:
-                    180,
+                milliseconds: 180,
               ),
 
               curve:
@@ -1286,13 +942,10 @@ class _FloatingMangaState
                                 alpha:
                                     0.48,
                               ),
-
                               blurRadius:
                                   28,
-
                               spreadRadius:
                                   1,
-
                               offset:
                                   const Offset(
                                 0,
@@ -1308,10 +961,8 @@ class _FloatingMangaState
                                 alpha:
                                     0.18,
                               ),
-
                               blurRadius:
                                   8,
-
                               offset:
                                   const Offset(
                                 0,
@@ -1351,7 +1002,7 @@ class _FloatingMangaState
 }
 
 /* ===========================================================
- * MANGA TILE
+ * TILE
  * ========================================================= */
 
 class _LibraryMangaTile
@@ -1362,7 +1013,6 @@ class _LibraryMangaTile
   });
 
   final Manga manga;
-
   final bool interactive;
 
   @override
@@ -1389,8 +1039,7 @@ class _LibraryMangaTile
         ),
 
         const SizedBox(
-          height:
-              10,
+          height: 10,
         ),
 
         Text(
@@ -1462,8 +1111,7 @@ class _RemoveButton
       child: AnimatedScale(
         duration:
             const Duration(
-          milliseconds:
-              150,
+          milliseconds: 150,
         ),
 
         curve:
@@ -1477,8 +1125,7 @@ class _RemoveButton
         child: AnimatedContainer(
           duration:
               const Duration(
-            milliseconds:
-                160,
+            milliseconds: 160,
           ),
 
           curve:
@@ -1489,8 +1136,7 @@ class _RemoveButton
 
           padding:
               const EdgeInsets.symmetric(
-            horizontal:
-                18,
+            horizontal: 18,
           ),
 
           decoration:
@@ -1579,8 +1225,7 @@ class _RemoveButton
               AnimatedSwitcher(
                 duration:
                     const Duration(
-                  milliseconds:
-                      120,
+                  milliseconds: 120,
                 ),
 
                 child: Text(
@@ -1617,7 +1262,7 @@ class _RemoveButton
 }
 
 /* ===========================================================
- * EMPTY / ERROR
+ * MESSAGE
  * ========================================================= */
 
 class _LibraryMessage
@@ -1631,9 +1276,7 @@ class _LibraryMessage
   });
 
   final IconData icon;
-
   final String title;
-
   final String message;
 
   final String? actionLabel;
@@ -1648,8 +1291,7 @@ class _LibraryMessage
       child: Padding(
         padding:
             const EdgeInsets.symmetric(
-          horizontal:
-              32,
+          horizontal: 32,
         ),
 
         child: Column(
@@ -1658,19 +1300,15 @@ class _LibraryMessage
 
           children: [
             Container(
-              width:
-                  58,
-
-              height:
-                  58,
+              width: 58,
+              height: 58,
 
               decoration:
                   BoxDecoration(
                 color:
                     AppColors.raised
                         .withValues(
-                  alpha:
-                      0.65,
+                  alpha: 0.65,
                 ),
 
                 borderRadius:
