@@ -48,7 +48,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: firebase/package-lock.json
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 21
