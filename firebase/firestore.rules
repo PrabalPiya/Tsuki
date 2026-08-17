@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function productionAccess() { return signedIn() && request.auth.token.appAccess == true; }
+    function owns(uid) { return productionAccess() && request.auth.uid == uid; }
+    function validBookmark(id) {
+      return request.resource.data.keys().hasOnly(['mangaId', 'updatedAt'])
+        && request.resource.data.mangaId == id
+        && request.resource.data.updatedAt == request.time;
+    }
+    function validProgress() {
+      return request.resource.data.keys().hasOnly([
+        'mangaId','chapterId','pageIndex','relativeOffset','chapterProgress',
+        'openedChapterIds','updatedAt'
+      ])
+        && request.resource.data.mangaId is string
+        && request.resource.data.chapterId is string
+        && request.resource.data.pageIndex is int
+        && request.resource.data.pageIndex >= 0
+        && request.resource.data.relativeOffset is number
+        && request.resource.data.relativeOffset >= 0
+        && request.resource.data.relativeOffset <= 1
+        && request.resource.data.chapterProgress is number
+        && request.resource.data.chapterProgress >= 0
+        && request.resource.data.chapterProgress <= 1
+        && request.resource.data.openedChapterIds is list
+        && request.resource.data.openedChapterIds.size() <= 2000
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    match /manga/{mangaId} {
+      allow read: if productionAccess();
+      allow write: if false;
+      match /chapters/{chapterId} {
+        allow read: if productionAccess();
+        allow write: if false;
+      }
+    }
+    match /rankings/{period} {
+      allow read: if productionAccess();
+      allow write: if false;
+    }
+    match /users/{uid} {
+      allow read: if owns(uid);
+      allow create, update: if owns(uid)
+        && request.resource.data.keys().hasOnly(['adultContent'])
+        && request.resource.data.adultContent is bool;
+      allow delete: if owns(uid);
+      match /bookmarks/{mangaId} {
+        allow read, delete: if owns(uid);
+        allow create, update: if owns(uid) && validBookmark(mangaId);
+      }
+      match /progress/{mangaId} {
+        allow read, delete: if owns(uid);
+        allow create, update: if owns(uid) && validProgress()
+          && request.resource.data.mangaId == mangaId;
+      }
+      match /{privateCollection}/{document=**} {
+        allow read, write: if false;
+      }
+    }
+    match /internalSourceMappings/{document=**} { allow read, write: if false; }
+    match /trackedManga/{document=**} { allow read, write: if false; }
+    match /sourceHealth/{document=**} { allow read, write: if false; }
+    match /updateJobs/{document=**} { allow read, write: if false; }
+    match /mergeAudit/{document=**} { allow read, write: if false; }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

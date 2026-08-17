@@ -1,0 +1,5 @@
+# Copy this file to key.properties and keep the real file private.
+storeFile=C:\\path\\to\\quiet-reader-release.jks
+storePassword=replace-me
+keyAlias=quiet-reader
+keyPassword=replace-me

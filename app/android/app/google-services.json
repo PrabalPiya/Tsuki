@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "348316155116",
+    "project_id": "quiet-reader-app-26b7",
+    "storage_bucket": "quiet-reader-app-26b7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:348316155116:android:48f1884387f456a2bb39c9",
+        "android_client_info": {
+          "package_name": "dev.quietreader.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "348316155116-sa6mdgu9bf3bgc3774g05npmi2db32pm.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "dev.quietreader.app",
+            "certificate_hash": "007c3b39792b860e3378b73d742accffe8886b39"
+          }
+        },
+        {
+          "client_id": "348316155116-nm7eobqepr5t9bfeoc5pn8i9nk7cqjmt.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD15TzUFztqM1OUZ82r_4S67-E982_SO3Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "348316155116-nm7eobqepr5t9bfeoc5pn8i9nk7cqjmt.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
