@@ -20,7 +20,7 @@ const double _detailPadding = 28.0;
  * Chapter layout
  * --------------------------------------------------------- */
 
-const double _chapterTileHeight = 68.0;
+const double _chapterTileHeight = 60.0;
 const double _chapterGap = 10.0;
 const int _maxVisibleChapters = 4;
 
@@ -45,7 +45,7 @@ const double _heroSynopsisToActionsSpacing = 20.0;
  * Chapter section
  * --------------------------------------------------------- */
 
-const double _chapterSectionOffset = 15.0;
+const double _chapterSectionOffset = -1.0;
 
 const double _chapterTitleToListSpacing = 16.0;
 const double _chapterBottomVisualSpacing = 22.0;
@@ -238,6 +238,8 @@ class _Details extends ConsumerWidget {
         physics:
             const ClampingScrollPhysics(),
         slivers: [
+          /* HERO */
+
           SliverToBoxAdapter(
             child: _MangaHero(
               manga: manga,
@@ -268,6 +270,8 @@ class _Details extends ConsumerWidget {
               },
             ),
           ),
+
+          /* CHAPTER HEADING */
 
           SliverToBoxAdapter(
             child: Transform.translate(
@@ -373,6 +377,8 @@ class _Details extends ConsumerWidget {
             ),
           ),
 
+          /* CHAPTER CONTENT */
+
           chaptersAsync.when(
             loading: () {
               return SliverToBoxAdapter(
@@ -391,6 +397,7 @@ class _Details extends ConsumerWidget {
                 ),
               );
             },
+
             error: (
               error,
               stackTrace,
@@ -401,8 +408,12 @@ class _Details extends ConsumerWidget {
                     0,
                     _chapterSectionOffset,
                   ),
-                  child: SizedBox(
-                    height: 170,
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(
+                      horizontal:
+                          _detailPadding,
+                    ),
                     child: _ModernMessage(
                       icon:
                           Icons.cloud_off_rounded,
@@ -421,6 +432,7 @@ class _Details extends ConsumerWidget {
                 ),
               );
             },
+
             data: (items) {
               if (items.isEmpty) {
                 return SliverToBoxAdapter(
@@ -430,14 +442,18 @@ class _Details extends ConsumerWidget {
                       _chapterSectionOffset,
                     ),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: _detailPadding,
+                      padding:
+                          const EdgeInsets.symmetric(
+                        horizontal:
+                            _detailPadding,
                       ),
                       child: _ModernMessage(
-                        icon: Icons.menu_book_outlined,
+                        icon: Icons
+                            .menu_book_outlined,
                         message:
                             'No English chapters available from the configured sources.',
-                        retryLabel: 'Refresh',
+                        retryLabel:
+                            'Refresh',
                         onRetry: () {
                           ref.invalidate(
                             chapterProvider(
@@ -599,6 +615,7 @@ class _ChapterViewportState
                       : const NeverScrollableScrollPhysics(),
               itemCount:
                   reversed.length,
+
               separatorBuilder:
                   (
                 context,
@@ -609,6 +626,7 @@ class _ChapterViewportState
                       _chapterGap,
                 );
               },
+
               itemBuilder:
                   (
                 context,
@@ -704,69 +722,47 @@ class _MangaHero extends StatelessWidget {
   final String startReadingLabel;
 
   void _showCoverPreview(
-    BuildContext context,
-  ) {
-    if (manga.coverUrl.trim().isEmpty) {
-      return;
-    }
-
-    showGeneralDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      barrierColor:
-          Colors.transparent,
-      barrierLabel:
-          'Cover preview',
-      transitionDuration:
-          const Duration(
-        milliseconds: 220,
-      ),
-      pageBuilder: (
-        dialogContext,
-        animation,
-        secondaryAnimation,
-      ) {
-        return _CoverPreviewOverlay(
-          manga: manga,
-        );
-      },
-      transitionBuilder: (
-        context,
-        animation,
-        secondaryAnimation,
-        child,
-      ) {
-        final curved =
-            CurvedAnimation(
-          parent:
-              animation,
-          curve:
-              Curves.easeOutCubic,
-          reverseCurve:
-              Curves.easeInCubic,
-        );
-
-        return FadeTransition(
-          opacity:
-              curved,
-          child:
-              ScaleTransition(
-            scale:
-                Tween<double>(
-              begin:
-                  0.94,
-              end:
-                  1,
-            ).animate(
-              curved,
-            ),
-            child:
-                child,
-          ),
-        );
-      },
-    );
+  BuildContext context,
+) {
+  if (manga.coverUrl.trim().isEmpty) {
+    return;
   }
+
+  showGeneralDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    barrierColor: Colors.transparent,
+    barrierLabel: 'Cover preview',
+    transitionDuration: const Duration(
+      milliseconds: 220,
+    ),
+
+    pageBuilder: (
+      dialogContext,
+      animation,
+      secondaryAnimation,
+    ) {
+      return _CoverPreviewOverlay(
+        manga: manga,
+      );
+    },
+
+    transitionBuilder: (
+      context,
+      animation,
+      secondaryAnimation,
+      child,
+    ) {
+      /*
+       * IMPORTANT:
+       * Do not scale the fullscreen overlay here.
+       *
+       * Just return it normally.
+       */
+      return child;
+    },
+  );
+}
 
   @override
   Widget build(
@@ -792,6 +788,7 @@ class _MangaHero extends StatelessWidget {
             MangaImageCache.instance,
         fit:
             BoxFit.cover,
+
         placeholder:
             (_, __) {
           return _HeroFallback(
@@ -799,6 +796,7 @@ class _MangaHero extends StatelessWidget {
                 manga.title,
           );
         },
+
         errorWidget:
             (_, __, ___) {
           return _HeroFallback(
@@ -845,7 +843,7 @@ class _MangaHero extends StatelessWidget {
             .headlineLarge
             ?.copyWith(
               fontSize:
-                  26,
+                  30,
               height:
                   1.2,
               fontWeight:
@@ -894,10 +892,10 @@ class _MangaHero extends StatelessWidget {
             );
 
     /*
-     * Every element below the title uses the ACTUAL
-     * rendered height of the previous element.
+     * Measure only the content that is actually visible.
      *
-     * There is no fake reserved title or synopsis space.
+     * No fake blank title line.
+     * No fake blank synopsis lines.
      */
     final titlePainter =
         TextPainter(
@@ -940,23 +938,22 @@ class _MangaHero extends StatelessWidget {
       );
 
     /*
-     * Title always begins at the same position.
+     * Title always starts at the same visual position.
      */
     final contentTop =
         baseHeroHeight *
             _heroContentTopFactor;
 
     /*
-     * Dynamic real content height.
+     * Natural content flow:
      *
-     * Long title:
-     * pushes info, synopsis, buttons and chapters down.
-     *
-     * Long synopsis:
-     * pushes buttons and chapters down.
-     *
-     * Short title/synopsis:
-     * following content moves upward naturally.
+     * Title actual height
+     * + exact gap
+     * + info chips
+     * + exact gap
+     * + synopsis actual height
+     * + exact gap
+     * + buttons
      */
     final contentHeight =
         titlePainter.height +
@@ -968,10 +965,8 @@ class _MangaHero extends StatelessWidget {
             50;
 
     /*
-     * The hero ends exactly 24px after the action row.
-     *
-     * Therefore Chapters is always the same distance
-     * below Bookmark / Start Reading.
+     * Hero finishes exactly after the action buttons
+     * plus the exact Bookmark/Read -> Chapters spacing.
      */
     final layoutHeight =
         contentTop +
@@ -986,18 +981,14 @@ class _MangaHero extends StatelessWidget {
         clipBehavior:
             Clip.hardEdge,
         children: [
-          /* =================================================
-           * COVER
-           * =============================================== */
+          /* COVER */
 
           Positioned.fill(
             child:
                 cover,
           ),
 
-          /* =================================================
-           * MAIN DARKNESS
-           * =============================================== */
+          /* MAIN DARKNESS */
 
           const Positioned.fill(
             child:
@@ -1044,9 +1035,7 @@ class _MangaHero extends StatelessWidget {
             ),
           ),
 
-          /* =================================================
-           * SECOND DARKNESS
-           * =============================================== */
+          /* SECOND DARKNESS */
 
           Positioned(
             left:
@@ -1098,12 +1087,7 @@ class _MangaHero extends StatelessWidget {
             ),
           ),
 
-          /* =================================================
-           * BOTTOM FADE INTO PAGE BACKGROUND
-           *
-           * Makes the bottom of the image disappear smoothly
-           * into the scaffold background.
-           * =============================================== */
+          /* BOTTOM FADE INTO PAGE BACKGROUND */
 
           Positioned(
             left:
@@ -1157,9 +1141,7 @@ class _MangaHero extends StatelessWidget {
             ),
           ),
 
-          /* =================================================
-           * COVER TAP SURFACE
-           * =============================================== */
+          /* COVER TAP SURFACE */
 
           if (coverUrl.isNotEmpty)
             Positioned.fill(
@@ -1178,9 +1160,7 @@ class _MangaHero extends StatelessWidget {
               ),
             ),
 
-          /* =================================================
-           * BACK BUTTON
-           * =============================================== */
+          /* BACK BUTTON */
 
           Positioned(
             top:
@@ -1214,9 +1194,7 @@ class _MangaHero extends StatelessWidget {
             ),
           ),
 
-          /* =================================================
-           * NATURAL HERO CONTENT
-           * =============================================== */
+          /* NATURAL HERO CONTENT FLOW */
 
           Positioned(
             left:
@@ -1246,13 +1224,6 @@ class _MangaHero extends StatelessWidget {
                       titleStyle,
                 ),
 
-                /*
-                 * One-line title:
-                 * info is 12px below the first line.
-                 *
-                 * Two-line title:
-                 * info is 12px below the second line.
-                 */
                 const SizedBox(
                   height:
                       _heroTitleToInfoSpacing,
@@ -1305,9 +1276,6 @@ class _MangaHero extends StatelessWidget {
                   ],
                 ),
 
-                /*
-                 * Exact Info -> Synopsis gap.
-                 */
                 const SizedBox(
                   height:
                       _heroInfoToSynopsisSpacing,
@@ -1327,11 +1295,6 @@ class _MangaHero extends StatelessWidget {
                       synopsisStyle,
                 ),
 
-                /*
-                 * Exact Synopsis -> Action gap.
-                 *
-                 * Short synopsis does not reserve blank lines.
-                 */
                 const SizedBox(
                   height:
                       _heroSynopsisToActionsSpacing,
@@ -1393,153 +1356,123 @@ class _CoverPreviewOverlay
     BuildContext context,
   ) {
     return Material(
-      color:
-          Colors.transparent,
-      child:
-          Stack(
+      color: Colors.transparent,
+      child: Stack(
+        fit: StackFit.expand,
         children: [
-          /* BLURRED BACKGROUND */
-
+          /*
+           * FULLSCREEN BLUR.
+           *
+           * This never scales, so you will no longer
+           * see the blurred rectangle growing outward
+           * from the edges.
+           */
           Positioned.fill(
-            child:
-                GestureDetector(
-              behavior:
-                  HitTestBehavior.opaque,
-              onTap:
-                  () {
-                Navigator.of(
-                  context,
-                ).pop();
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+
+              onTap: () {
+                Navigator.of(context).pop();
               },
-              child:
-                  BackdropFilter(
-                filter:
-                    ImageFilter.blur(
-                  sigmaX:
-                      20,
-                  sigmaY:
-                      20,
+
+              child: BackdropFilter(
+                filter: ImageFilter.blur(
+                  sigmaX: 20,
+                  sigmaY: 20,
                 ),
-                child:
-                    ColoredBox(
-                  color:
-                      Colors.black
-                          .withValues(
-                    alpha:
-                        0.72,
+                child: ColoredBox(
+                  color: Colors.black.withValues(
+                    alpha: 0.72,
                   ),
                 ),
               ),
             ),
           ),
 
-          /* CENTER 3D CARD */
-
+          /*
+           * 3D COVER.
+           *
+           * Kept completely separate from the
+           * fullscreen blur.
+           */
           SafeArea(
-            child:
-                Center(
-              child:
-                  _RotatingCoverCard(
-                manga:
-                    manga,
+            child: Center(
+              child: _CoverEntranceAnimation(
+                child: _RotatingCoverCard(
+                  manga: manga,
+                ),
               ),
             ),
           ),
 
-          /* CLOSE BUTTON */
-
+          /*
+           * CLOSE BUTTON
+           */
           Positioned(
             top:
-                MediaQuery.paddingOf(
-                          context,
-                        ).top +
+                MediaQuery.paddingOf(context).top +
                     14,
-            right:
-                18,
-            child:
-                IconButton(
-              onPressed:
-                  () {
-                Navigator.of(
-                  context,
-                ).pop();
+            right: 18,
+            child: IconButton(
+              onPressed: () {
+                Navigator.of(context).pop();
               },
-              style:
-                  IconButton.styleFrom(
+
+              style: IconButton.styleFrom(
                 backgroundColor:
-                    Colors.black
-                        .withValues(
-                  alpha:
-                      0.45,
+                    Colors.black.withValues(
+                  alpha: 0.45,
                 ),
-                foregroundColor:
-                    Colors.white,
-                side:
-                    BorderSide(
+                foregroundColor: Colors.white,
+                side: BorderSide(
                   color:
-                      Colors.white
-                          .withValues(
-                    alpha:
-                        0.15,
+                      Colors.white.withValues(
+                    alpha: 0.15,
                   ),
                 ),
               ),
-              icon:
-                  const Icon(
+
+              icon: const Icon(
                 Icons.close_rounded,
               ),
             ),
           ),
 
-          /* DRAG HINT */
-
+          /*
+           * DRAG HINT
+           */
           Positioned(
-            left:
-                0,
-            right:
-                0,
+            left: 0,
+            right: 0,
             bottom:
-                MediaQuery.paddingOf(
-                          context,
-                        ).bottom +
+                MediaQuery.paddingOf(context).bottom +
                     28,
-            child:
-                IgnorePointer(
-              child:
-                  Row(
+            child: IgnorePointer(
+              child: Row(
                 mainAxisAlignment:
                     MainAxisAlignment.center,
                 children: [
                   Icon(
-                    Icons
-                        .swipe_rounded,
-                    size:
-                        18,
+                    Icons.swipe_rounded,
+                    size: 18,
                     color:
-                        Colors.white
-                            .withValues(
-                      alpha:
-                          0.65,
+                        Colors.white.withValues(
+                      alpha: 0.65,
                     ),
                   ),
 
                   const SizedBox(
-                    width:
-                        8,
+                    width: 8,
                   ),
 
                   Text(
                     'Drag to rotate',
-                    style:
-                        TextStyle(
+                    style: TextStyle(
                       color:
-                          Colors.white
-                              .withValues(
-                        alpha:
-                            0.68,
+                          Colors.white.withValues(
+                        alpha: 0.68,
                       ),
-                      fontSize:
-                          13,
+                      fontSize: 13,
                       fontWeight:
                           FontWeight.w600,
                     ),
@@ -1549,6 +1482,86 @@ class _CoverPreviewOverlay
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CoverEntranceAnimation
+    extends StatefulWidget {
+  const _CoverEntranceAnimation({
+    required this.child,
+  });
+
+  final Widget child;
+
+  @override
+  State<_CoverEntranceAnimation>
+      createState() =>
+          _CoverEntranceAnimationState();
+}
+
+class _CoverEntranceAnimationState
+    extends State<_CoverEntranceAnimation>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController
+      _controller;
+
+  late final Animation<double>
+      _scale;
+
+  late final Animation<double>
+      _opacity;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller =
+        AnimationController(
+      vsync: this,
+      duration: const Duration(
+        milliseconds: 220,
+      ),
+    );
+
+    final curved =
+        CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+    );
+
+    _scale =
+        Tween<double>(
+      begin: 0.94,
+      end: 1.0,
+    ).animate(curved);
+
+    _opacity =
+        Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(curved);
+
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    return FadeTransition(
+      opacity: _opacity,
+      child: ScaleTransition(
+        scale: _scale,
+        child: widget.child,
       ),
     );
   }
@@ -1705,7 +1718,8 @@ class _RotatingCoverCardState
     );
 
     final tiltStrength =
-        rotationPercent.abs();
+        rotationPercent
+            .abs();
 
     return GestureDetector(
       behavior:
@@ -1889,7 +1903,7 @@ class _RotatingCoverCardState
                   ),
                 ),
 
-                /* MOVING LIGHT */
+                /* MOVING LIGHT / CARD SHINE */
 
                 IgnorePointer(
                   child:

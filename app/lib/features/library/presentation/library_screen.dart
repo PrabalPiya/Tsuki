@@ -1,183 +1,1775 @@
+import 'dart:async';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
 import '../../../core/models/manga.dart';
 import '../../../core/state/providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/cover_art.dart';
 
+/* ===========================================================
+ * LIBRARY PROVIDER
+ * ========================================================= */
+
 final libraryItemsProvider =
     FutureProvider.autoDispose<List<Manga>>((ref) async {
-  final state = ref.watch(userLibraryProvider.select((value) =>
-      (bookmarks: value.bookmarks, bookmarkedManga: value.bookmarkedManga)));
+  final state = ref.watch(
+    userLibraryProvider.select(
+      (value) => (
+        bookmarks: value.bookmarks,
+        bookmarkedManga: value.bookmarkedManga,
+      ),
+    ),
+  );
+
   final repository = ref.watch(catalogProvider);
+
   final items = <Manga>[];
+
   for (final id in state.bookmarks) {
     try {
-      final manga = repository.cached(id) ??
+      final manga =
+          repository.cached(id) ??
           state.bookmarkedManga[id] ??
           await repository.details(id);
+
       if (manga != null) {
         repository.remember(manga);
         items.add(manga);
       }
     } catch (_) {
-      // Keep the rest of the library usable if one provider entry is missing.
+      // Keep loading other bookmarks if one fails.
     }
   }
-  items.sort((a, b) => a.title.compareTo(b.title));
+
+  items.sort(
+    (a, b) => a.title.compareTo(b.title),
+  );
+
   return items;
 });
 
+/* ===========================================================
+ * DRAG METRICS
+ * ========================================================= */
+
+class _DragMetrics {
+  const _DragMetrics({
+    required this.pull,
+    required this.active,
+    required this.target,
+  });
+
+  final double pull;
+  final bool active;
+  final Offset? target;
+}
+
+/* ===========================================================
+ * LIBRARY SCREEN
+ * ========================================================= */
+
 class LibraryScreen extends ConsumerStatefulWidget {
-  const LibraryScreen({super.key});
+  const LibraryScreen({
+    super.key,
+  });
+
   @override
-  ConsumerState<LibraryScreen> createState() => _LibraryScreenState();
+  ConsumerState<LibraryScreen> createState() =>
+      _LibraryScreenState();
 }
 
-class _LibraryScreenState extends ConsumerState<LibraryScreen> {
+class _LibraryScreenState
+    extends ConsumerState<LibraryScreen>
+    with SingleTickerProviderStateMixin {
   bool _dragging = false;
-  @override
-  Widget build(BuildContext context) {
-    final state = ref.watch(userLibraryProvider);
-    final itemsState = ref.watch(libraryItemsProvider);
-    final items = itemsState.valueOrNull ?? const <Manga>[];
-    return Scaffold(
-        appBar: AppBar(
-        titleSpacing: 16,
-            title: const Text('Library'),
-            actions: [
-              Padding(
-            padding: const EdgeInsets.only(right: 16),
-                  child: IconButton(
-                      onPressed: () => context.push('/settings'),
-                      icon: const Icon(Icons.settings_outlined),
-                      tooltip: 'Settings'))
-            ]),
-        body: Stack(children: [
-          if (state.loading || itemsState.isLoading)
-            const Center(child: CircularProgressIndicator())
-          else if (items.isEmpty)
-            const Center(
-                child: Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Text('Your bookmarked manga will appear here.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: AppColors.muted))))
-          else
-            GridView.builder(
-                padding: EdgeInsets.fromLTRB(16, 12, 16, _dragging ? 132 : 0),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: .56,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 20),
-                itemCount: items.length,
-                itemBuilder: (context, index) => _LibraryItem(
-                    manga: items[index],
-                    onDragStarted: () {
-                      HapticFeedback.mediumImpact();
-                      setState(() => _dragging = true);
-                    },
-                    onDragEnd: () => setState(() => _dragging = false))),
-          AnimatedPositioned(
-              duration: const Duration(milliseconds: 180),
-              left: 16,
-              right: 16,
-              bottom: _dragging ? 104 : -110,
-              child: _RemoveTarget(onRemoved: (manga) {
-                setState(() => _dragging = false);
-                ref.read(userLibraryProvider.notifier).toggleBookmark(manga);
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text('${manga.title} removed'),
-                    action: SnackBarAction(
-                        label: 'Undo',
-                        onPressed: () => ref
-                            .read(userLibraryProvider.notifier)
-                            .restoreBookmark(manga))));
-              }))
-        ]));
-  }
-}
+  bool _removeActive = false;
 
-class _LibraryItem extends StatelessWidget {
-  const _LibraryItem(
-      {required this.manga,
-      required this.onDragStarted,
-      required this.onDragEnd});
-  final Manga manga;
-  final VoidCallback onDragStarted, onDragEnd;
-  @override
-  Widget build(BuildContext context) {
-    final child = Card(
-        child: InkWell(
-            borderRadius: BorderRadius.circular(18),
-            onTap: () =>
-                context.push('/manga/${Uri.encodeComponent(manga.id)}'),
-            child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                          child: CoverArt(
-                              url: manga.coverUrl,
-                              title: manga.title,
-                              borderRadius: 14)),
-                      const SizedBox(height: 10),
-                      Text(manga.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleMedium),
-                      const SizedBox(height: 6),
-                      Row(children: [
-                        const Icon(Icons.bookmark_rounded,
-                            size: 15, color: AppColors.accent),
-                        const SizedBox(width: 5),
-                        Text('Saved',
-                            style: Theme.of(context).textTheme.bodySmall)
-                      ])
-                    ]))));
-    return LongPressDraggable<Manga>(
-        data: manga,
-        maxSimultaneousDrags: 1,
-        onDragStarted: onDragStarted,
-        onDragEnd: (_) => onDragEnd(),
-        onDraggableCanceled: (_, __) => onDragEnd(),
-        feedback: Material(
-            color: Colors.transparent,
-            child: SizedBox(
-                width: 160,
-                height: 290,
-                child: Transform.scale(scale: 1.04, child: child))),
-        childWhenDragging: Opacity(opacity: .25, child: child),
-        child: child);
-  }
-}
+  final GlobalKey _removeTargetKey =
+      GlobalKey();
 
-class _RemoveTarget extends StatelessWidget {
-  const _RemoveTarget({required this.onRemoved});
-  final ValueChanged<Manga> onRemoved;
+  static const double _pullStartDistance =
+      175.0;
+
+  static const double _deleteDistance =
+      78.0;
+
+  late final AnimationController
+      _hintController;
+
+  Timer? _hintTimer;
+
+  /* =========================================================
+   * INIT
+   * ======================================================= */
+
   @override
-  Widget build(BuildContext context) => DragTarget<Manga>(
-      onWillAcceptWithDetails: (_) {
-        HapticFeedback.selectionClick();
-        return true;
+  void initState() {
+    super.initState();
+
+    /*
+     * EXACT SAME TIMING AS DISCOVER.
+     */
+    _hintController =
+        AnimationController(
+      vsync: this,
+      duration: const Duration(
+        milliseconds: 900,
+      ),
+    );
+
+    WidgetsBinding.instance
+        .addPostFrameCallback(
+      (_) => _showLibraryHint(),
+    );
+  }
+
+  /* =========================================================
+   * HINT
+   * ======================================================= */
+
+  void _showLibraryHint() {
+    if (!mounted) {
+      return;
+    }
+
+    _hintTimer?.cancel();
+
+    /*
+     * Same blinking/fading behavior as Discover.
+     */
+    _hintController.repeat(
+      reverse: true,
+    );
+
+    /*
+     * Same 5 second lifetime as Discover.
+     */
+    _hintTimer = Timer(
+      const Duration(
+        seconds: 5,
+      ),
+      () {
+        if (mounted) {
+          _hintController.animateTo(
+            0.0,
+          );
+        }
       },
-      onAcceptWithDetails: (details) => onRemoved(details.data),
-      builder: (context, candidates, _) => AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          height: 82,
-          decoration: BoxDecoration(
-              color: candidates.isEmpty ? AppColors.raised : AppColors.danger,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: AppColors.outline)),
-          child:
-              const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(Icons.bookmark_remove_rounded),
-            SizedBox(width: 10),
-            Text('Remove Bookmark',
-                style: TextStyle(fontWeight: FontWeight.w700))
-          ])));
+    );
+  }
+
+  void _hideLibraryHint() {
+    _hintTimer?.cancel();
+
+    _hintController.animateTo(
+      0.0,
+    );
+  }
+
+  /* =========================================================
+   * DISPOSE
+   * ======================================================= */
+
+  @override
+  void dispose() {
+    _hintTimer?.cancel();
+
+    _hintController.dispose();
+
+    super.dispose();
+  }
+
+  /* =========================================================
+   * REMOVE TARGET CENTER
+   * ======================================================= */
+
+  Offset? _removeTargetCenter() {
+    final targetContext =
+        _removeTargetKey.currentContext;
+
+    if (targetContext == null) {
+      return null;
+    }
+
+    final box =
+        targetContext.findRenderObject()
+            as RenderBox?;
+
+    if (box == null ||
+        !box.hasSize) {
+      return null;
+    }
+
+    return box.localToGlobal(
+      Offset(
+        box.size.width / 2.0,
+        box.size.height / 2.0,
+      ),
+    );
+  }
+
+  /* =========================================================
+   * START DRAG
+   * ======================================================= */
+
+  void _startDrag() {
+    /*
+     * Same idea as Discover:
+     * interaction immediately hides the hint.
+     */
+    _hideLibraryHint();
+
+    HapticFeedback.mediumImpact();
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _dragging = true;
+      _removeActive = false;
+    });
+  }
+
+  /* =========================================================
+   * MAGNETIC PULL
+   * ======================================================= */
+
+  _DragMetrics _dragMetrics(
+    Offset finger,
+  ) {
+    final target =
+        _removeTargetCenter();
+
+    if (target == null) {
+      return const _DragMetrics(
+        pull: 0.0,
+        active: false,
+        target: null,
+      );
+    }
+
+    final double distance =
+        (finger - target).distance;
+
+    final bool active =
+        distance <= _deleteDistance;
+
+    double pull = 0.0;
+
+    if (distance <=
+        _deleteDistance) {
+      pull = 1.0;
+    } else if (distance <
+        _pullStartDistance) {
+      final double raw =
+          1.0 -
+          ((distance -
+                  _deleteDistance) /
+              (_pullStartDistance -
+                  _deleteDistance));
+
+      pull = Curves.easeInCubic
+          .transform(
+        raw
+            .clamp(
+              0.0,
+              1.0,
+            )
+            .toDouble(),
+      );
+    }
+
+    if (active !=
+        _removeActive) {
+      WidgetsBinding.instance
+          .addPostFrameCallback(
+        (_) {
+          if (!mounted) {
+            return;
+          }
+
+          if (_removeActive ==
+              active) {
+            return;
+          }
+
+          setState(() {
+            _removeActive =
+                active;
+          });
+
+          if (active) {
+            HapticFeedback
+                .selectionClick();
+          }
+        },
+      );
+    }
+
+    return _DragMetrics(
+      pull: pull,
+      active: active,
+      target: target,
+    );
+  }
+
+  /* =========================================================
+   * CANCEL
+   * ======================================================= */
+
+  void _cancelDrag() {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _dragging = false;
+      _removeActive = false;
+    });
+  }
+
+  /* =========================================================
+   * REMOVE
+   * ======================================================= */
+
+  void _removeManga(
+    Manga manga,
+  ) {
+    HapticFeedback.mediumImpact();
+
+    ref
+        .read(
+          userLibraryProvider.notifier,
+        )
+        .toggleBookmark(
+          manga,
+        );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _dragging = false;
+      _removeActive = false;
+    });
+  }
+
+  /* =========================================================
+   * BUILD
+   * ======================================================= */
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    final libraryState =
+        ref.watch(
+      userLibraryProvider,
+    );
+
+    final itemsState =
+        ref.watch(
+      libraryItemsProvider,
+    );
+
+    /*
+     * ALL bookmarked manga.
+     *
+     * Adult titles remain bookmarked even
+     * when adult content is turned off.
+     */
+    final allItems =
+        itemsState.valueOrNull ??
+        const <Manga>[];
+
+    /*
+     * Visibility filter only.
+     */
+    final items = allItems
+        .where(
+          (manga) =>
+              libraryState
+                  .adultContent ||
+              !manga.isAdult,
+        )
+        .toList();
+
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 16,
+
+        title: const Text(
+          'Library',
+        ),
+
+        actions: [
+          Padding(
+            padding:
+                const EdgeInsets.only(
+              right: 16,
+            ),
+
+            child: IconButton(
+              onPressed: () {
+                context.push(
+                  '/settings',
+                );
+              },
+
+              icon: const Icon(
+                Icons.settings_outlined,
+              ),
+
+              tooltip:
+                  'Settings',
+            ),
+          ),
+        ],
+      ),
+
+      body: Stack(
+        children: [
+          /* ===============================================
+           * LIBRARY
+           * ============================================= */
+
+          Positioned.fill(
+            child: _buildContent(
+              libraryState,
+              itemsState,
+              items,
+              allItems,
+            ),
+          ),
+
+          /* ===============================================
+           * DISCOVER-STYLE HINT
+           * ============================================= */
+
+          if (items.isNotEmpty &&
+              !_dragging)
+            Positioned(
+              left: 0,
+              right: 0,
+
+              /*
+               * Floating above the bottom nav / cards,
+               * just like Discover's floating hint.
+               */
+              bottom: 28,
+
+              child: IgnorePointer(
+                child: Center(
+                  child: FadeTransition(
+                    opacity:
+                        CurvedAnimation(
+                      parent:
+                          _hintController,
+
+                      curve:
+                          Curves.easeInOut,
+                    ),
+
+                    child: Container(
+                      padding:
+                          const EdgeInsets
+                              .symmetric(
+                        horizontal:
+                            14,
+                        vertical:
+                            9,
+                      ),
+
+                      decoration:
+                          BoxDecoration(
+                        color:
+                            AppColors.glass,
+
+                        borderRadius:
+                            BorderRadius
+                                .circular(
+                          24,
+                        ),
+
+                        border:
+                            Border.all(
+                          color:
+                              AppColors
+                                  .outline,
+                        ),
+                      ),
+
+                      child:
+                          const Row(
+                        mainAxisSize:
+                            MainAxisSize.min,
+
+                        children: [
+                          Icon(
+                            Icons
+                                .touch_app_rounded,
+
+                            size:
+                                18,
+
+                            color:
+                                Colors.white,
+                          ),
+
+                          SizedBox(
+                            width:
+                                8,
+                          ),
+
+                          Text(
+                            'Hold & drag down to remove',
+
+                            style:
+                                TextStyle(
+                              color:
+                                  Colors.white,
+
+                              fontSize:
+                                  12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+          /* ===============================================
+           * BLUR / DARKEN
+           * ============================================= */
+
+          Positioned.fill(
+            child: IgnorePointer(
+              child: AnimatedOpacity(
+                duration:
+                    const Duration(
+                  milliseconds:
+                      180,
+                ),
+
+                curve:
+                    Curves.easeOutCubic,
+
+                opacity:
+                    _dragging
+                        ? 1.0
+                        : 0.0,
+
+                child: BackdropFilter(
+                  filter:
+                      ImageFilter.blur(
+                    sigmaX:
+                        5.0,
+
+                    sigmaY:
+                        5.0,
+                  ),
+
+                  child: Container(
+                    color:
+                        Colors.black
+                            .withValues(
+                      alpha:
+                          0.48,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          /* ===============================================
+           * REMOVE TARGET
+           * ============================================= */
+
+          AnimatedPositioned(
+            duration:
+                const Duration(
+              milliseconds:
+                  240,
+            ),
+
+            curve:
+                Curves.easeOutBack,
+
+            left:
+                0.0,
+
+            right:
+                0.0,
+
+            /*
+             * Kept low as requested.
+             */
+            bottom:
+                _dragging
+                    ? 12.0
+                    : -90.0,
+
+            child: IgnorePointer(
+              child: AnimatedOpacity(
+                duration:
+                    const Duration(
+                  milliseconds:
+                      150,
+                ),
+
+                opacity:
+                    _dragging
+                        ? 1.0
+                        : 0.0,
+
+                child: _RemoveButton(
+                  key:
+                      _removeTargetKey,
+
+                  active:
+                      _removeActive,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /* =========================================================
+   * CONTENT
+   * ======================================================= */
+
+  Widget _buildContent(
+    dynamic libraryState,
+    AsyncValue<List<Manga>>
+        itemsState,
+    List<Manga> items,
+    List<Manga> allItems,
+  ) {
+    if (libraryState.loading ||
+        itemsState.isLoading) {
+      return const Center(
+        child:
+            CircularProgressIndicator(),
+      );
+    }
+
+    if (itemsState.hasError) {
+      return _LibraryMessage(
+        icon:
+            Icons.cloud_off_rounded,
+
+        title:
+            'Library unavailable',
+
+        message:
+            'Your library could not be loaded right now.',
+
+        actionLabel:
+            'Retry',
+
+        onAction: () {
+          ref.invalidate(
+            libraryItemsProvider,
+          );
+        },
+      );
+    }
+
+    /* =======================================================
+     * ONLY HIDDEN ADULT BOOKMARKS
+     * ===================================================== */
+
+    if (items.isEmpty &&
+        allItems.isNotEmpty &&
+        !libraryState.adultContent) {
+      return const _LibraryMessage(
+        icon:
+            Icons.visibility_off_rounded,
+
+        title:
+            'Adult titles hidden',
+
+        message:
+            'Your bookmarked adult manga will appear again when Adult Content is enabled.',
+      );
+    }
+
+    /* =======================================================
+     * ACTUALLY EMPTY
+     * ===================================================== */
+
+    if (items.isEmpty) {
+      return const _LibraryMessage(
+        icon:
+            Icons.bookmark_border_rounded,
+
+        title:
+            'Your library is empty',
+
+        message:
+            'Manga you bookmark will appear here.',
+      );
+    }
+
+    /* =======================================================
+     * GRID
+     * ===================================================== */
+
+    return GridView.builder(
+      padding:
+          const EdgeInsets.fromLTRB(
+        16,
+        12,
+        16,
+        18,
+      ),
+
+      gridDelegate:
+          const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount:
+            2,
+
+        childAspectRatio:
+            0.60,
+
+        crossAxisSpacing:
+            14,
+
+        mainAxisSpacing:
+            18,
+      ),
+
+      itemCount:
+          items.length,
+
+      itemBuilder: (
+        context,
+        index,
+      ) {
+        return _LibraryItem(
+          manga:
+              items[index],
+
+          onDragStarted:
+              _startDrag,
+
+          dragMetrics:
+              _dragMetrics,
+
+          onCancel:
+              _cancelDrag,
+
+          onRemove:
+              _removeManga,
+        );
+      },
+    );
+  }
+}
+
+/* ===========================================================
+ * LIBRARY ITEM
+ * ========================================================= */
+
+class _LibraryItem
+    extends StatefulWidget {
+  const _LibraryItem({
+    required this.manga,
+    required this.onDragStarted,
+    required this.dragMetrics,
+    required this.onCancel,
+    required this.onRemove,
+  });
+
+  final Manga manga;
+
+  final VoidCallback
+      onDragStarted;
+
+  final _DragMetrics Function(
+    Offset position,
+  ) dragMetrics;
+
+  final VoidCallback
+      onCancel;
+
+  final ValueChanged<Manga>
+      onRemove;
+
+  @override
+  State<_LibraryItem>
+      createState() =>
+          _LibraryItemState();
+}
+
+class _LibraryItemState
+    extends State<_LibraryItem> {
+  OverlayEntry? _overlay;
+
+  bool _dragging =
+      false;
+
+  bool _deleting =
+      false;
+
+  Offset _finger =
+      Offset.zero;
+
+  double _pull =
+      0.0;
+
+  Offset? _target;
+
+  Size _size =
+      Size.zero;
+
+  /* =========================================================
+   * LONG PRESS START
+   * ======================================================= */
+
+  void _onLongPressStart(
+    LongPressStartDetails details,
+  ) {
+    final box =
+        context.findRenderObject()
+            as RenderBox?;
+
+    if (box == null) {
+      return;
+    }
+
+    _size =
+        box.size;
+
+    _finger =
+        details.globalPosition;
+
+    _dragging =
+        true;
+
+    widget.onDragStarted();
+
+    _updateMetrics(
+      _finger,
+    );
+
+    _overlay =
+        OverlayEntry(
+      builder:
+          (context) {
+        return _FloatingManga(
+          manga:
+              widget.manga,
+
+          finger:
+              _finger,
+
+          size:
+              _size,
+
+          target:
+              _target,
+
+          pull:
+              _pull,
+
+          deleting:
+              _deleting,
+        );
+      },
+    );
+
+    Overlay.of(context).insert(
+      _overlay!,
+    );
+
+    setState(() {});
+  }
+
+  /* =========================================================
+   * DRAG
+   * ======================================================= */
+
+  void _onLongPressMove(
+    LongPressMoveUpdateDetails
+        details,
+  ) {
+    if (!_dragging ||
+        _deleting) {
+      return;
+    }
+
+    _finger =
+        details.globalPosition;
+
+    _updateMetrics(
+      _finger,
+    );
+
+    _overlay
+        ?.markNeedsBuild();
+  }
+
+  void _updateMetrics(
+    Offset position,
+  ) {
+    final metrics =
+        widget.dragMetrics(
+      position,
+    );
+
+    _pull =
+        metrics.pull;
+
+    _target =
+        metrics.target;
+  }
+
+  /* =========================================================
+   * RELEASE
+   * ======================================================= */
+
+  Future<void> _onLongPressEnd(
+    LongPressEndDetails details,
+  ) async {
+    if (!_dragging ||
+        _deleting) {
+      return;
+    }
+
+    final metrics =
+        widget.dragMetrics(
+      details.globalPosition,
+    );
+
+    _pull =
+        metrics.pull;
+
+    _target =
+        metrics.target;
+
+    if (metrics.active &&
+        _target != null) {
+      await _animateDelete();
+    } else {
+      _cancel();
+    }
+  }
+
+  /* =========================================================
+   * DELETE SUCTION
+   * ======================================================= */
+
+  Future<void> _animateDelete() async {
+    _deleting =
+        true;
+
+    _pull =
+        1.0;
+
+    _overlay
+        ?.markNeedsBuild();
+
+    HapticFeedback
+        .selectionClick();
+
+    await Future.delayed(
+      const Duration(
+        milliseconds:
+            220,
+      ),
+    );
+
+    _removeOverlay();
+
+    if (mounted) {
+      setState(() {
+        _dragging =
+            false;
+
+        _deleting =
+            false;
+      });
+    }
+
+    widget.onRemove(
+      widget.manga,
+    );
+  }
+
+  /* =========================================================
+   * CANCEL
+   * ======================================================= */
+
+  void _cancel() {
+    _removeOverlay();
+
+    _dragging =
+        false;
+
+    _deleting =
+        false;
+
+    if (mounted) {
+      setState(() {});
+    }
+
+    widget.onCancel();
+  }
+
+  void _removeOverlay() {
+    _overlay?.remove();
+
+    _overlay =
+        null;
+  }
+
+  @override
+  void dispose() {
+    _removeOverlay();
+
+    super.dispose();
+  }
+
+  /* =========================================================
+   * BUILD
+   * ======================================================= */
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    return GestureDetector(
+      behavior:
+          HitTestBehavior.opaque,
+
+      onLongPressStart:
+          _onLongPressStart,
+
+      onLongPressMoveUpdate:
+          _onLongPressMove,
+
+      onLongPressEnd:
+          _onLongPressEnd,
+
+      child: AnimatedOpacity(
+        duration:
+            const Duration(
+          milliseconds:
+              180,
+        ),
+
+        curve:
+            Curves.easeOutCubic,
+
+        opacity:
+            _dragging
+                ? 0.12
+                : 1.0,
+
+        child:
+            _LibraryMangaTile(
+          manga:
+              widget.manga,
+        ),
+      ),
+    );
+  }
+}
+
+/* ===========================================================
+ * FLOATING MANGA
+ * ========================================================= */
+
+class _FloatingManga
+    extends StatefulWidget {
+  const _FloatingManga({
+    required this.manga,
+    required this.finger,
+    required this.size,
+    required this.target,
+    required this.pull,
+    required this.deleting,
+  });
+
+  final Manga manga;
+
+  final Offset finger;
+
+  final Size size;
+
+  final Offset? target;
+
+  final double pull;
+
+  final bool deleting;
+
+  @override
+  State<_FloatingManga>
+      createState() =>
+          _FloatingMangaState();
+}
+
+class _FloatingMangaState
+    extends State<_FloatingManga> {
+  bool _entered =
+      false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    WidgetsBinding.instance
+        .addPostFrameCallback(
+      (_) {
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _entered =
+              true;
+        });
+      },
+    );
+  }
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    final Offset targetCenter =
+        widget.target ??
+        widget.finger;
+
+    final double attraction =
+        widget.deleting
+            ? 1.0
+            : widget.pull *
+                0.34;
+
+    final Offset displayCenter =
+        Offset.lerp(
+      widget.finger,
+      targetCenter,
+      attraction,
+    )!;
+
+    final double liftedScale =
+        _entered
+            ? 1.04
+            : 1.0;
+
+    final double scale =
+        widget.deleting
+            ? 0.05
+            : liftedScale -
+                (widget.pull *
+                    0.54);
+
+    final double rawOpacity =
+        widget.deleting
+            ? 0.0
+            : 1.0 -
+                (widget.pull *
+                    0.16);
+
+    final double opacity =
+        rawOpacity
+            .clamp(
+              0.0,
+              1.0,
+            )
+            .toDouble();
+
+    final double lift =
+        _entered
+            ? 6.0
+            : 0.0;
+
+    return AnimatedPositioned(
+      duration:
+          Duration(
+        milliseconds:
+            widget.deleting
+                ? 220
+                : 75,
+      ),
+
+      curve:
+          widget.deleting
+              ? Curves.easeInCubic
+              : Curves.easeOutCubic,
+
+      left:
+          displayCenter.dx -
+          widget.size.width /
+              2.0,
+
+      top:
+          displayCenter.dy -
+          widget.size.height /
+              2.0 -
+          lift,
+
+      child: IgnorePointer(
+        child: AnimatedScale(
+          duration:
+              Duration(
+            milliseconds:
+                widget.deleting
+                    ? 220
+                    : 180,
+          ),
+
+          curve:
+              widget.deleting
+                  ? Curves.easeInCubic
+                  : Curves.easeOutCubic,
+
+          scale:
+              scale,
+
+          child: AnimatedOpacity(
+            duration:
+                Duration(
+              milliseconds:
+                  widget.deleting
+                      ? 180
+                      : 130,
+            ),
+
+            curve:
+                Curves.easeOut,
+
+            opacity:
+                opacity,
+
+            child: AnimatedContainer(
+              duration:
+                  const Duration(
+                milliseconds:
+                    180,
+              ),
+
+              curve:
+                  Curves.easeOutCubic,
+
+              decoration:
+                  BoxDecoration(
+                borderRadius:
+                    BorderRadius.circular(
+                  18,
+                ),
+
+                boxShadow:
+                    _entered
+                        ? [
+                            BoxShadow(
+                              color:
+                                  Colors.black
+                                      .withValues(
+                                alpha:
+                                    0.48,
+                              ),
+
+                              blurRadius:
+                                  28,
+
+                              spreadRadius:
+                                  1,
+
+                              offset:
+                                  const Offset(
+                                0,
+                                12,
+                              ),
+                            ),
+                          ]
+                        : [
+                            BoxShadow(
+                              color:
+                                  Colors.black
+                                      .withValues(
+                                alpha:
+                                    0.18,
+                              ),
+
+                              blurRadius:
+                                  8,
+
+                              offset:
+                                  const Offset(
+                                0,
+                                3,
+                              ),
+                            ),
+                          ],
+              ),
+
+              child: Material(
+                color:
+                    Colors.transparent,
+
+                child: SizedBox(
+                  width:
+                      widget.size.width,
+
+                  height:
+                      widget.size.height,
+
+                  child:
+                      _LibraryMangaTile(
+                    manga:
+                        widget.manga,
+
+                    interactive:
+                        false,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/* ===========================================================
+ * MANGA TILE
+ * ========================================================= */
+
+class _LibraryMangaTile
+    extends StatelessWidget {
+  const _LibraryMangaTile({
+    required this.manga,
+    this.interactive = true,
+  });
+
+  final Manga manga;
+
+  final bool interactive;
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    final content =
+        Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+
+      children: [
+        Expanded(
+          child: CoverArt(
+            url:
+                manga.coverUrl,
+
+            title:
+                manga.title,
+
+            borderRadius:
+                16,
+          ),
+        ),
+
+        const SizedBox(
+          height:
+              10,
+        ),
+
+        Text(
+          manga.title,
+
+          maxLines:
+              1,
+
+          overflow:
+              TextOverflow.ellipsis,
+
+          style:
+              Theme.of(
+            context,
+          )
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(
+                    fontWeight:
+                        FontWeight.w700,
+
+                    height:
+                        1.2,
+                  ),
+        ),
+      ],
+    );
+
+    if (!interactive) {
+      return content;
+    }
+
+    return InkWell(
+      borderRadius:
+          BorderRadius.circular(
+        18,
+      ),
+
+      onTap: () {
+        context.push(
+          '/manga/${Uri.encodeComponent(manga.id)}',
+        );
+      },
+
+      child:
+          content,
+    );
+  }
+}
+
+/* ===========================================================
+ * REMOVE BUTTON
+ * ========================================================= */
+
+class _RemoveButton
+    extends StatelessWidget {
+  const _RemoveButton({
+    super.key,
+    required this.active,
+  });
+
+  final bool active;
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    return Center(
+      child: AnimatedScale(
+        duration:
+            const Duration(
+          milliseconds:
+              150,
+        ),
+
+        curve:
+            Curves.easeOutCubic,
+
+        scale:
+            active
+                ? 1.06
+                : 1.0,
+
+        child: AnimatedContainer(
+          duration:
+              const Duration(
+            milliseconds:
+                160,
+          ),
+
+          curve:
+              Curves.easeOutCubic,
+
+          height:
+              56,
+
+          padding:
+              const EdgeInsets.symmetric(
+            horizontal:
+                18,
+          ),
+
+          decoration:
+              BoxDecoration(
+            color:
+                active
+                    ? AppColors.danger
+                    : AppColors.raised,
+
+            borderRadius:
+                BorderRadius.circular(
+              18,
+            ),
+
+            border:
+                Border.all(
+              color:
+                  active
+                      ? Colors.white
+                          .withValues(
+                          alpha:
+                              0.18,
+                        )
+                      : AppColors.outline,
+            ),
+
+            boxShadow: [
+              BoxShadow(
+                color:
+                    active
+                        ? AppColors.danger
+                            .withValues(
+                            alpha:
+                                0.34,
+                          )
+                        : Colors.black
+                            .withValues(
+                            alpha:
+                                0.30,
+                          ),
+
+                blurRadius:
+                    active
+                        ? 28
+                        : 18,
+
+                spreadRadius:
+                    active
+                        ? 2
+                        : 0,
+
+                offset:
+                    const Offset(
+                  0,
+                  7,
+                ),
+              ),
+            ],
+          ),
+
+          child: Row(
+            mainAxisSize:
+                MainAxisSize.min,
+
+            children: [
+              Icon(
+                active
+                    ? Icons.delete_rounded
+                    : Icons
+                        .delete_outline_rounded,
+
+                size:
+                    21,
+
+                color:
+                    active
+                        ? Colors.white
+                        : AppColors.muted,
+              ),
+
+              const SizedBox(
+                width:
+                    9,
+              ),
+
+              AnimatedSwitcher(
+                duration:
+                    const Duration(
+                  milliseconds:
+                      120,
+                ),
+
+                child: Text(
+                  active
+                      ? 'Release to remove'
+                      : 'Remove bookmark',
+
+                  key:
+                      ValueKey<bool>(
+                    active,
+                  ),
+
+                  style:
+                      TextStyle(
+                    color:
+                        active
+                            ? Colors.white
+                            : AppColors.text,
+
+                    fontSize:
+                        14,
+
+                    fontWeight:
+                        FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/* ===========================================================
+ * EMPTY / ERROR
+ * ========================================================= */
+
+class _LibraryMessage
+    extends StatelessWidget {
+  const _LibraryMessage({
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final IconData icon;
+
+  final String title;
+
+  final String message;
+
+  final String? actionLabel;
+
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    return Center(
+      child: Padding(
+        padding:
+            const EdgeInsets.symmetric(
+          horizontal:
+              32,
+        ),
+
+        child: Column(
+          mainAxisSize:
+              MainAxisSize.min,
+
+          children: [
+            Container(
+              width:
+                  58,
+
+              height:
+                  58,
+
+              decoration:
+                  BoxDecoration(
+                color:
+                    AppColors.raised
+                        .withValues(
+                  alpha:
+                      0.65,
+                ),
+
+                borderRadius:
+                    BorderRadius.circular(
+                  18,
+                ),
+
+                border:
+                    Border.all(
+                  color:
+                      AppColors.outline,
+                ),
+              ),
+
+              child: Icon(
+                icon,
+
+                size:
+                    27,
+
+                color:
+                    AppColors.accent,
+              ),
+            ),
+
+            const SizedBox(
+              height:
+                  18,
+            ),
+
+            Text(
+              title,
+
+              textAlign:
+                  TextAlign.center,
+
+              style:
+                  Theme.of(
+                context,
+              )
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(
+                        fontWeight:
+                            FontWeight.w800,
+                      ),
+            ),
+
+            const SizedBox(
+              height:
+                  7,
+            ),
+
+            Text(
+              message,
+
+              textAlign:
+                  TextAlign.center,
+
+              style:
+                  Theme.of(
+                context,
+              )
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(
+                        color:
+                            AppColors.muted,
+
+                        height:
+                            1.4,
+                      ),
+            ),
+
+            if (actionLabel != null &&
+                onAction != null) ...[
+              const SizedBox(
+                height:
+                    18,
+              ),
+
+              OutlinedButton.icon(
+                onPressed:
+                    onAction,
+
+                icon:
+                    const Icon(
+                  Icons.refresh_rounded,
+                ),
+
+                label:
+                    Text(
+                  actionLabel!,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
