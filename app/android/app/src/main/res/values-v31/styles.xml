@@ -5,6 +5,18 @@
         name="LaunchTheme"
         parent="@android:style/Theme.Material.NoActionBar">
 
+        <item name="android:windowSplashScreenBackground">
+            #101014
+        </item>
+
+        <item name="android:windowSplashScreenAnimatedIcon">
+            @mipmap/ic_launcher
+        </item>
+
+        <item name="android:windowSplashScreenAnimationDuration">
+            0
+        </item>
+
         <item name="android:windowBackground">
             #101014
         </item>
