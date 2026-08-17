@@ -4,495 +4,2555 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
 import '../../../core/models/chapter.dart';
 import '../../../core/models/manga.dart';
 import '../../../core/models/reading_progress.dart';
 import '../../../core/state/providers.dart';
 import '../../../core/storage/image_cache.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/synopsis_summary.dart';
 
-const _detailRadius = 18.0;
-const _detailPadding = 16.0;
-const _chapterTileHeight = 72.0;
-const _chapterListHeight = 5 * 72.0 + 4 * 10.0;
-const _heroAspectRatio = 0.62;
-const _heroPaddingBottom = 20.0;
+const double _detailRadius = 18.0;
+const double _detailPadding = 28.0;
+
+/* -----------------------------------------------------------
+ * Chapter layout
+ * --------------------------------------------------------- */
+
+const double _chapterTileHeight = 68.0;
+const double _chapterGap = 10.0;
+const int _maxVisibleChapters = 4;
+
+const double _fourChapterViewportHeight =
+    (_chapterTileHeight * _maxVisibleChapters) +
+        (_chapterGap * (_maxVisibleChapters - 1));
+
+/* -----------------------------------------------------------
+ * Hero layout
+ * --------------------------------------------------------- */
+
+const double _heroAspectRatio = 0.62;
+
+const double _heroToChapterSpacing = 24.0;
+const double _heroContentTopFactor = 0.46;
+
+const double _heroTitleToInfoSpacing = 12.0;
+const double _heroInfoToSynopsisSpacing = 17.0;
+const double _heroSynopsisToActionsSpacing = 20.0;
+
+/* -----------------------------------------------------------
+ * Chapter section
+ * --------------------------------------------------------- */
+
+const double _chapterSectionOffset = 15.0;
+
+const double _chapterTitleToListSpacing = 16.0;
+const double _chapterBottomVisualSpacing = 22.0;
+
+/* -----------------------------------------------------------
+ * 3D cover preview
+ * --------------------------------------------------------- */
+
+const double _maxCoverRotation = 0.70;
+
+const Duration _coverReturnDuration =
+    Duration(milliseconds: 300);
+
+/* ===========================================================
+ * MANGA DETAILS SCREEN
+ * ========================================================= */
 
 class MangaDetailsScreen extends ConsumerWidget {
-  const MangaDetailsScreen({super.key, required this.mangaId});
+  const MangaDetailsScreen({
+    super.key,
+    required this.mangaId,
+  });
+
   final String mangaId;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final repository = ref.watch(catalogProvider);
-    final saved = ref.watch(userLibraryProvider).bookmarkedManga[mangaId];
-    if (saved != null) repository.remember(saved);
+    final library = ref.watch(userLibraryProvider);
+
+    final saved = library.bookmarkedManga[mangaId];
+
+    if (saved != null) {
+      repository.remember(saved);
+    }
+
     final cached = repository.cached(mangaId);
-    if (cached != null) return _Details(manga: cached);
+
+    if (cached != null) {
+      return _Details(
+        manga: cached,
+      );
+    }
+
     return FutureBuilder<Manga?>(
-        future: repository.details(mangaId),
-        builder: (context, snapshot) {
-          final manga = snapshot.data;
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Scaffold(
-                body: Center(child: CircularProgressIndicator()));
-          }
-          if (manga == null) {
-            return const Scaffold(
-                body: Center(child: Text('Manga unavailable right now.')));
-          }
-          return _Details(manga: manga);
-        });
+      future: repository.details(mangaId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Scaffold(
+            body: _ModernMessage(
+              icon: Icons.error_outline_rounded,
+              message: 'Unable to load manga details.',
+              onRetry: () {
+                if (context.canPop()) {
+                  context.pop();
+                }
+              },
+              retryLabel: 'Go Back',
+            ),
+          );
+        }
+
+        final manga = snapshot.data;
+
+        if (manga == null) {
+          return Scaffold(
+            body: _ModernMessage(
+              icon: Icons.menu_book_outlined,
+              message: 'Manga unavailable right now.',
+              onRetry: () {
+                if (context.canPop()) {
+                  context.pop();
+                }
+              },
+              retryLabel: 'Go Back',
+            ),
+          );
+        }
+
+        repository.remember(manga);
+
+        return _Details(
+          manga: manga,
+        );
+      },
+    );
   }
 }
 
+/* ===========================================================
+ * DETAILS
+ * ========================================================= */
+
 class _Details extends ConsumerWidget {
-  const _Details({required this.manga});
+  const _Details({
+    required this.manga,
+  });
+
   final Manga manga;
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final library = ref.watch(userLibraryProvider);
-    final bookmarked = library.bookmarks.contains(manga.id);
-    final chapters = ref.watch(chapterProvider(manga));
-    final progress = library.progress[manga.id];
-    final readableChapters =
-        chapters.valueOrNull?.where((c) => c.hasDirectlyReadableCopy).toList();
-    final hasReadable = readableChapters?.isNotEmpty == true;
+  Widget build(
+    BuildContext context,
+    WidgetRef ref,
+  ) {
+    final library =
+        ref.watch(userLibraryProvider);
+
+    final chaptersAsync =
+        ref.watch(chapterProvider(manga));
+
+    final bookmarked =
+        library.bookmarks.contains(manga.id);
+
+    final progress =
+        library.progress[manga.id];
+
+    final loadedChapters =
+        chaptersAsync.valueOrNull ??
+            const <CanonicalChapter>[];
+
+    final readableChapters = loadedChapters
+        .where(
+          (chapter) =>
+              chapter.hasDirectlyReadableCopy,
+        )
+        .toList(
+          growable: false,
+        );
+
+    final actualChapterCount =
+        loadedChapters.isNotEmpty
+            ? loadedChapters.length
+            : manga.chapterCount;
+
     final startReadingLabel =
-        progress == null ? 'Start Reading' : 'Continue Reading';
-    final VoidCallback? onStartReading = hasReadable
-        ? () {
-            final list = readableChapters;
-            if (list == null || list.isEmpty) return;
-            final currentChapterId = progress?.chapterId;
-            final chapterId = currentChapterId != null &&
-                list.any((c) => c.id == currentChapterId)
-              ? currentChapterId
-              : list.first.id;
-            context.push(
-                '/reader/${Uri.encodeComponent(manga.id)}?chapter=${Uri.encodeComponent(chapterId)}');
+        progress == null
+            ? 'Start Reading'
+            : 'Continue Reading';
+
+    VoidCallback? onStartReading;
+
+    if (readableChapters.isNotEmpty) {
+      onStartReading = () {
+        CanonicalChapter selected =
+            readableChapters.first;
+
+        final currentId =
+            progress?.chapterId;
+
+        if (currentId != null &&
+            currentId.isNotEmpty) {
+          for (final chapter
+              in readableChapters) {
+            if (chapter.id == currentId) {
+              selected = chapter;
+              break;
+            }
           }
-        : null;
+        }
+
+        context.push(
+          '/reader/${Uri.encodeComponent(manga.id)}'
+          '?chapter=${Uri.encodeComponent(selected.id)}',
+        );
+      };
+    }
+
+    final systemBottom =
+        MediaQuery.paddingOf(context).bottom;
+
+    final bottomSpacing =
+        systemBottom +
+            _chapterBottomVisualSpacing;
+
+    final chapterSectionScrollable =
+        loadedChapters.length >
+            _maxVisibleChapters;
 
     return Scaffold(
-        body: CustomScrollView(slivers: [
-      // Hero section - full cover image with all content overlaid on top
-      SliverToBoxAdapter(
-          child: _MangaHero(
+      body: CustomScrollView(
+        physics:
+            const ClampingScrollPhysics(),
+        slivers: [
+          SliverToBoxAdapter(
+            child: _MangaHero(
               manga: manga,
-              onBack: () => context.pop(),
-              onToggleBookmark: () =>
-                  ref.read(userLibraryProvider.notifier).toggleBookmark(manga),
-              bookmarked: bookmarked,
-              onStartReading: onStartReading,
-              startReadingLabel: startReadingLabel)),
-      // Chapters header
-      SliverToBoxAdapter(
-          child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  _detailPadding, 18, _detailPadding, 10),
-              child: Text('Chapters',
-                  style: Theme.of(context).textTheme.headlineSmall))),
-      // Chapters list - fixed height showing 5 at a time, scrollable
-      chapters.when(
-          loading: () => const SliverFillRemaining(
-              hasScrollBody: false,
-              child: Center(child: CircularProgressIndicator())),
-          error: (_, __) => const SliverFillRemaining(
-              hasScrollBody: false,
-              child: _ModernMessage(
-                  icon: Icons.cloud_off_rounded,
-                  message: 'Unable to retrieve chapters right now.')),
-          data: (items) {
-            if (items.isEmpty) {
-              return const SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _ModernMessage(
-                      icon: Icons.menu_book_outlined,
+              chapterCount:
+                  actualChapterCount,
+              bookmarked:
+                  bookmarked,
+              startReadingLabel:
+                  startReadingLabel,
+              onStartReading:
+                  onStartReading,
+              onBack: () {
+                if (context.canPop()) {
+                  context.pop();
+                } else {
+                  context.go('/');
+                }
+              },
+              onToggleBookmark: () {
+                ref
+                    .read(
+                      userLibraryProvider
+                          .notifier,
+                    )
+                    .toggleBookmark(
+                      manga,
+                    );
+              },
+            ),
+          ),
+
+          SliverToBoxAdapter(
+            child: Transform.translate(
+              offset: const Offset(
+                0,
+                _chapterSectionOffset,
+              ),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(
+                  horizontal:
+                      _detailPadding,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Chapters',
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineSmall
+                            ?.copyWith(
+                              fontSize: 28,
+                              fontWeight:
+                                  FontWeight.w800,
+                            ),
+                      ),
+                    ),
+
+                    if (chapterSectionScrollable)
+                      Container(
+                        padding:
+                            const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration:
+                            BoxDecoration(
+                          color:
+                              AppColors.surface
+                                  .withValues(
+                            alpha: 0.7,
+                          ),
+                          borderRadius:
+                              BorderRadius.circular(
+                            999,
+                          ),
+                          border:
+                              Border.all(
+                            color:
+                                AppColors.outline,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize:
+                              MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons
+                                  .unfold_more_rounded,
+                              size: 15,
+                              color:
+                                  AppColors.muted,
+                            ),
+                            const SizedBox(
+                              width: 4,
+                            ),
+                            Text(
+                              'Scroll',
+                              style:
+                                  Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        color:
+                                            AppColors.muted,
+                                        fontSize:
+                                            11,
+                                        fontWeight:
+                                            FontWeight
+                                                .w700,
+                                      ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          SliverToBoxAdapter(
+            child: Transform.translate(
+              offset: const Offset(
+                0,
+                _chapterSectionOffset,
+              ),
+              child: const SizedBox(
+                height:
+                    _chapterTitleToListSpacing,
+              ),
+            ),
+          ),
+
+          chaptersAsync.when(
+            loading: () {
+              return SliverToBoxAdapter(
+                child: Transform.translate(
+                  offset: const Offset(
+                    0,
+                    _chapterSectionOffset,
+                  ),
+                  child: const SizedBox(
+                    height: 150,
+                    child: Center(
+                      child:
+                          CircularProgressIndicator(),
+                    ),
+                  ),
+                ),
+              );
+            },
+            error: (
+              error,
+              stackTrace,
+            ) {
+              return SliverToBoxAdapter(
+                child: Transform.translate(
+                  offset: const Offset(
+                    0,
+                    _chapterSectionOffset,
+                  ),
+                  child: SizedBox(
+                    height: 170,
+                    child: _ModernMessage(
+                      icon:
+                          Icons.cloud_off_rounded,
                       message:
-                          'No English chapters available from the configured sources.'));
-            }
-            return SliverToBoxAdapter(
-                child: SizedBox(
-                    height: _chapterListHeight,
-                    child: ListView.separated(
-                        padding: EdgeInsets.zero,
-                        itemCount: items.length,
-                        separatorBuilder: (_, __) =>
-                            const SizedBox(height: 10),
-                        itemBuilder: (context, index) {
-                          final chapter =
-                              items[items.length - index - 1];
-                          final state = _chapterState(chapter, progress);
-                          final readable = chapter.hasDirectlyReadableCopy;
-                          return _ChapterTile(
-                              chapter: chapter,
-                              state: state,
-                              readable: readable,
-                              onTap: readable
-                                  ? () => context.push(
-                                      '/reader/${Uri.encodeComponent(manga.id)}?chapter=${Uri.encodeComponent(chapter.id)}')
-                                  : null);
-                        })));
-          }),
-      const SliverToBoxAdapter(child: SizedBox(height: 24)),
-    ]));
+                          'Unable to retrieve chapters right now.',
+                      retryLabel: 'Retry',
+                      onRetry: () {
+                        ref.invalidate(
+                          chapterProvider(
+                            manga,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              );
+            },
+            data: (items) {
+              if (items.isEmpty) {
+                return SliverToBoxAdapter(
+                  child: Transform.translate(
+                    offset: const Offset(
+                      0,
+                      _chapterSectionOffset,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: _detailPadding,
+                      ),
+                      child: _ModernMessage(
+                        icon: Icons.menu_book_outlined,
+                        message:
+                            'No English chapters available from the configured sources.',
+                        retryLabel: 'Refresh',
+                        onRetry: () {
+                          ref.invalidate(
+                            chapterProvider(
+                              manga,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                );
+              }
+
+              return SliverToBoxAdapter(
+                child: Transform.translate(
+                  offset: const Offset(
+                    0,
+                    _chapterSectionOffset,
+                  ),
+                  child: _ChapterViewport(
+                    manga: manga,
+                    chapters: items,
+                    progress: progress,
+                  ),
+                ),
+              );
+            },
+          ),
+
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height:
+                  bottomSpacing,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/* ===========================================================
+ * CHAPTER VIEWPORT
+ * ========================================================= */
+
+class _ChapterViewport
+    extends StatefulWidget {
+  const _ChapterViewport({
+    required this.manga,
+    required this.chapters,
+    required this.progress,
+  });
+
+  final Manga manga;
+
+  final List<CanonicalChapter>
+      chapters;
+
+  final ReadingProgress? progress;
+
+  @override
+  State<_ChapterViewport>
+      createState() =>
+          _ChapterViewportState();
+}
+
+class _ChapterViewportState
+    extends State<_ChapterViewport> {
+  late final ScrollController
+      _controller;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller =
+        ScrollController();
   }
 
-  String _chapterState(CanonicalChapter chapter, ReadingProgress? progress) {
-    if (!chapter.hasDirectlyReadableCopy) return 'EXTERNAL';
-    if (progress == null || !progress.openedChapterIds.contains(chapter.id)) {
+  @override
+  void dispose() {
+    _controller.dispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    final reversed =
+        widget.chapters.reversed
+            .toList(
+      growable: false,
+    );
+
+    final visibleCount =
+        reversed.length <
+                _maxVisibleChapters
+            ? reversed.length
+            : _maxVisibleChapters;
+
+    final double viewportHeight;
+
+    if (visibleCount ==
+        _maxVisibleChapters) {
+      viewportHeight =
+          _fourChapterViewportHeight;
+    } else {
+      viewportHeight =
+          (_chapterTileHeight *
+                  visibleCount) +
+              (_chapterGap *
+                  (visibleCount - 1));
+    }
+
+    final canScroll =
+        reversed.length >
+            _maxVisibleChapters;
+
+    return Padding(
+      padding:
+          const EdgeInsets.symmetric(
+        horizontal:
+            _detailPadding,
+      ),
+      child: SizedBox(
+        width:
+            double.infinity,
+        height:
+            viewportHeight,
+        child: ClipRect(
+          child: Scrollbar(
+            controller:
+                _controller,
+            thumbVisibility:
+                false,
+            thickness:
+                3,
+            radius:
+                const Radius.circular(
+              999,
+            ),
+            child:
+                ListView.separated(
+              controller:
+                  _controller,
+              padding:
+                  EdgeInsets.zero,
+              primary:
+                  false,
+              shrinkWrap:
+                  false,
+              clipBehavior:
+                  Clip.hardEdge,
+              physics:
+                  canScroll
+                      ? const ClampingScrollPhysics()
+                      : const NeverScrollableScrollPhysics(),
+              itemCount:
+                  reversed.length,
+              separatorBuilder:
+                  (
+                context,
+                index,
+              ) {
+                return const SizedBox(
+                  height:
+                      _chapterGap,
+                );
+              },
+              itemBuilder:
+                  (
+                context,
+                index,
+              ) {
+                final chapter =
+                    reversed[index];
+
+                final readable =
+                    chapter
+                        .hasDirectlyReadableCopy;
+
+                final state =
+                    _chapterState(
+                  chapter,
+                  widget.progress,
+                );
+
+                return SizedBox(
+                  height:
+                      _chapterTileHeight,
+                  child:
+                      _ChapterTile(
+                    chapter:
+                        chapter,
+                    state:
+                        state,
+                    readable:
+                        readable,
+                    onTap:
+                        readable
+                            ? () {
+                                context.push(
+                                  '/reader/${Uri.encodeComponent(widget.manga.id)}'
+                                  '?chapter=${Uri.encodeComponent(chapter.id)}',
+                                );
+                              }
+                            : null,
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _chapterState(
+    CanonicalChapter chapter,
+    ReadingProgress? progress,
+  ) {
+    if (progress == null) {
       return 'NEW';
     }
+
+    if (!progress
+        .openedChapterIds
+        .contains(
+          chapter.id,
+        )) {
+      return 'NEW';
+    }
+
     return 'READ';
   }
 }
 
+/* ===========================================================
+ * HERO
+ * ========================================================= */
+
 class _MangaHero extends StatelessWidget {
-  const _MangaHero(
-      {required this.manga,
-      required this.onBack,
-      required this.bookmarked,
-      required this.onToggleBookmark,
-      required this.onStartReading,
-      required this.startReadingLabel});
+  const _MangaHero({
+    required this.manga,
+    required this.chapterCount,
+    required this.onBack,
+    required this.bookmarked,
+    required this.onToggleBookmark,
+    required this.onStartReading,
+    required this.startReadingLabel,
+  });
+
   final Manga manga;
+  final int chapterCount;
+
   final VoidCallback onBack;
+
   final bool bookmarked;
   final VoidCallback onToggleBookmark;
+
   final VoidCallback? onStartReading;
   final String startReadingLabel;
 
+  void _showCoverPreview(
+    BuildContext context,
+  ) {
+    if (manga.coverUrl.trim().isEmpty) {
+      return;
+    }
+
+    showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor:
+          Colors.transparent,
+      barrierLabel:
+          'Cover preview',
+      transitionDuration:
+          const Duration(
+        milliseconds: 220,
+      ),
+      pageBuilder: (
+        dialogContext,
+        animation,
+        secondaryAnimation,
+      ) {
+        return _CoverPreviewOverlay(
+          manga: manga,
+        );
+      },
+      transitionBuilder: (
+        context,
+        animation,
+        secondaryAnimation,
+        child,
+      ) {
+        final curved =
+            CurvedAnimation(
+          parent:
+              animation,
+          curve:
+              Curves.easeOutCubic,
+          reverseCurve:
+              Curves.easeInCubic,
+        );
+
+        return FadeTransition(
+          opacity:
+              curved,
+          child:
+              ScaleTransition(
+            scale:
+                Tween<double>(
+              begin:
+                  0.94,
+              end:
+                  1,
+            ).animate(
+              curved,
+            ),
+            child:
+                child,
+          ),
+        );
+      },
+    );
+  }
+
   @override
-  Widget build(BuildContext context) {
-    final cover = manga.coverUrl.isEmpty
-        ? _HeroFallback(title: manga.title)
-        : CachedNetworkImage(
-            imageUrl: manga.coverUrl,
-            cacheManager: MangaImageCache.instance,
-            fit: BoxFit.cover,
-            placeholder: (_, __) => _HeroFallback(title: manga.title),
-            errorWidget: (_, __, ___) => _HeroFallback(title: manga.title));
-    final heroHeight = MediaQuery.sizeOf(context).width / _heroAspectRatio;
+  Widget build(
+    BuildContext context,
+  ) {
+    final coverUrl =
+        manga.coverUrl.trim();
+
+    final Widget cover;
+
+    if (coverUrl.isEmpty) {
+      cover =
+          _HeroFallback(
+        title:
+            manga.title,
+      );
+    } else {
+      cover =
+          CachedNetworkImage(
+        imageUrl:
+            coverUrl,
+        cacheManager:
+            MangaImageCache.instance,
+        fit:
+            BoxFit.cover,
+        placeholder:
+            (_, __) {
+          return _HeroFallback(
+            title:
+                manga.title,
+          );
+        },
+        errorWidget:
+            (_, __, ___) {
+          return _HeroFallback(
+            title:
+                manga.title,
+          );
+        },
+      );
+    }
+
+    final width =
+        MediaQuery.sizeOf(
+      context,
+    ).width;
+
+    final baseHeroHeight =
+        width /
+            _heroAspectRatio;
+
+    final synopsis =
+        summarizeSynopsis(
+      manga.synopsis,
+    );
+
+    final title =
+        manga.title
+                .trim()
+                .isEmpty
+            ? 'Untitled'
+            : manga.title
+                .trim();
+
+    final pageBackground =
+        Theme.of(context)
+            .scaffoldBackgroundColor;
+
+    final contentWidth =
+        width -
+            (_detailPadding * 2);
+
+    final titleStyle =
+        Theme.of(context)
+            .textTheme
+            .headlineLarge
+            ?.copyWith(
+              fontSize:
+                  26,
+              height:
+                  1.2,
+              fontWeight:
+                  FontWeight.w800,
+              color:
+                  Colors.white,
+              shadows:
+                  const [
+                Shadow(
+                  color:
+                      Colors.black,
+                  blurRadius:
+                      8,
+                  offset:
+                      Offset(
+                    0,
+                    1,
+                  ),
+                ),
+                Shadow(
+                  color:
+                      Colors.black54,
+                  blurRadius:
+                      16,
+                ),
+              ],
+            );
+
+    final synopsisStyle =
+        Theme.of(context)
+            .textTheme
+            .bodyMedium
+            ?.copyWith(
+              color:
+                  Colors.white
+                      .withValues(
+                alpha:
+                    0.94,
+              ),
+              height:
+                  1.42,
+              wordSpacing:
+                  0.15,
+              letterSpacing:
+                  0.02,
+            );
+
+    /*
+     * Every element below the title uses the ACTUAL
+     * rendered height of the previous element.
+     *
+     * There is no fake reserved title or synopsis space.
+     */
+    final titlePainter =
+        TextPainter(
+      text:
+          TextSpan(
+        text:
+            title,
+        style:
+            titleStyle,
+      ),
+      textDirection:
+          TextDirection.ltr,
+      maxLines:
+          2,
+      ellipsis:
+          '…',
+    )..layout(
+        maxWidth:
+            contentWidth,
+      );
+
+    final synopsisPainter =
+        TextPainter(
+      text:
+          TextSpan(
+        text:
+            synopsis,
+        style:
+            synopsisStyle,
+      ),
+      textDirection:
+          TextDirection.ltr,
+      textAlign:
+          TextAlign.justify,
+      maxLines:
+          10,
+    )..layout(
+        maxWidth:
+            contentWidth,
+      );
+
+    /*
+     * Title always begins at the same position.
+     */
+    final contentTop =
+        baseHeroHeight *
+            _heroContentTopFactor;
+
+    /*
+     * Dynamic real content height.
+     *
+     * Long title:
+     * pushes info, synopsis, buttons and chapters down.
+     *
+     * Long synopsis:
+     * pushes buttons and chapters down.
+     *
+     * Short title/synopsis:
+     * following content moves upward naturally.
+     */
+    final contentHeight =
+        titlePainter.height +
+            _heroTitleToInfoSpacing +
+            34 +
+            _heroInfoToSynopsisSpacing +
+            synopsisPainter.height +
+            _heroSynopsisToActionsSpacing +
+            50;
+
+    /*
+     * The hero ends exactly 24px after the action row.
+     *
+     * Therefore Chapters is always the same distance
+     * below Bookmark / Start Reading.
+     */
+    final layoutHeight =
+        contentTop +
+            contentHeight +
+            _heroToChapterSpacing;
+
     return SizedBox(
-        height: heroHeight,
-        child: Stack(
-            children: [
-          // Full cover image from top to bottom (complete image visible)
-          // ShaderMask fades the image to transparent at the bottom edge
+      height:
+          layoutHeight,
+      child:
+          Stack(
+        clipBehavior:
+            Clip.hardEdge,
+        children: [
+          /* =================================================
+           * COVER
+           * =============================================== */
+
           Positioned.fill(
-              child: ShaderMask(
-                  blendMode: BlendMode.dstIn,
-                  shaderCallback: (bounds) => LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.white,
-                        Colors.white,
-                        Colors.white70,
-                        Colors.transparent,
-                      ],
-                      stops: [0.0, 0.6, 0.8, 1.0],
-                  ).createShader(bounds),
-                  child: cover)),
-          // Bottom gradient fade - darkens over the content area for readability
-          Positioned.fill(
-              child: const DecoratedBox(
-                  decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                    Colors.transparent,
-                    Color(0x66000000),
-                    Color(0xCC000000),
-                    Color(0xFF000000),
-                  ],
-                          stops: [0.0, 0.25, 0.5, 1.0])))),
-          // Back button (top-left, above status bar)
+            child:
+                cover,
+          ),
+
+          /* =================================================
+           * MAIN DARKNESS
+           * =============================================== */
+
+          const Positioned.fill(
+            child:
+                IgnorePointer(
+              child:
+                  DecoratedBox(
+                decoration:
+                    BoxDecoration(
+                  gradient:
+                      LinearGradient(
+                    begin:
+                        Alignment.topCenter,
+                    end:
+                        Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Color(
+                        0x18000000,
+                      ),
+                      Color(
+                        0x70000000,
+                      ),
+                      Color(
+                        0xC0000000,
+                      ),
+                      Color(
+                        0xE0000000,
+                      ),
+                      Color(
+                        0xF5000000,
+                      ),
+                    ],
+                    stops: [
+                      0.00,
+                      0.20,
+                      0.34,
+                      0.49,
+                      0.67,
+                      1.00,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          /* =================================================
+           * SECOND DARKNESS
+           * =============================================== */
+
           Positioned(
-              top: MediaQuery.paddingOf(context).top + 8,
-              left: 8,
-              child: IconButton(
-                  onPressed: onBack,
-                  style: IconButton.styleFrom(
-                      backgroundColor: AppColors.glass,
-                      side: const BorderSide(color: AppColors.outline)),
-                  icon: const Icon(Icons.arrow_back_rounded),
-                  tooltip: 'Back')),
-          // Content anchored to the bottom
+            left:
+                0,
+            right:
+                0,
+            bottom:
+                0,
+            height:
+                layoutHeight *
+                    0.74,
+            child:
+                const IgnorePointer(
+              child:
+                  DecoratedBox(
+                decoration:
+                    BoxDecoration(
+                  gradient:
+                      LinearGradient(
+                    begin:
+                        Alignment.topCenter,
+                    end:
+                        Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Color(
+                        0x50000000,
+                      ),
+                      Color(
+                        0xA8000000,
+                      ),
+                      Color(
+                        0xD8000000,
+                      ),
+                      Color(
+                        0xF0000000,
+                      ),
+                    ],
+                    stops: [
+                      0.00,
+                      0.15,
+                      0.35,
+                      0.61,
+                      1.00,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          /* =================================================
+           * BOTTOM FADE INTO PAGE BACKGROUND
+           *
+           * Makes the bottom of the image disappear smoothly
+           * into the scaffold background.
+           * =============================================== */
+
           Positioned(
-              left: _detailPadding,
-              right: _detailPadding,
-              bottom: 12,
-              child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            left:
+                0,
+            right:
+                0,
+            bottom:
+                0,
+            height:
+                120,
+            child:
+                IgnorePointer(
+              child:
+                  DecoratedBox(
+                decoration:
+                    BoxDecoration(
+                  gradient:
+                      LinearGradient(
+                    begin:
+                        Alignment.topCenter,
+                    end:
+                        Alignment.bottomCenter,
+                    colors: [
+                      pageBackground
+                          .withValues(
+                        alpha:
+                            0,
+                      ),
+                      pageBackground
+                          .withValues(
+                        alpha:
+                            0.20,
+                      ),
+                      pageBackground
+                          .withValues(
+                        alpha:
+                            0.62,
+                      ),
+                      pageBackground,
+                    ],
+                    stops:
+                        const [
+                      0.00,
+                      0.38,
+                      0.76,
+                      1.00,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          /* =================================================
+           * COVER TAP SURFACE
+           * =============================================== */
+
+          if (coverUrl.isNotEmpty)
+            Positioned.fill(
+              child:
+                  GestureDetector(
+                behavior:
+                    HitTestBehavior.translucent,
+                onTap:
+                    () {
+                  _showCoverPreview(
+                    context,
+                  );
+                },
+                child:
+                    const SizedBox.expand(),
+              ),
+            ),
+
+          /* =================================================
+           * BACK BUTTON
+           * =============================================== */
+
+          Positioned(
+            top:
+                MediaQuery.paddingOf(
+                          context,
+                        ).top -
+                    2,
+            left:
+                20,
+            child:
+                IconButton(
+              onPressed:
+                  onBack,
+              style:
+                  IconButton.styleFrom(
+                backgroundColor:
+                    AppColors.glass,
+                side:
+                    const BorderSide(
+                  color:
+                      AppColors.outline,
+                ),
+              ),
+              icon:
+                  const Icon(
+                Icons
+                    .arrow_back_rounded,
+              ),
+              tooltip:
+                  'Back',
+            ),
+          ),
+
+          /* =================================================
+           * NATURAL HERO CONTENT
+           * =============================================== */
+
+          Positioned(
+            left:
+                _detailPadding,
+            right:
+                _detailPadding,
+            top:
+                contentTop,
+            child:
+                Column(
+              mainAxisSize:
+                  MainAxisSize.min,
+              crossAxisAlignment:
+                  CrossAxisAlignment.start,
+              children: [
+                /* TITLE */
+
+                Text(
+                  title,
+                  softWrap:
+                      true,
+                  maxLines:
+                      2,
+                  overflow:
+                      TextOverflow.ellipsis,
+                  style:
+                      titleStyle,
+                ),
+
+                /*
+                 * One-line title:
+                 * info is 12px below the first line.
+                 *
+                 * Two-line title:
+                 * info is 12px below the second line.
+                 */
+                const SizedBox(
+                  height:
+                      _heroTitleToInfoSpacing,
+                ),
+
+                /* INFO */
+
+                Row(
                   children: [
-                    // Title
-                    Text(
-                      manga.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context)
-                          .textTheme
-                          .headlineLarge
-                          ?.copyWith(
-                              fontSize: 24,
-                              height: 1.2,
-                              fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 12),
-                    // Info chips (rating, status, chapter count)
-                    Row(children: [
-                      Expanded(
-                          child: _InfoChip(
-                              icon: Icons.star_rounded,
-                              label: manga.ratingLabel)),
-                      const SizedBox(width: 8),
-                      Expanded(
-                          child: _InfoChip(
-                              icon: Icons.bolt_rounded,
-                              label: manga.statusLabel)),
-                      const SizedBox(width: 8),
-                      Expanded(
-                          child: _InfoChip(
-                              icon: Icons.library_books_rounded,
-                              label: '${manga.chapterCount} chp')),
-                    ]),
-                    const SizedBox(height: 12),
-                    // Full synopsis
-                    Text(
-                      manga.synopsis,
-                      textAlign: TextAlign.justify,
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyMedium
-                          ?.copyWith(
-                              color: Colors.white.withValues(alpha: .92),
-                              height: 1.45,
-                              wordSpacing: 0.15,
-                              letterSpacing: 0.02),
-                    ),
-                    const SizedBox(height: _heroPaddingBottom),
-                    // Bookmark + Read buttons
-                    Row(children: [
-                      Expanded(
-                        child: _BookmarkButton(
-                          bookmarked: bookmarked,
-                          onPressed: onToggleBookmark,
-                        ),
+                    Expanded(
+                      child:
+                          _InfoChip(
+                        icon:
+                            Icons.star_rounded,
+                        label:
+                            manga.ratingLabel,
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _ReadActionCard(
-                            label: startReadingLabel,
-                            onPressed: onStartReading),
+                    ),
+
+                    const SizedBox(
+                      width:
+                          14,
+                    ),
+
+                    Expanded(
+                      child:
+                          _InfoChip(
+                        icon:
+                            Icons.bolt_rounded,
+                        label:
+                            manga.statusLabel,
                       ),
-                    ]),
-                  ]))
-        ]));
+                    ),
+
+                    const SizedBox(
+                      width:
+                          14,
+                    ),
+
+                    Expanded(
+                      child:
+                          _InfoChip(
+                        icon:
+                            Icons
+                                .library_books_rounded,
+                        label:
+                            '$chapterCount chp',
+                      ),
+                    ),
+                  ],
+                ),
+
+                /*
+                 * Exact Info -> Synopsis gap.
+                 */
+                const SizedBox(
+                  height:
+                      _heroInfoToSynopsisSpacing,
+                ),
+
+                /* SYNOPSIS */
+
+                Text(
+                  synopsis,
+                  textAlign:
+                      TextAlign.justify,
+                  maxLines:
+                      10,
+                  overflow:
+                      TextOverflow.clip,
+                  style:
+                      synopsisStyle,
+                ),
+
+                /*
+                 * Exact Synopsis -> Action gap.
+                 *
+                 * Short synopsis does not reserve blank lines.
+                 */
+                const SizedBox(
+                  height:
+                      _heroSynopsisToActionsSpacing,
+                ),
+
+                /* ACTIONS */
+
+                Row(
+                  children: [
+                    Expanded(
+                      child:
+                          _BookmarkButton(
+                        bookmarked:
+                            bookmarked,
+                        onPressed:
+                            onToggleBookmark,
+                      ),
+                    ),
+
+                    const SizedBox(
+                      width:
+                          16,
+                    ),
+
+                    Expanded(
+                      child:
+                          _ReadActionCard(
+                        label:
+                            startReadingLabel,
+                        onPressed:
+                            onStartReading,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
-class _HeroFallback extends StatelessWidget {
-  const _HeroFallback({required this.title});
-  final String title;
+/* ===========================================================
+ * COVER PREVIEW OVERLAY
+ * ========================================================= */
+
+class _CoverPreviewOverlay
+    extends StatelessWidget {
+  const _CoverPreviewOverlay({
+    required this.manga,
+  });
+
+  final Manga manga;
+
   @override
-  Widget build(BuildContext context) => Container(
-      decoration: const BoxDecoration(
-          gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF39325F), Color(0xFF1A1923)])),
-      alignment: Alignment.bottomLeft,
-      child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Text(title,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  color: AppColors.text,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16))));
+  Widget build(
+    BuildContext context,
+  ) {
+    return Material(
+      color:
+          Colors.transparent,
+      child:
+          Stack(
+        children: [
+          /* BLURRED BACKGROUND */
+
+          Positioned.fill(
+            child:
+                GestureDetector(
+              behavior:
+                  HitTestBehavior.opaque,
+              onTap:
+                  () {
+                Navigator.of(
+                  context,
+                ).pop();
+              },
+              child:
+                  BackdropFilter(
+                filter:
+                    ImageFilter.blur(
+                  sigmaX:
+                      20,
+                  sigmaY:
+                      20,
+                ),
+                child:
+                    ColoredBox(
+                  color:
+                      Colors.black
+                          .withValues(
+                    alpha:
+                        0.72,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          /* CENTER 3D CARD */
+
+          SafeArea(
+            child:
+                Center(
+              child:
+                  _RotatingCoverCard(
+                manga:
+                    manga,
+              ),
+            ),
+          ),
+
+          /* CLOSE BUTTON */
+
+          Positioned(
+            top:
+                MediaQuery.paddingOf(
+                          context,
+                        ).top +
+                    14,
+            right:
+                18,
+            child:
+                IconButton(
+              onPressed:
+                  () {
+                Navigator.of(
+                  context,
+                ).pop();
+              },
+              style:
+                  IconButton.styleFrom(
+                backgroundColor:
+                    Colors.black
+                        .withValues(
+                  alpha:
+                      0.45,
+                ),
+                foregroundColor:
+                    Colors.white,
+                side:
+                    BorderSide(
+                  color:
+                      Colors.white
+                          .withValues(
+                    alpha:
+                        0.15,
+                  ),
+                ),
+              ),
+              icon:
+                  const Icon(
+                Icons.close_rounded,
+              ),
+            ),
+          ),
+
+          /* DRAG HINT */
+
+          Positioned(
+            left:
+                0,
+            right:
+                0,
+            bottom:
+                MediaQuery.paddingOf(
+                          context,
+                        ).bottom +
+                    28,
+            child:
+                IgnorePointer(
+              child:
+                  Row(
+                mainAxisAlignment:
+                    MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons
+                        .swipe_rounded,
+                    size:
+                        18,
+                    color:
+                        Colors.white
+                            .withValues(
+                      alpha:
+                          0.65,
+                    ),
+                  ),
+
+                  const SizedBox(
+                    width:
+                        8,
+                  ),
+
+                  Text(
+                    'Drag to rotate',
+                    style:
+                        TextStyle(
+                      color:
+                          Colors.white
+                              .withValues(
+                        alpha:
+                            0.68,
+                      ),
+                      fontSize:
+                          13,
+                      fontWeight:
+                          FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-class _BookmarkButton extends StatelessWidget {
+/* ===========================================================
+ * ROTATING 3D COVER CARD
+ * ========================================================= */
+
+class _RotatingCoverCard
+    extends StatefulWidget {
+  const _RotatingCoverCard({
+    required this.manga,
+  });
+
+  final Manga manga;
+
+  @override
+  State<_RotatingCoverCard>
+      createState() =>
+          _RotatingCoverCardState();
+}
+
+class _RotatingCoverCardState
+    extends State<_RotatingCoverCard>
+    with SingleTickerProviderStateMixin {
+  double _rotationY =
+      0;
+
+  late final AnimationController
+      _animationController;
+
+  Animation<double>?
+      _returnAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _animationController =
+        AnimationController(
+      vsync:
+          this,
+      duration:
+          _coverReturnDuration,
+    );
+
+    _animationController
+        .addListener(
+      () {
+        final animation =
+            _returnAnimation;
+
+        if (animation ==
+            null) {
+          return;
+        }
+
+        setState(
+          () {
+            _rotationY =
+                animation.value;
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _animationController
+        .dispose();
+
+    super.dispose();
+  }
+
+  void _dragStart(
+    DragStartDetails details,
+  ) {
+    _animationController
+        .stop();
+  }
+
+  void _dragUpdate(
+    DragUpdateDetails details,
+  ) {
+    final delta =
+        details.delta.dx /
+            230;
+
+    setState(
+      () {
+        _rotationY =
+            (_rotationY +
+                    delta)
+                .clamp(
+          -_maxCoverRotation,
+          _maxCoverRotation,
+        );
+      },
+    );
+  }
+
+  void _dragEnd(
+    DragEndDetails details,
+  ) {
+    _returnAnimation =
+        Tween<double>(
+      begin:
+          _rotationY,
+      end:
+          0,
+    ).animate(
+      CurvedAnimation(
+        parent:
+            _animationController,
+        curve:
+            Curves.easeOutBack,
+      ),
+    );
+
+    _animationController
+      ..reset()
+      ..forward();
+  }
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    final screen =
+        MediaQuery.sizeOf(
+      context,
+    );
+
+    final double cardWidth =
+        screen.width *
+                    0.76 >
+                360
+            ? 360
+            : screen.width *
+                0.76;
+
+    final cardHeight =
+        cardWidth *
+            1.50;
+
+    final rotationPercent =
+        (_rotationY /
+                _maxCoverRotation)
+            .clamp(
+      -1.0,
+      1.0,
+    );
+
+    final tiltStrength =
+        rotationPercent.abs();
+
+    return GestureDetector(
+      behavior:
+          HitTestBehavior.opaque,
+
+      onHorizontalDragStart:
+          _dragStart,
+
+      onHorizontalDragUpdate:
+          _dragUpdate,
+
+      onHorizontalDragEnd:
+          _dragEnd,
+
+      child:
+          Transform(
+        alignment:
+            Alignment.center,
+
+        transform:
+            Matrix4.identity()
+              ..setEntry(
+                3,
+                2,
+                0.0015,
+              )
+              ..rotateY(
+                _rotationY,
+              ),
+
+        child:
+            Container(
+          width:
+              cardWidth,
+          height:
+              cardHeight,
+
+          decoration:
+              BoxDecoration(
+            borderRadius:
+                BorderRadius.circular(
+              22,
+            ),
+
+            boxShadow: [
+              BoxShadow(
+                color:
+                    Colors.black
+                        .withValues(
+                  alpha:
+                      0.72,
+                ),
+                blurRadius:
+                    48,
+                spreadRadius:
+                    6,
+                offset:
+                    Offset(
+                  -rotationPercent *
+                      25,
+                  24,
+                ),
+              ),
+
+              BoxShadow(
+                color:
+                    Colors.white
+                        .withValues(
+                  alpha:
+                      0.06,
+                ),
+                blurRadius:
+                    18,
+                spreadRadius:
+                    1,
+              ),
+            ],
+          ),
+
+          child:
+              ClipRRect(
+            borderRadius:
+                BorderRadius.circular(
+              22,
+            ),
+
+            child:
+                Stack(
+              fit:
+                  StackFit.expand,
+              children: [
+                /* COVER IMAGE */
+
+                CachedNetworkImage(
+                  imageUrl:
+                      widget
+                          .manga
+                          .coverUrl,
+
+                  cacheManager:
+                      MangaImageCache
+                          .instance,
+
+                  fit:
+                      BoxFit.cover,
+
+                  placeholder:
+                      (
+                    context,
+                    url,
+                  ) {
+                    return _HeroFallback(
+                      title:
+                          widget
+                              .manga
+                              .title,
+                    );
+                  },
+
+                  errorWidget:
+                      (
+                    context,
+                    url,
+                    error,
+                  ) {
+                    return _HeroFallback(
+                      title:
+                          widget
+                              .manga
+                              .title,
+                    );
+                  },
+                ),
+
+                /* DARK SIDE */
+
+                IgnorePointer(
+                  child:
+                      DecoratedBox(
+                    decoration:
+                        BoxDecoration(
+                      gradient:
+                          LinearGradient(
+                        begin:
+                            rotationPercent >
+                                    0
+                                ? Alignment
+                                    .centerRight
+                                : Alignment
+                                    .centerLeft,
+
+                        end:
+                            rotationPercent >
+                                    0
+                                ? Alignment
+                                    .centerLeft
+                                : Alignment
+                                    .centerRight,
+
+                        colors: [
+                          Colors.black
+                              .withValues(
+                            alpha:
+                                tiltStrength *
+                                    0.38,
+                          ),
+
+                          Colors.transparent,
+
+                          Colors.transparent,
+                        ],
+
+                        stops:
+                            const [
+                          0,
+                          0.42,
+                          1,
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+                /* MOVING LIGHT */
+
+                IgnorePointer(
+                  child:
+                      Opacity(
+                    opacity:
+                        0.12 +
+                            tiltStrength *
+                                0.25,
+
+                    child:
+                        Transform.translate(
+                      offset:
+                          Offset(
+                        -rotationPercent *
+                            90,
+                        0,
+                      ),
+
+                      child:
+                          const DecoratedBox(
+                        decoration:
+                            BoxDecoration(
+                          gradient:
+                              LinearGradient(
+                            begin:
+                                Alignment(
+                              -1,
+                              -0.7,
+                            ),
+
+                            end:
+                                Alignment(
+                              1,
+                              0.7,
+                            ),
+
+                            colors: [
+                              Colors.transparent,
+
+                              Color(
+                                0x18FFFFFF,
+                              ),
+
+                              Color(
+                                0xA8FFFFFF,
+                              ),
+
+                              Color(
+                                0x14FFFFFF,
+                              ),
+
+                              Colors.transparent,
+                            ],
+
+                            stops: [
+                              0.10,
+                              0.34,
+                              0.50,
+                              0.67,
+                              0.90,
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                /* CARD EDGE */
+
+                IgnorePointer(
+                  child:
+                      DecoratedBox(
+                    decoration:
+                        BoxDecoration(
+                      borderRadius:
+                          BorderRadius.circular(
+                        22,
+                      ),
+
+                      border:
+                          Border.all(
+                        color:
+                            Colors.white
+                                .withValues(
+                          alpha:
+                              0.20,
+                        ),
+
+                        width:
+                            1.2,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/* ===========================================================
+ * HERO FALLBACK
+ * ========================================================= */
+
+class _HeroFallback
+    extends StatelessWidget {
+  const _HeroFallback({
+    required this.title,
+  });
+
+  final String title;
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    final displayTitle =
+        title.trim().isEmpty
+            ? 'Untitled'
+            : title.trim();
+
+    return Container(
+      decoration:
+          const BoxDecoration(
+        gradient:
+            LinearGradient(
+          begin:
+              Alignment.topLeft,
+          end:
+              Alignment.bottomRight,
+          colors: [
+            Color(
+              0xFF39325F,
+            ),
+            Color(
+              0xFF1A1923,
+            ),
+          ],
+        ),
+      ),
+      alignment:
+          Alignment.bottomLeft,
+      child:
+          Padding(
+        padding:
+            const EdgeInsets.all(
+          14,
+        ),
+        child:
+            Text(
+          displayTitle,
+          maxLines:
+              3,
+          overflow:
+              TextOverflow.ellipsis,
+          style:
+              const TextStyle(
+            color:
+                AppColors.text,
+            fontWeight:
+                FontWeight.w700,
+            fontSize:
+                16,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/* ===========================================================
+ * BOOKMARK BUTTON
+ * ========================================================= */
+
+class _BookmarkButton
+    extends StatelessWidget {
   const _BookmarkButton({
     required this.bookmarked,
     required this.onPressed,
   });
+
   final bool bookmarked;
   final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context) => ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: IconButton(
-                onPressed: onPressed,
-                tooltip: bookmarked ? 'Bookmarked' : 'Bookmark',
-                style: IconButton.styleFrom(
-                    backgroundColor: bookmarked
-                        ? AppColors.accent.withValues(alpha: .3)
-                        : AppColors.raised.withValues(alpha: .6),
-                    foregroundColor: bookmarked
-                        ? AppColors.accent
-                        : AppColors.text,
-                    side: bookmarked
-                        ? BorderSide(
-                            color: AppColors.accent
-                                .withValues(alpha: .65),
-                            width: 1.2)
-                        : const BorderSide(
-                            color: AppColors.outline, width: 1),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14))),
-                icon: Icon(
-                    bookmarked
-                        ? Icons.favorite_rounded
-                        : Icons.favorite_border_rounded,
-                    size: 22),
-                padding: EdgeInsets.zero)),
-      ));
+  Widget build(
+    BuildContext context,
+  ) {
+    return ClipRRect(
+      borderRadius:
+          BorderRadius.circular(
+        14,
+      ),
+      child:
+          BackdropFilter(
+        filter:
+            ImageFilter.blur(
+          sigmaX:
+              12,
+          sigmaY:
+              12,
+        ),
+        child:
+            SizedBox(
+          width:
+              double.infinity,
+          height:
+              50,
+          child:
+              IconButton(
+            onPressed:
+                onPressed,
+            tooltip:
+                bookmarked
+                    ? 'Bookmarked'
+                    : 'Bookmark',
+            style:
+                IconButton.styleFrom(
+              backgroundColor:
+                  bookmarked
+                      ? AppColors.accent
+                          .withValues(
+                          alpha:
+                              0.30,
+                        )
+                      : AppColors.raised
+                          .withValues(
+                          alpha:
+                              0.60,
+                        ),
+              foregroundColor:
+                  bookmarked
+                      ? AppColors.accent
+                      : AppColors.text,
+              side:
+                  bookmarked
+                      ? BorderSide(
+                          color:
+                              AppColors.accent
+                                  .withValues(
+                            alpha:
+                                0.65,
+                          ),
+                        )
+                      : const BorderSide(
+                          color:
+                              AppColors.outline,
+                        ),
+              shape:
+                  RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(
+                  14,
+                ),
+              ),
+            ),
+            icon:
+                Icon(
+              bookmarked
+                  ? Icons
+                      .favorite_rounded
+                  : Icons
+                      .favorite_border_rounded,
+              size:
+                  22,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-class _ReadActionCard extends StatelessWidget {
-  const _ReadActionCard({required this.label, required this.onPressed});
+/* ===========================================================
+ * READ BUTTON
+ * ========================================================= */
+
+class _ReadActionCard
+    extends StatelessWidget {
+  const _ReadActionCard({
+    required this.label,
+    required this.onPressed,
+  });
+
   final String label;
   final VoidCallback? onPressed;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-      width: double.infinity,
-      height: 46,
-      child: FilledButton(
-          onPressed: onPressed,
-          style: FilledButton.styleFrom(
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14))),
-          child: Text(label)));
+  Widget build(
+    BuildContext context,
+  ) {
+    return SizedBox(
+      width:
+          double.infinity,
+      height:
+          50,
+      child:
+          FilledButton(
+        onPressed:
+            onPressed,
+        style:
+            FilledButton.styleFrom(
+          shape:
+              RoundedRectangleBorder(
+            borderRadius:
+                BorderRadius.circular(
+              14,
+            ),
+          ),
+        ),
+        child:
+            Text(
+          label,
+        ),
+      ),
+    );
+  }
 }
 
-class _InfoChip extends StatelessWidget {
-  const _InfoChip({required this.icon, required this.label});
+/* ===========================================================
+ * INFO CHIP
+ * ========================================================= */
+
+class _InfoChip
+    extends StatelessWidget {
+  const _InfoChip({
+    required this.icon,
+    required this.label,
+  });
+
   final IconData icon;
   final String label;
+
   @override
-  Widget build(BuildContext context) => Container(
-      height: 34,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      decoration: BoxDecoration(
-          color: AppColors.raised.withValues(alpha: .86),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: AppColors.outline)),
-      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Icon(icon, size: 14, color: AppColors.accent),
-        const SizedBox(width: 5),
-        Flexible(
-            child: Text(label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style:
-                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w800)))
-      ]));
+  Widget build(
+    BuildContext context,
+  ) {
+    final displayLabel =
+        label.trim().isEmpty
+            ? '-'
+            : label.trim();
+
+    return Container(
+      height:
+          34,
+      padding:
+          const EdgeInsets.symmetric(
+        horizontal:
+            8,
+      ),
+      decoration:
+          BoxDecoration(
+        color:
+            AppColors.raised
+                .withValues(
+          alpha:
+              0.86,
+        ),
+        borderRadius:
+            BorderRadius.circular(
+          999,
+        ),
+        border:
+            Border.all(
+          color:
+              AppColors.outline,
+        ),
+      ),
+      child:
+          Row(
+        mainAxisAlignment:
+            MainAxisAlignment.center,
+        children: [
+          Icon(
+            icon,
+            size:
+                14,
+            color:
+                AppColors.accent,
+          ),
+
+          const SizedBox(
+            width:
+                5,
+          ),
+
+          Flexible(
+            child:
+                Text(
+              displayLabel,
+              maxLines:
+                  1,
+              overflow:
+                  TextOverflow.ellipsis,
+              style:
+                  const TextStyle(
+                fontSize:
+                    12,
+                fontWeight:
+                    FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-class _ChapterTile extends StatelessWidget {
-  const _ChapterTile(
-      {required this.chapter,
-      required this.state,
-      required this.readable,
-      required this.onTap});
+/* ===========================================================
+ * CHAPTER TILE
+ * ========================================================= */
+
+class _ChapterTile
+    extends StatelessWidget {
+  const _ChapterTile({
+    required this.chapter,
+    required this.state,
+    required this.readable,
+    required this.onTap,
+  });
+
   final CanonicalChapter chapter;
   final String state;
   final bool readable;
   final VoidCallback? onTap;
+
   @override
-  Widget build(BuildContext context) {
-    final read = state.startsWith('READ');
-    final accent = state == 'NEW'
-        ? AppColors.accent
-        : state == 'EXTERNAL'
-            ? AppColors.accentWarm
-            : AppColors.muted.withValues(alpha: .9);
+  Widget build(
+    BuildContext context,
+  ) {
+    final read =
+        state == 'READ';
+
+    late final Color accent;
+
+    if (state == 'NEW') {
+      accent =
+          AppColors.accent;
+    } else {
+      accent =
+          AppColors.muted
+              .withValues(
+        alpha:
+            0.9,
+      );
+    }
+
+    final chapterTitle =
+        chapter.title.trim();
+
     return Opacity(
-        opacity: read ? .30 : 1,
-        child: SizedBox(
-            height: _chapterTileHeight,
-            child: InkWell(
-                borderRadius: BorderRadius.circular(_detailRadius),
-                onTap: onTap,
-                child: Ink(
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                        color: read
-                            ? AppColors.surface.withValues(alpha: .72)
-                            : AppColors.surface,
-                        borderRadius: BorderRadius.circular(_detailRadius),
-                        border: Border.all(color: AppColors.outline)),
-                    child: Row(children: [
-                      Expanded(
-                          child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text.rich(
-                                    TextSpan(children: [
-                                      TextSpan(
-                                          text: 'Chapter ${chapter.numberLabel}',
-                                          style: const TextStyle(
-                                              color: AppColors.text,
-                                              fontWeight: FontWeight.w800)),
-                                      if (chapter.title.trim().isNotEmpty &&
-                                          !chapter.title.startsWith('Chapter '))
-                                        TextSpan(
-                                            text: '   ${chapter.title}',
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall
-                                                ?.copyWith(
-                                                    color: read
-                                                        ? AppColors.muted.withValues(alpha: .72)
-                                                        : AppColors.muted,
-                                                    fontWeight:
-                                                        FontWeight.w600))
-                                    ]),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis))),
-                      const SizedBox(width: 10),
-                      SizedBox(
-                          width: 72,
-                          child: Align(
-                              alignment: Alignment.centerRight,
-                              child: Text(state,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      color: accent,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w900))))
-                    ])))));
+      opacity:
+          read ? 0.30 : 1,
+      child:
+          Material(
+        color:
+            Colors.transparent,
+        child:
+            InkWell(
+          onTap:
+              readable ? onTap : null,
+          borderRadius:
+              BorderRadius.circular(
+            _detailRadius,
+          ),
+          child:
+              Ink(
+            height:
+                _chapterTileHeight,
+            padding:
+                const EdgeInsets.symmetric(
+              horizontal:
+                  20,
+            ),
+            decoration:
+                BoxDecoration(
+              color:
+                  AppColors.surface,
+              borderRadius:
+                  BorderRadius.circular(
+                _detailRadius,
+              ),
+              border:
+                  Border.all(
+                color:
+                    AppColors.outline,
+              ),
+            ),
+            child:
+                Row(
+              children: [
+                Expanded(
+                  child:
+                      Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text:
+                              'Chapter ${chapter.numberLabel}',
+                          style:
+                              const TextStyle(
+                            color:
+                                AppColors.text,
+                            fontSize:
+                                15.5,
+                            fontWeight:
+                                FontWeight.w800,
+                          ),
+                        ),
+
+                        if (chapterTitle.isNotEmpty &&
+                            !chapterTitle
+                                .toLowerCase()
+                                .startsWith(
+                                  'chapter ',
+                                ))
+                          TextSpan(
+                            text:
+                                '   $chapterTitle',
+                            style:
+                                Theme.of(
+                              context,
+                            )
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color:
+                                          AppColors.muted,
+                                      fontWeight:
+                                          FontWeight.w600,
+                                    ),
+                          ),
+                      ],
+                    ),
+                    maxLines:
+                        2,
+                    softWrap:
+                        true,
+                    overflow:
+                        TextOverflow.ellipsis,
+                  ),
+                ),
+
+                const SizedBox(
+                  width:
+                      14,
+                ),
+
+                Text(
+                  state,
+                  maxLines:
+                      1,
+                  style:
+                      TextStyle(
+                    color:
+                        accent,
+                    fontSize:
+                        11,
+                    fontWeight:
+                        FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
-class _ModernMessage extends StatelessWidget {
-  const _ModernMessage({required this.icon, required this.message});
+/* ===========================================================
+ * MESSAGE
+ * ========================================================= */
+
+class _ModernMessage
+    extends StatelessWidget {
+  const _ModernMessage({
+    required this.icon,
+    required this.message,
+    this.onRetry,
+    this.retryLabel = 'Retry',
+  });
+
   final IconData icon;
   final String message;
+  final VoidCallback? onRetry;
+  final String retryLabel;
+
   @override
-  Widget build(BuildContext context) => Card(
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(_detailRadius)),
-      child: Padding(
-          padding: const EdgeInsets.all(_detailPadding),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, color: AppColors.muted),
-            const SizedBox(height: 10),
-            Text(message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.muted))
-          ])));
+  Widget build(
+    BuildContext context,
+  ) {
+    return Center(
+      child:
+          Padding(
+        padding:
+            const EdgeInsets.all(
+          28,
+        ),
+        child:
+            Column(
+          mainAxisSize:
+              MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size:
+                  34,
+              color:
+                  AppColors.muted,
+            ),
+
+            const SizedBox(
+              height:
+                  12,
+            ),
+
+            Text(
+              message,
+              textAlign:
+                  TextAlign.center,
+              style:
+                  Theme.of(
+                context,
+              )
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(
+                        color:
+                            AppColors.muted,
+                        height:
+                            1.4,
+                      ),
+            ),
+
+            if (onRetry != null) ...[
+              const SizedBox(
+                height:
+                    18,
+              ),
+
+              OutlinedButton.icon(
+                onPressed:
+                    onRetry,
+                icon:
+                    const Icon(
+                  Icons.refresh_rounded,
+                ),
+                label:
+                    Text(
+                  retryLabel,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
