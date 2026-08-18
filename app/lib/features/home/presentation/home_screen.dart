@@ -456,8 +456,7 @@ class _HomeScreenState
   }
 }
 
-class _TsukiTitle
-    extends StatelessWidget {
+class _TsukiTitle extends StatelessWidget {
   const _TsukiTitle();
 
   @override
@@ -465,42 +464,17 @@ class _TsukiTitle
     BuildContext context,
   ) {
     return Row(
-      mainAxisSize:
-          MainAxisSize.min,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 48,
-          height: 48,
-          padding:
-              const EdgeInsets.all(
-            4,
-          ),
-          decoration:
-              BoxDecoration(
-            color:
-                AppColors.raised
-                    .withValues(
-              alpha: 0.55,
-            ),
-            borderRadius:
-                BorderRadius.circular(
-              16,
-            ),
-          ),
-          child: ClipRRect(
-            borderRadius:
-                BorderRadius.circular(
-              12,
-            ),
-            child: Image.asset(
-              'assets/branding/quiet_reader_icon.png',
-              fit: BoxFit.cover,
-            ),
-          ),
+        Image.asset(
+          'assets/branding/tsuki_logo_transparent.png',
+          width: 58,
+          height: 58,
+          fit: BoxFit.contain,
         ),
 
         const SizedBox(
-          width: 12,
+          width: 6,
         ),
 
         const Text(
@@ -508,8 +482,7 @@ class _TsukiTitle
           style: TextStyle(
             color: AppColors.text,
             fontSize: 32,
-            fontWeight:
-                FontWeight.w900,
+            fontWeight: FontWeight.w900,
           ),
         ),
       ],

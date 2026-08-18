@@ -4,11 +4,12 @@ publish_to: none
 version: 1.0.2+3
 
 environment:
-  sdk: '>=3.5.0 <4.0.0'
+  sdk: ^3.13.0
 
 dependencies:
   flutter:
     sdk: flutter
+
   cached_network_image: ^3.4.1
   cloud_firestore: ^5.6.12
   dio: ^5.8.0+1
@@ -24,10 +25,31 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
   flutter_lints: ^6.0.0
   mocktail: ^1.0.4
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.8
 
 flutter:
   uses-material-design: true
+
   assets:
-    - assets/branding/quiet_reader_icon.png
+    - assets/branding/tsuki_logo.png
+    - assets/branding/tsuki_logo_transparent.png
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/branding/tsuki_logo.png"
+  remove_alpha_ios: true
+
+flutter_native_splash:
+  color: "#0B0B10"
+  image: assets/branding/tsuki_logo.png
+  android: true
+  ios: true
+
+  android_12:
+    color: "#0B0B10"
+    image: assets/branding/tsuki_logo.png
