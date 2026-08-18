@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'core/auth/auth_controller.dart';
 import 'core/state/providers.dart';
@@ -121,25 +122,26 @@ class _AccessGate extends StatelessWidget {
                           MainAxisSize.min,
                       children: [
                         Image.asset(
-                          'assets/branding/tsuki_logo.png',
-                          width: 72,
-                          height: 72,
+                          'assets/branding/tsuki_logo_transparent.png',
+                          width: 125,
+                          height: 125,
                           fit:
                               BoxFit.contain,
                         ),
 
                         const SizedBox(
-                          height: 22,
+                          height: 3,
                         ),
 
                         Text(
                           'Tsuki',
-                          style:
-                              Theme.of(
-                            context,
-                          )
-                                  .textTheme
-                                  .headlineLarge,
+                          style: GoogleFonts.sora(
+                            color: AppColors.text,
+                            fontSize: 35,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.7,
+                            height: 1,
+                          ),
                         ),
 
                         const SizedBox(
@@ -227,13 +229,13 @@ class _AccessGate extends StatelessWidget {
           '',
 
         SessionStatus.signedOut =>
-          'Sign in to sync bookmarks and reading progress.',
+          'Sign in to start reading.',
 
         SessionStatus.backendMissing =>
-          'Backend not configured. See docs/SETUP.md.',
+          'Backend not configured.',
 
         SessionStatus.accessDenied =>
-          'This account does not have production access.',
+          'Access Denied.',
 
         SessionStatus.error =>
           'Sign in failed. Try again.',

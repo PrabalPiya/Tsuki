@@ -21,6 +21,7 @@ dependencies:
   go_router: ^16.0.0
   google_sign_in: ^6.3.0
   shared_preferences: ^2.5.3
+  google_fonts: ^8.2.1
 
 dev_dependencies:
   flutter_test:
@@ -35,21 +36,22 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/branding/tsuki_logo.png
+    - assets/branding/tsuki_splash.png
+    - assets/branding/tsuki_app_icon.jpg
     - assets/branding/tsuki_logo_transparent.png
 
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/branding/tsuki_logo.png"
+  image_path: "assets/branding/tsuki_app_icon.png"
   remove_alpha_ios: true
 
 flutter_native_splash:
   color: "#0B0B10"
-  image: assets/branding/tsuki_logo.png
+  image: assets/branding/tsuki_splash.png
   android: true
   ios: true
 
   android_12:
     color: "#0B0B10"
-    image: assets/branding/tsuki_logo.png
+    image: assets/branding/tsuki_splash.png

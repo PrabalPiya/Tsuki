@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../../../core/models/chapter.dart';
 import '../../../core/models/manga.dart';
@@ -477,12 +478,14 @@ class _TsukiTitle extends StatelessWidget {
           width: 6,
         ),
 
-        const Text(
+        Text(
           'Tsuki',
-          style: TextStyle(
+          style: GoogleFonts.sora(
             color: AppColors.text,
-            fontSize: 32,
-            fontWeight: FontWeight.w900,
+            fontSize: 35,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.7,
+            height: 1.5,
           ),
         ),
       ],
