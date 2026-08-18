@@ -1,222 +1,454 @@
 import 'package:dio/dio.dart';
 import 'package:html/dom.dart';
-import 'package:html/parser.dart' as html_parser;
+import 'package:html/parser.dart'
+    as html_parser;
 
 import '../../../core/models/chapter.dart';
 import '../../../core/models/manga.dart';
 import '../../../core/network/http_client.dart';
 import '../../../core/network/source_failure.dart';
-import 'manga_source.dart';
 
-class AsuraSource implements MangaSource {
-  AsuraSource({Dio? client})
-    : _client = client ?? createHttpClient(baseUrl: 'https://asuracomic.net');
+import 'chapter_number_parser.dart';
+import 'manga_source.dart';
+import 'source_matching.dart';
+
+class AsuraSource
+    implements MangaSource {
+  AsuraSource({
+    Dio? client,
+  }) : _client =
+            client ??
+            createHttpClient(
+              baseUrl:
+                  'https://asurascans.com',
+            );
 
   final Dio _client;
+
+  List<Manga>? _indexCache;
+
+  DateTime? _indexCachedAt;
 
   @override
   String get id => 'asura';
 
   @override
-  String get displayName => 'Asura';
+  String get displayName =>
+      'Asura';
 
   @override
-  SourceCapabilities get capabilities => const SourceCapabilities(
-    search: true,
-    details: true,
-    chapters: true,
-    pages: true,
-  );
+  SourceCapabilities
+      get capabilities =>
+          const SourceCapabilities(
+            search: true,
+            details: true,
+            chapters: true,
+            pages: true,
+          );
 
   @override
-  Set<String> get allowedImageHosts => const {};
+  Set<String>
+      get allowedImageHosts =>
+          const {
+            'cdn.asurascans.com',
+          };
 
   @override
-  Future<List<Manga>> search(String query) async {
-    final document = await _document(
-      '/series',
-      queryParameters: {'name': query},
+  Future<List<Manga>> search(
+    String query,
+  ) async {
+    final index =
+        await _loadIndex();
+
+    final scored =
+        <({Manga manga, double score})>[];
+
+    for (final manga in index) {
+      final score =
+          SourceMatching.similarity(
+        query,
+        manga.title,
+      );
+
+      if (score >= .60) {
+        scored.add(
+          (
+            manga: manga,
+            score: score,
+          ),
+        );
+      }
+    }
+
+    scored.sort(
+      (a, b) =>
+          b.score.compareTo(
+        a.score,
+      ),
     );
 
-    final results = <String, Manga>{};
-
-    final candidates = document.querySelectorAll('a[href]');
-
-    for (final anchor in candidates) {
-      final href = anchor.attributes['href'];
-
-      if (href == null || href.isEmpty) {
-        continue;
-      }
-
-      final path = _path(href);
-
-      if (path == null || path.isEmpty || path == 'series') {
-        continue;
-      }
-
-      final image = anchor.querySelector('img');
-
-      final heading = anchor.querySelector('h3, h2, span');
-
-      var title = (heading?.text ?? image?.attributes['alt'] ?? '').trim();
-
-      if (title.isEmpty) {
-        continue;
-      }
-
-      /*
-       * Avoid navigation/category links.
-       */
-      if (!anchor.text.toLowerCase().contains(title.toLowerCase()) &&
-          image == null) {
-        continue;
-      }
-
-      final sourceId = Uri.encodeComponent(path);
-
-      results[path] = Manga(
-        id: 'asura:$sourceId',
-        title: title,
-        coverUrl: _absolute(
-          image?.attributes['data-src'] ?? image?.attributes['src'] ?? '',
-        ),
-        synopsis: '',
-        status: MangaStatus.unknown,
-        chapterCount: 0,
-      );
-    }
-
-    return results.values.toList(growable: false);
+    return scored
+        .take(30)
+        .map(
+          (entry) =>
+              entry.manga,
+        )
+        .toList(
+          growable: false,
+        );
   }
 
-  Future<String?> findConservativeMatch(Manga canonical) async {
-    final expected = <String>{
-      canonical.title,
-      ...canonical.aliases,
-    }.map(_normalize).where((value) => value.isNotEmpty).toSet();
+  Future<String?>
+      findConservativeMatch(
+    Manga canonical,
+  ) async {
+    final candidates =
+        await _loadIndex();
 
-    final queries = <String>{
-      canonical.title,
-      ...canonical.aliases,
-    }.map((value) => value.trim()).where((value) => value.length >= 2).take(8);
+    return SourceMatching.bestMatchId(
+      canonical,
+      candidates,
+      sourcePrefix: 'asura:',
+      minimumScore: .87,
+      ambiguityMargin: .04,
+    );
+  }
 
-    for (final query in queries) {
+  /*
+   * Asura currently has a few hundred titles.
+   *
+   * Load the browse catalogue once and keep it
+   * cached instead of hitting /browse for every
+   * alias search.
+   */
+  Future<List<Manga>>
+      _loadIndex() async {
+    final now =
+        DateTime.now();
+
+    final cached =
+        _indexCache;
+
+    final cachedAt =
+        _indexCachedAt;
+
+    if (cached != null &&
+        cachedAt != null &&
+        now.difference(cachedAt) <
+            const Duration(
+              minutes: 30,
+            )) {
+      return cached;
+    }
+
+    final results =
+        <String, Manga>{};
+
+    /*
+     * Current Asura browse pages expose roughly
+     * twenty titles at a time.
+     *
+     * Stop when pages stop producing new comics.
+     */
+    var emptyOrDuplicatePages = 0;
+
+    for (var page = 1;
+        page <= 25;
+        page++) {
       try {
-        final results = await search(query);
+        final document =
+            await _document(
+          '/browse',
+          queryParameters: {
+            'page': page,
+          },
+        );
 
-        for (final candidate in results) {
-          if (<String>{
-            candidate.title,
-            ...candidate.aliases,
-          }.map(_normalize).any(expected.contains)) {
-            return candidate.id.replaceFirst('asura:', '');
+        final before =
+            results.length;
+
+        for (final anchor
+            in document
+                .querySelectorAll(
+          'a[href*="/comics/"]',
+        )) {
+          final href =
+              anchor.attributes[
+                  'href'];
+
+          if (href == null) {
+            continue;
           }
+
+          final path =
+              _path(href);
+
+          if (path == null ||
+              !path.startsWith(
+                'comics/',
+              )) {
+            continue;
+          }
+
+          /*
+           * Do not treat chapter links as
+           * separate manga.
+           */
+          if (path.contains(
+            '/chapter/',
+          )) {
+            continue;
+          }
+
+          final image =
+              anchor.querySelector(
+                'img',
+              );
+
+          String title =
+              (image?.attributes[
+                          'alt'] ??
+                      anchor
+                          .querySelector(
+                            'h1, h2, h3, h4',
+                          )
+                          ?.text ??
+                      '')
+                  .replaceAll(
+                    RegExp(r'\s+'),
+                    ' ',
+                  )
+                  .trim();
+
+          if (title.isEmpty) {
+            /*
+             * Slug is still useful as a
+             * fallback title.
+             */
+            title =
+                _titleFromPath(
+              path,
+            );
+          }
+
+          if (title.isEmpty) {
+            continue;
+          }
+
+          final sourceId =
+              Uri.encodeComponent(
+            path,
+          );
+
+          results[path] = Manga(
+            id:
+                'asura:$sourceId',
+            title: title,
+            coverUrl:
+                _absolute(
+              image?.attributes[
+                      'src'] ??
+                  image?.attributes[
+                      'data-src'] ??
+                  '',
+            ),
+            synopsis: '',
+            status:
+                MangaStatus.unknown,
+            chapterCount:
+                _chapterCountFromCard(
+              anchor.text,
+            ),
+          );
+        }
+
+        if (results.length ==
+            before) {
+          emptyOrDuplicatePages++;
+
+          if (emptyOrDuplicatePages >=
+              2) {
+            break;
+          }
+        } else {
+          emptyOrDuplicatePages = 0;
         }
       } catch (_) {
-        // Continue.
+        /*
+         * A missing late pagination page should
+         * not destroy the catalogue already read.
+         */
+        if (results.isNotEmpty) {
+          break;
+        }
+
+        rethrow;
       }
     }
 
-    return null;
+    final values =
+        results.values.toList(
+      growable: false,
+    );
+
+    _indexCache = values;
+    _indexCachedAt = now;
+
+    return values;
   }
 
   @override
-  Future<Manga?> getMangaDetails(String sourceMangaId) async {
-    final path = Uri.decodeComponent(sourceMangaId);
+  Future<Manga?>
+      getMangaDetails(
+    String sourceMangaId,
+  ) async {
+    final path =
+        Uri.decodeComponent(
+      sourceMangaId,
+    );
 
-    if (path.isEmpty) {
+    if (!path.startsWith(
+      'comics/',
+    )) {
       return null;
     }
 
-    final document = await _document('/$path');
+    final document =
+        await _document(
+      '/$path',
+    );
 
     final title =
-        document.querySelector('h1, .series-title')?.text.trim() ?? '';
+        document
+                .querySelector(
+                  'h1',
+                )
+                ?.text
+                .replaceAll(
+                  RegExp(r'\s+'),
+                  ' ',
+                )
+                .trim() ??
+            '';
 
     if (title.isEmpty) {
       return null;
     }
 
-    final coverElement = document.querySelector(
-      '.series-thumb img, '
-      '.thumb img, '
-      'img',
+    final aliases =
+        _extractAliases(
+      document,
+      title,
+    );
+
+    final cover =
+        _findCover(
+      document,
+      title,
     );
 
     return Manga(
-      id: 'asura:$sourceMangaId',
+      id:
+          'asura:$sourceMangaId',
       title: title,
-      coverUrl: _absolute(
-        coverElement?.attributes['data-src'] ??
-            coverElement?.attributes['src'] ??
-            '',
-      ),
+      aliases: aliases,
+      coverUrl: cover,
       synopsis:
-          document
-              .querySelector(
-                '.series-desc, '
-                '.description',
-              )
-              ?.text
-              .trim() ??
-          '',
-      status: MangaStatus.unknown,
-      chapterCount: document.querySelectorAll('a[href*="chapter"]').length,
+          _findDescription(
+        document,
+      ),
+      status:
+          _statusFromDocument(
+        document,
+      ),
+      chapterCount:
+          _seriesChapterCount(
+        document,
+      ),
     );
   }
 
   @override
-  Future<List<CanonicalChapter>> getChapters(String sourceMangaId) async {
-    final path = Uri.decodeComponent(sourceMangaId);
+  Future<List<CanonicalChapter>>
+      getChapters(
+    String sourceMangaId,
+  ) async {
+    final path =
+        Uri.decodeComponent(
+      sourceMangaId,
+    );
 
-    if (path.isEmpty) {
+    if (!path.startsWith(
+      'comics/',
+    )) {
       return const [];
     }
 
-    final document = await _document('/$path');
-
-    final chapters = <String, CanonicalChapter>{};
-
-    /*
-     * Current implementations find Asura chapters
-     * through chapter-list links.
-     */
-    final anchors = document.querySelectorAll(
-      'div[class*="chapter"] a, '
-      'li[class*="chapter"] a, '
-      '.chapter-list a, '
-      'a[href*="chapter"]',
+    final document =
+        await _document(
+      '/$path',
     );
 
-    for (final anchor in anchors) {
-      final href = anchor.attributes['href'];
+    final chapters =
+        <String,
+            CanonicalChapter>{};
 
-      if (href == null || href.isEmpty) {
+    /*
+     * Current Asura series pages expose their
+     * complete chapter listing directly.
+     */
+    for (final anchor
+        in document
+            .querySelectorAll(
+      'a[href*="/chapter/"]',
+    )) {
+      final href =
+          anchor.attributes[
+              'href'];
+
+      if (href == null) {
         continue;
       }
 
-      final chapterPath = _path(href);
+      final chapterPath =
+          _path(href);
 
-      if (chapterPath == null || chapterPath.isEmpty) {
+      if (chapterPath == null ||
+          !chapterPath.startsWith(
+            '$path/chapter/',
+          )) {
         continue;
       }
 
-      final text = anchor.text.trim();
+      final text =
+          anchor.text
+              .replaceAll(
+                RegExp(r'\s+'),
+                ' ',
+              )
+              .trim();
 
-      final lowerText = text.toLowerCase();
+      final lower =
+          text.toLowerCase();
 
       /*
-       * Public chapters only.
+       * Do not circumvent premium chapters.
        */
-      if (lowerText.contains('premium') ||
-          lowerText.contains('locked') ||
-          lowerText.contains('subscribe')) {
+      if (lower.contains(
+            'premium',
+          ) ||
+          lower.contains(
+            'locked',
+          ) ||
+          lower.contains(
+            'subscribe',
+          )) {
         continue;
       }
 
       final number =
-          _chapterNumber(
+          ChapterNumberParser
+              .parseVisibleLabel(
         text,
       );
 
@@ -224,89 +456,173 @@ class AsuraSource implements MangaSource {
         continue;
       }
 
-      final key = _numberLabel(number);
+      final key =
+          ChapterNumberParser.label(
+        number,
+      );
 
-      final existing = chapters[key];
+      final existing =
+          chapters[key];
 
-      final copy = ChapterSourceCopy(
+      final published =
+          _dateNearAnchor(
+        anchor,
+      );
+
+      final copy =
+          ChapterSourceCopy(
         sourceId: id,
-        chapterId: Uri.encodeComponent(chapterPath),
-        reliability: .70,
-        publishedAt: DateTime.fromMillisecondsSinceEpoch(0),
+        chapterId:
+            Uri.encodeComponent(
+          chapterPath,
+        ),
+        reliability: .78,
+        publishedAt:
+            published,
         attribution: 'Asura',
       );
 
-      chapters[key] = CanonicalChapter(
-        id: 'chapter:number:$key',
+      chapters[key] =
+          CanonicalChapter(
+        id:
+            'chapter:number:$key',
         number: number,
-        title: text.isEmpty ? 'Chapter $key' : text,
+        title: text.isEmpty
+            ? 'Chapter $key'
+            : text,
         publishedAt:
-            existing?.publishedAt ?? DateTime.fromMillisecondsSinceEpoch(0),
-        sourceCopies: [...?existing?.sourceCopies, copy],
+            existing == null ||
+                    published.isBefore(
+                      existing
+                          .publishedAt,
+                    )
+                ? published
+                : existing
+                    .publishedAt,
+        sourceCopies: [
+          ...?existing
+              ?.sourceCopies,
+          copy,
+        ],
       );
     }
 
-    final values = chapters.values.toList()
-      ..sort((a, b) => (a.number ?? 0).compareTo(b.number ?? 0));
+    final values =
+        chapters.values.toList()
+          ..sort(
+            (a, b) =>
+                (a.number ?? 0)
+                    .compareTo(
+              b.number ?? 0,
+            ),
+          );
 
     return values;
   }
 
   @override
-  Future<ChapterPages> getChapterPages(String sourceChapterId) async {
-    final chapterPath = Uri.decodeComponent(sourceChapterId);
+  Future<ChapterPages>
+      getChapterPages(
+    String sourceChapterId,
+  ) async {
+    final path =
+        Uri.decodeComponent(
+      sourceChapterId,
+    );
 
-    if (chapterPath.isEmpty) {
-      throw const SourceFailure('Invalid Asura chapter.', retryable: false);
+    if (!path.startsWith(
+          'comics/',
+        ) ||
+        !path.contains(
+          '/chapter/',
+        )) {
+      throw const SourceFailure(
+        'Invalid Asura chapter.',
+        retryable: false,
+      );
     }
 
-    final document = await _document('/$chapterPath');
+    final document =
+        await _document(
+      '/$path',
+    );
 
-    final pageText = document.body?.text.toLowerCase() ?? '';
+    final pageText =
+        document.body
+                ?.text
+                .toLowerCase() ??
+            '';
 
-    /*
-     * Never try to bypass a locked chapter.
-     */
-    if (pageText.contains('premium chapter') ||
-        pageText.contains('unlock chapter') ||
-        pageText.contains('subscribe to read')) {
+    if (pageText.contains(
+          'premium chapter',
+        ) ||
+        pageText.contains(
+          'unlock chapter',
+        ) ||
+        pageText.contains(
+          'subscribe to read',
+        )) {
       throw const SourceFailure(
         'This Asura chapter is not publicly readable.',
         retryable: false,
       );
     }
 
-    final urls = <String>[];
+    final urls =
+        <String>[];
 
-    final images = document.querySelectorAll(
+    final images =
+        document
+            .querySelectorAll(
+      'main img, '
       '.reader img, '
       '#readerarea img, '
-      'img[src*="cdn"], '
-      'img[src*="asura"]',
+      'img[src*="cdn.asurascans.com"]',
     );
 
     for (final image in images) {
-      final source =
-          image.attributes['data-src'] ??
-          image.attributes['data-lazy-src'] ??
-          image.attributes['src'];
+      final raw =
+          image.attributes[
+                  'data-src'] ??
+              image.attributes[
+                  'data-lazy-src'] ??
+              image.attributes[
+                  'src'];
 
-      if (source == null || source.isEmpty) {
+      if (raw == null ||
+          raw.trim().isEmpty) {
         continue;
       }
 
-      final lower = source.toLowerCase();
+      final lower =
+          raw.toLowerCase();
 
-      if (lower.contains('logo') ||
-          lower.contains('avatar') ||
-          lower.contains('icon') ||
-          lower.contains('banner')) {
+      if (lower.contains(
+            'logo',
+          ) ||
+          lower.contains(
+            'avatar',
+          ) ||
+          lower.contains(
+            'cover',
+          ) ||
+          lower.contains(
+            'banner',
+          ) ||
+          lower.contains(
+            'icon',
+          )) {
         continue;
       }
 
-      final url = _absolute(source);
+      final url =
+          _absolute(raw);
 
-      if (!url.startsWith('https://')) {
+      final uri =
+          Uri.tryParse(url);
+
+      if (uri == null ||
+          uri.scheme != 'https') {
         continue;
       }
 
@@ -315,100 +631,368 @@ class AsuraSource implements MangaSource {
       }
     }
 
-    if (urls.isEmpty || urls.length > 500) {
-      throw const SourceFailure('Asura chapter unavailable.');
+    if (urls.isEmpty ||
+        urls.length > 600) {
+      throw const SourceFailure(
+        'Asura chapter unavailable.',
+      );
     }
 
-    return ChapterPages(chapterId: sourceChapterId, sourceId: id, urls: urls);
+    return ChapterPages(
+      chapterId:
+          sourceChapterId,
+      sourceId: id,
+      urls: urls,
+    );
   }
 
   @override
-  Future<CanonicalChapter?> getLatestChapter(String sourceMangaId) async {
-    final chapters = await getChapters(sourceMangaId);
+  Future<CanonicalChapter?>
+      getLatestChapter(
+    String sourceMangaId,
+  ) async {
+    final values =
+        await getChapters(
+      sourceMangaId,
+    );
 
-    return chapters.isEmpty ? null : chapters.last;
+    return values.isEmpty
+        ? null
+        : values.last;
   }
 
   Future<Document> _document(
     String path, {
-    Map<String, dynamic>? queryParameters,
+    Map<String, dynamic>?
+        queryParameters,
   }) async {
-    final response = await _client.get<String>(
+    final response =
+        await _client.get<String>(
       path,
-      queryParameters: queryParameters,
+      queryParameters:
+          queryParameters,
       options: Options(
-        responseType: ResponseType.plain,
-        headers: const {'Referer': 'https://asuracomic.net/'},
+        responseType:
+            ResponseType.plain,
+        headers: const {
+          'Referer':
+              'https://asurascans.com/',
+        },
       ),
     );
 
-    return html_parser.parse(response.data ?? '');
+    return html_parser.parse(
+      response.data ?? '',
+    );
   }
 
-  double? _chapterNumber(
-  String text,
-) {
-  final cleaned =
-      text
-          .replaceAll(
-            RegExp(r'\s+'),
-            ' ',
-          )
-          .trim();
+  List<String> _extractAliases(
+    Document document,
+    String title,
+  ) {
+    final aliases =
+        <String>{};
 
-  final match =
+    final normalizedTitle =
+        SourceMatching.normalize(
+      title,
+    );
+
+    /*
+     * Current page places aliases near the
+     * primary H1 before the description.
+     */
+    for (final element
+        in document
+            .querySelectorAll(
+      'p, div',
+    )) {
+      final text =
+          element.text
+              .replaceAll(
+                RegExp(r'\s+'),
+                ' ',
+              )
+              .trim();
+
+      if (!text.contains('•')) {
+        continue;
+      }
+
+      final pieces =
+          text
+              .split('•')
+              .map(
+                (value) =>
+                    value.trim(),
+              )
+              .where(
+                (value) =>
+                    value.isNotEmpty &&
+                    value.length < 100,
+              );
+
+      for (final value in pieces) {
+        if (SourceMatching.normalize(
+              value,
+            ) !=
+            normalizedTitle) {
+          aliases.add(value);
+        }
+      }
+
+      if (aliases.isNotEmpty) {
+        break;
+      }
+    }
+
+    return aliases.toList(
+      growable: false,
+    );
+  }
+
+  String _findCover(
+    Document document,
+    String title,
+  ) {
+    for (final image
+        in document
+            .querySelectorAll(
+      'img',
+    )) {
+      final alt =
+          image.attributes[
+                  'alt'] ??
+              '';
+
+      if (SourceMatching.similarity(
+            alt,
+            title,
+          ) <
+          .85) {
+        continue;
+      }
+
+      return _absolute(
+        image.attributes[
+                'src'] ??
+            image.attributes[
+                'data-src'] ??
+            '',
+      );
+    }
+
+    return '';
+  }
+
+  String _findDescription(
+    Document document,
+  ) {
+    var longest = '';
+
+    for (final paragraph
+        in document
+            .querySelectorAll(
+      'p',
+    )) {
+      final text =
+          paragraph.text.trim();
+
+      if (text.length >
+              longest.length &&
+          text.length > 80) {
+        longest = text;
+      }
+    }
+
+    return longest;
+  }
+
+  MangaStatus _statusFromDocument(
+    Document document,
+  ) {
+    final text =
+        document.body?.text
+                .toLowerCase() ??
+            '';
+
+    if (text.contains(
+      'status completed',
+    )) {
+      return MangaStatus.completed;
+    }
+
+    if (text.contains(
+      'status hiatus',
+    )) {
+      return MangaStatus.hiatus;
+    }
+
+    if (text.contains(
+      'status cancelled',
+    )) {
+      return MangaStatus.cancelled;
+    }
+
+    if (text.contains(
+      'status ongoing',
+    )) {
+      return MangaStatus.ongoing;
+    }
+
+    return MangaStatus.unknown;
+  }
+
+  int _seriesChapterCount(
+    Document document,
+  ) {
+    final match =
+        RegExp(
+      r'(\d+)\s+chapters?',
+      caseSensitive: false,
+    ).firstMatch(
+      document.body?.text ?? '',
+    );
+
+    return int.tryParse(
+          match?.group(1) ?? '',
+        ) ??
+        0;
+  }
+
+  int _chapterCountFromCard(
+    String text,
+  ) {
+    final match =
+        RegExp(
+      r'(\d+)\s+(?:chs?|chapters?)',
+      caseSensitive: false,
+    ).firstMatch(text);
+
+    return int.tryParse(
+          match?.group(1) ?? '',
+        ) ??
+        0;
+  }
+
+  DateTime _dateNearAnchor(
+    Element anchor,
+  ) {
+    Element? node =
+        anchor.parent;
+
+    for (var depth = 0;
+        depth < 4 &&
+            node != null;
+        depth++) {
+      final time =
+          node.querySelector(
+        'time',
+      );
+
+      final raw =
+          time?.attributes[
+                  'datetime'] ??
+              time?.text;
+
+      if (raw != null) {
+        final parsed =
+            DateTime.tryParse(
+          raw.trim(),
+        );
+
+        if (parsed != null) {
+          return parsed;
+        }
+      }
+
+      node = node.parent;
+    }
+
+    return DateTime
+        .fromMillisecondsSinceEpoch(
+      0,
+    );
+  }
+
+  String _titleFromPath(
+    String path,
+  ) {
+    var slug =
+        path.replaceFirst(
+      'comics/',
+      '',
+    );
+
+    slug = slug.replaceFirst(
       RegExp(
-    r'\bchapter\s*#?\s*(\d+(?:\.\d+)?)\b',
-    caseSensitive: false,
-  ).firstMatch(cleaned);
+        r'-[a-f0-9]{8}$',
+        caseSensitive: false,
+      ),
+      '',
+    );
 
-  if (match == null) {
-    return null;
+    return slug
+        .split('-')
+        .where(
+          (value) =>
+              value.isNotEmpty,
+        )
+        .map(
+          (value) =>
+              '${value[0].toUpperCase()}'
+              '${value.substring(1)}',
+        )
+        .join(' ');
   }
 
-  return double.tryParse(
-    match.group(1) ?? '',
-  );
-}
-
-  String? _path(String value) {
-    final uri = Uri.tryParse(value);
+  String? _path(
+    String value,
+  ) {
+    final uri =
+        Uri.tryParse(value);
 
     if (uri == null) {
       return null;
     }
 
-    return uri.path.replaceFirst(RegExp(r'^/+'), '');
+    return uri.path
+        .replaceFirst(
+          RegExp(r'^/+'),
+          '',
+        );
   }
 
-  String _absolute(String value) {
-    final trimmed = value.trim();
+  String _absolute(
+    String value,
+  ) {
+    final trimmed =
+        value.trim();
 
     if (trimmed.isEmpty) {
       return '';
     }
 
-    if (trimmed.startsWith('https://')) {
+    if (trimmed.startsWith(
+      'https://',
+    )) {
       return trimmed;
     }
 
-    if (trimmed.startsWith('//')) {
+    if (trimmed.startsWith(
+      '//',
+    )) {
       return 'https:$trimmed';
     }
 
-    if (trimmed.startsWith('/')) {
-      return 'https://asuracomic.net'
+    if (trimmed.startsWith(
+      '/',
+    )) {
+      return 'https://asurascans.com'
           '$trimmed';
     }
 
-    return 'https://asuracomic.net/'
+    return 'https://asurascans.com/'
         '$trimmed';
   }
-
-  String _normalize(String value) =>
-      value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-
-  String _numberLabel(double value) => value == value.roundToDouble()
-      ? value.toInt().toString()
-      : value.toString();
 }

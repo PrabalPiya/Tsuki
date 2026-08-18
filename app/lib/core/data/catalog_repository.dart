@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import '../config/app_config.dart';
 import '../models/chapter.dart';
 import '../models/manga.dart';
@@ -22,36 +20,62 @@ class CatalogRepository {
     MangaPillSource? mangaPill,
     WeebCentralSource? weebCentral,
     AsuraSource? asura,
-  })  : _comicK = comicK ?? ComicKSource(),
-        _mangaPill = mangaPill ?? MangaPillSource(),
-        _weebCentral = weebCentral ?? WeebCentralSource(),
-        _asura = asura ?? AsuraSource() {
+  })  : _comicK =
+            comicK ??
+                ComicKSource(),
+        _mangaPill =
+            mangaPill ??
+                MangaPillSource(),
+        _weebCentral =
+            weebCentral ??
+                WeebCentralSource(),
+        _asura =
+            asura ??
+                AsuraSource() {
     if (_config.useDemoData) {
-      for (final manga in demoCatalog) {
-        _cache[manga.id] = manga;
+      for (final manga
+          in demoCatalog) {
+        _cache[manga.id] =
+            manga;
       }
     }
   }
 
   final AppConfig _config;
+
   final MetadataProvider _metadata;
 
   final MangaDexSource _mangaDex;
   final ComicKSource _comicK;
   final MangaPillSource _mangaPill;
-  final WeebCentralSource _weebCentral;
+  final WeebCentralSource
+      _weebCentral;
   final AsuraSource _asura;
 
-  final Map<String, Manga> _cache = {};
+  final Map<String, Manga>
+      _cache = {};
 
-  final Map<String, List<CanonicalChapter>>
+  final Map<String,
+          List<CanonicalChapter>>
       _chapterCache = {};
 
+  /*
+   * Successful source mappings only.
+   *
+   * Null misses are deliberately NOT cached.
+   */
   final Map<String, String>
       _sourceMatchCache = {};
 
+  /*
+   * Sources run concurrently.
+   *
+   * Ten seconds is a maximum for a single
+   * provider, not ten seconds multiplied by
+   * five sources.
+   */
   static const _sourceTimeout =
-      Duration(seconds: 8);
+      Duration(seconds: 10);
 
   List<Manga> get demoRankings =>
       _config.useDemoData
@@ -77,11 +101,13 @@ class CatalogRepository {
       final values =
           await _metadata.search(
         query.trim(),
-        includeAdult: includeAdult,
+        includeAdult:
+            includeAdult,
       );
 
       for (final value in values) {
-        _cache[value.id] = value;
+        _cache[value.id] =
+            value;
       }
 
       return _dedupe(values);
@@ -90,7 +116,7 @@ class CatalogRepository {
         rethrow;
       }
 
-      final q =
+      final normalized =
           query.toLowerCase();
 
       return demoCatalog
@@ -98,7 +124,9 @@ class CatalogRepository {
             (manga) =>
                 manga.title
                     .toLowerCase()
-                    .contains(q),
+                    .contains(
+                      normalized,
+                    ),
           )
           .toList();
     }
@@ -115,7 +143,9 @@ class CatalogRepository {
     }
 
     final loaded =
-        await _metadata.getById(id);
+        await _metadata.getById(
+      id,
+    );
 
     if (loaded != null) {
       _cache[id] = loaded;
@@ -138,11 +168,14 @@ class CatalogRepository {
     final cacheKey =
         '${manga.id}|adult:$allowAdult';
 
-    if (!refresh &&
-        _chapterCache
-            .containsKey(cacheKey)) {
-      return _chapterCache[
-          cacheKey]!;
+    if (!refresh) {
+      final cached =
+          _chapterCache[
+              cacheKey];
+
+      if (cached != null) {
+        return cached;
+      }
     }
 
     if (refresh) {
@@ -158,68 +191,54 @@ class CatalogRepository {
     if (manga.id.startsWith(
       'demo:',
     )) {
-      final result =
-          demoChapters(manga);
+      final values =
+          demoChapters(
+        manga,
+      );
 
-      _chapterCache[
-          cacheKey] = result;
+      _chapterCache[cacheKey] =
+          values;
 
-      return result;
+      return values;
     }
 
     /*
-     * IMPORTANT:
+     * Every source is independent.
      *
-     * All sources now run IN PARALLEL.
-     *
-     * Before:
-     *
-     * MangaDex
-     *   wait
-     * ComicK
-     *   wait
-     * MangaPill
-     *   wait
-     * WeebCentral
-     *   wait
-     * Asura
-     *
-     * Now:
-     *
-     * MangaDex ─────┐
-     * ComicK ───────┤
-     * MangaPill ────┤
-     * WeebCentral ──┤
-     * Asura ─────────┘
+     * Failure of MangaDex does not suppress
+     * ComicK / WeebCentral / Asura / MangaPill.
      */
     final batches =
-        await Future.wait([
-      _safeSource(
-        () => _loadMangaDex(
-          manga,
+        await Future.wait<
+            List<CanonicalChapter>>(
+      [
+        _safe(
+          () => _loadMangaDex(
+            manga,
+          ),
         ),
-      ),
-      _safeSource(
-        () => _loadComicK(
-          manga,
+        _safe(
+          () => _loadComicK(
+            manga,
+          ),
         ),
-      ),
-      _safeSource(
-        () => _loadMangaPill(
-          manga,
+        _safe(
+          () => _loadWeebCentral(
+            manga,
+          ),
         ),
-      ),
-      _safeSource(
-        () => _loadWeebCentral(
-          manga,
+        _safe(
+          () => _loadAsura(
+            manga,
+          ),
         ),
-      ),
-      _safeSource(
-        () => _loadAsura(
-          manga,
+        _safe(
+          () => _loadMangaPill(
+            manga,
+          ),
         ),
-      ),
-    ]);
+      ],
+    );
 
     final collected =
         <CanonicalChapter>[];
@@ -231,33 +250,32 @@ class CatalogRepository {
     final merged =
         _mergeChapters(
       collected,
-      manga,
     );
 
-    final current =
+    final existing =
         _cache[manga.id] ??
             manga;
 
     _cache[manga.id] =
-        current.copyWith(
+        existing.copyWith(
       chapterCount:
           merged.length,
     );
 
-    _chapterCache[
-        cacheKey] = merged;
+    _chapterCache[cacheKey] =
+        merged;
 
     return merged;
   }
 
   Future<List<CanonicalChapter>>
-      _safeSource(
+      _safe(
     Future<List<CanonicalChapter>>
             Function()
-        loader,
+        operation,
   ) async {
     try {
-      return await loader()
+      return await operation()
           .timeout(
         _sourceTimeout,
       );
@@ -290,14 +308,13 @@ class CatalogRepository {
       sourceId,
     );
 
-    final current =
+    final existing =
         _cache[manga.id] ??
             manga;
 
     _cache[manga.id] =
-        current.copyWith(
-      mangaDexId:
-          sourceId,
+        existing.copyWith(
+      mangaDexId: sourceId,
     );
 
     return values;
@@ -321,29 +338,6 @@ class CatalogRepository {
     }
 
     return _comicK
-        .getChapters(
-      sourceId,
-    );
-  }
-
-  Future<List<CanonicalChapter>>
-      _loadMangaPill(
-    Manga manga,
-  ) async {
-    final sourceId =
-        await _resolve(
-      '${manga.id}|mangapill',
-      () => _mangaPill
-          .findConservativeMatch(
-        manga,
-      ),
-    );
-
-    if (sourceId == null) {
-      return const [];
-    }
-
-    return _mangaPill
         .getChapters(
       sourceId,
     );
@@ -395,33 +389,54 @@ class CatalogRepository {
     );
   }
 
+  Future<List<CanonicalChapter>>
+      _loadMangaPill(
+    Manga manga,
+  ) async {
+    final sourceId =
+        await _resolve(
+      '${manga.id}|mangapill',
+      () => _mangaPill
+          .findConservativeMatch(
+        manga,
+      ),
+    );
+
+    if (sourceId == null) {
+      return const [];
+    }
+
+    return _mangaPill
+        .getChapters(
+      sourceId,
+    );
+  }
+
   Future<String?> _resolve(
-    String key,
+    String cacheKey,
     Future<String?> Function()
         resolver,
   ) async {
-    final cached =
-        _sourceMatchCache[key];
+    final existing =
+        _sourceMatchCache[
+            cacheKey];
 
-    if (cached != null) {
-      return cached;
+    if (existing != null) {
+      return existing;
     }
 
     final result =
         await resolver();
 
     /*
-     * IMPORTANT:
+     * Do not cache misses.
      *
-     * Do NOT cache null.
-     *
-     * A temporary search/source failure should
-     * not permanently mean "this manga does not
-     * exist on this source".
+     * Temporary source/search failures should be
+     * retried next time.
      */
     if (result != null) {
-      _sourceMatchCache[key] =
-          result;
+      _sourceMatchCache[
+          cacheKey] = result;
     }
 
     return result;
@@ -449,36 +464,57 @@ class CatalogRepository {
 
   List<CanonicalChapter>
       _mergeChapters(
-    List<CanonicalChapter> input,
-    Manga manga,
+    List<CanonicalChapter>
+        chapters,
   ) {
     final merged =
         <String,
             CanonicalChapter>{};
 
-    for (final chapter in input) {
-      /*
-       * Remove obviously corrupted chapter
-       * numbers BEFORE merging.
-       */
-      if (!_reasonableChapter(
-        chapter,
-        manga,
-      )) {
+    for (final chapter
+        in chapters) {
+      final number =
+          chapter.number;
+
+      if (number != null &&
+          (!number.isFinite ||
+              number < 0 ||
+              number > 20000)) {
         continue;
       }
 
       final key =
-          chapter.number != null
-              ? 'number:'
-                  '${_numberLabel(chapter.number!)}'
-              : 'special:'
-                  '${_normalize(chapter.title)}';
+          number == null
+              ? 'special:'
+                  '${_normalize(chapter.title)}'
+              : 'number:'
+                  '${_numberLabel(number)}';
+
+      /*
+       * A special with no usable title cannot be
+       * safely deduplicated.
+       */
+      if (number == null &&
+          _normalize(
+            chapter.title,
+          ).isEmpty) {
+        continue;
+      }
 
       final existing =
           merged[key];
 
       if (existing == null) {
+        final copies = [
+          ...chapter.sourceCopies,
+        ]..sort(
+            (a, b) =>
+                b.reliability
+                    .compareTo(
+              a.reliability,
+            ),
+          );
+
         merged[key] =
             CanonicalChapter(
           id:
@@ -489,9 +525,7 @@ class CatalogRepository {
               chapter.title,
           publishedAt:
               chapter.publishedAt,
-          sourceCopies: [
-            ...chapter.sourceCopies,
-          ],
+          sourceCopies: copies,
         );
 
         continue;
@@ -511,7 +545,7 @@ class CatalogRepository {
             copy;
       }
 
-      final sorted =
+      final sortedCopies =
           copies.values.toList()
             ..sort(
               (a, b) =>
@@ -527,40 +561,41 @@ class CatalogRepository {
         number:
             existing.number ??
                 chapter.number,
-        title: _betterTitle(
+        title: _bestTitle(
           existing.title,
           chapter.title,
         ),
         publishedAt:
-            chapter.publishedAt
-                    .isBefore(
-              existing.publishedAt,
-            )
-                ? chapter
-                    .publishedAt
-                : existing
-                    .publishedAt,
-        sourceCopies: sorted,
+            _earliestMeaningfulDate(
+          existing.publishedAt,
+          chapter.publishedAt,
+        ),
+        sourceCopies:
+            sortedCopies,
       );
     }
 
-    final result =
+    final values =
         merged.values.toList()
           ..sort(
             (a, b) {
-              if (a.number != null &&
-                  b.number != null) {
-                return a.number!
-                    .compareTo(
-                  b.number!,
-                );
+              final left =
+                  a.number;
+
+              final right =
+                  b.number;
+
+              if (left != null &&
+                  right != null) {
+                return left
+                    .compareTo(right);
               }
 
-              if (a.number != null) {
+              if (left != null) {
                 return -1;
               }
 
-              if (b.number != null) {
+              if (right != null) {
                 return 1;
               }
 
@@ -571,83 +606,66 @@ class CatalogRepository {
             },
           );
 
-    return result;
+    return values;
   }
 
-  bool _reasonableChapter(
-    CanonicalChapter chapter,
-    Manga manga,
+  String _bestTitle(
+    String left,
+    String right,
   ) {
-    final number =
-        chapter.number;
-
-    /*
-     * Specials without a chapter number are OK.
-     */
-    if (number == null) {
-      return chapter.title
-          .trim()
-          .isNotEmpty;
-    }
-
-    if (!number.isFinite ||
-        number < 0) {
-      return false;
-    }
-
-    /*
-     * Absolute protection against accidentally
-     * parsing database IDs / years / timestamps.
-     */
-    if (number > 10000) {
-      return false;
-    }
-
-    /*
-     * AniList knows total chapters for many
-     * completed series.
-     *
-     * Give sources LOTS of tolerance because
-     * AniList can be stale/different.
-     */
-    if (manga.chapterCount > 0) {
-      final expected =
-          manga.chapterCount;
-
-      final maximum =
-          math.max(
-        expected * 2.0,
-        expected + 100.0,
-      );
-
-      if (number > maximum) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  String _betterTitle(
-    String current,
-    String candidate,
-  ) {
-    final pattern =
+    final generic =
         RegExp(
-      r'^Chapter\s+\d+(?:\.\d+)?$',
+      r'^(?:chapter|ch\.?)\s*#?\s*\d+(?:\.\d+)?$',
       caseSensitive: false,
     );
 
-    if (pattern.hasMatch(
-          current.trim(),
-        ) &&
-        !pattern.hasMatch(
-          candidate.trim(),
-        )) {
-      return candidate;
+    final leftGeneric =
+        generic.hasMatch(
+      left.trim(),
+    );
+
+    final rightGeneric =
+        generic.hasMatch(
+      right.trim(),
+    );
+
+    if (leftGeneric &&
+        !rightGeneric) {
+      return right;
     }
 
-    return current;
+    if (!leftGeneric &&
+        rightGeneric) {
+      return left;
+    }
+
+    return right.length >
+            left.length
+        ? right
+        : left;
+  }
+
+  DateTime _earliestMeaningfulDate(
+    DateTime left,
+    DateTime right,
+  ) {
+    final epoch =
+        DateTime
+            .fromMillisecondsSinceEpoch(
+      0,
+    );
+
+    if (left == epoch) {
+      return right;
+    }
+
+    if (right == epoch) {
+      return left;
+    }
+
+    return left.isBefore(right)
+        ? left
+        : right;
   }
 
   Future<ChapterPages> pages(
@@ -666,7 +684,8 @@ class CatalogRepository {
     Object? lastError;
 
     for (final copy in copies) {
-      if (!copy.isDirectlyReadable) {
+      if (!copy
+          .isDirectlyReadable) {
         continue;
       }
 
@@ -718,6 +737,9 @@ class CatalogRepository {
           );
         }
       } catch (error) {
+        /*
+         * Automatically try the next copy.
+         */
         lastError = error;
       }
     }
@@ -735,17 +757,21 @@ class CatalogRepository {
         <String, Manga>{};
 
     for (final manga in values) {
+      final key =
+          manga.anilistId
+                  ?.toString() ??
+              _normalize(
+                manga.title,
+              );
+
       map.putIfAbsent(
-        manga.anilistId
-                ?.toString() ??
-            _normalize(
-              manga.title,
-            ),
+        key,
         () => manga,
       );
     }
 
-    return map.values.toList();
+    return map.values
+        .toList();
   }
 
   String _normalize(

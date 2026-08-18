@@ -1,14 +1,19 @@
 import 'package:dio/dio.dart';
 import 'package:html/dom.dart';
-import 'package:html/parser.dart' as html_parser;
+import 'package:html/parser.dart'
+    as html_parser;
 
 import '../../../core/models/chapter.dart';
 import '../../../core/models/manga.dart';
 import '../../../core/network/http_client.dart';
 import '../../../core/network/source_failure.dart';
-import 'manga_source.dart';
 
-class WeebCentralSource implements MangaSource {
+import 'chapter_number_parser.dart';
+import 'manga_source.dart';
+import 'source_matching.dart';
+
+class WeebCentralSource
+    implements MangaSource {
   WeebCentralSource({
     Dio? client,
   }) : _client =
@@ -29,17 +34,19 @@ class WeebCentralSource implements MangaSource {
       'WeebCentral';
 
   @override
-  SourceCapabilities get capabilities =>
-      const SourceCapabilities(
-        search: true,
-        details: true,
-        chapters: true,
-        pages: true,
-      );
+  SourceCapabilities
+      get capabilities =>
+          const SourceCapabilities(
+            search: true,
+            details: true,
+            chapters: true,
+            pages: true,
+          );
 
   @override
-  Set<String> get allowedImageHosts =>
-      const {};
+  Set<String>
+      get allowedImageHosts =>
+          const {};
 
   @override
   Future<List<Manga>> search(
@@ -50,7 +57,7 @@ class WeebCentralSource implements MangaSource {
       '/search',
       queryParameters: {
         'text': query,
-        'limit': 20,
+        'limit': 30,
         'offset': 0,
         'display_mode':
             'Full Display',
@@ -61,11 +68,13 @@ class WeebCentralSource implements MangaSource {
         <String, Manga>{};
 
     for (final anchor
-        in document.querySelectorAll(
+        in document
+            .querySelectorAll(
       'a[href*="/series/"]',
     )) {
       final href =
-          anchor.attributes['href'];
+          anchor.attributes[
+              'href'];
 
       if (href == null) {
         continue;
@@ -81,15 +90,27 @@ class WeebCentralSource implements MangaSource {
         continue;
       }
 
-      final image =
-          anchor.querySelector('img') ??
-              anchor.parent
-                  ?.querySelector('img');
+      final container =
+          anchor.parent;
 
-      final title =
-          (image?.attributes['alt'] ??
-                  anchor.attributes['title'] ??
+      final image =
+          anchor.querySelector(
+            'img',
+          ) ??
+          container?.querySelector(
+            'img',
+          );
+
+      var title =
+          (image?.attributes[
+                      'alt'] ??
+                  anchor.attributes[
+                      'title'] ??
                   anchor.text)
+              .replaceAll(
+                RegExp(r'\s+'),
+                ' ',
+              )
               .trim();
 
       if (title.isEmpty) {
@@ -98,15 +119,21 @@ class WeebCentralSource implements MangaSource {
 
       final cover =
           _absolute(
-        image?.attributes['src'] ??
+        image?.attributes[
+                'src'] ??
             image?.attributes[
                 'data-src'] ??
             '',
       );
 
+      final encoded =
+          Uri.encodeComponent(
+        path,
+      );
+
       results[path] = Manga(
         id:
-            'weebcentral:${Uri.encodeComponent(path)}',
+            'weebcentral:$encoded',
         title: title,
         coverUrl: cover,
         synopsis: '',
@@ -122,27 +149,10 @@ class WeebCentralSource implements MangaSource {
     );
   }
 
-  Future<String?> findConservativeMatch(
+  Future<String?>
+      findConservativeMatch(
     Manga canonical,
   ) async {
-    final expected =
-        <String>{
-      canonical.title,
-      ...canonical.aliases,
-    }
-            .map(_normalize)
-            .where(
-              (value) =>
-                  value.isNotEmpty,
-            )
-            .toSet();
-
-    /*
-     * Do not try 8+ aliases.
-     *
-     * That was a major source of the
-     * loading delay.
-     */
     final queries =
         <String>{
       canonical.title,
@@ -156,44 +166,38 @@ class WeebCentralSource implements MangaSource {
               (value) =>
                   value.length >= 2,
             )
-            .take(3);
+            .take(4)
+            .toList();
+
+    final candidates =
+        <String, Manga>{};
 
     for (final query in queries) {
       try {
-        final results =
+        final values =
             await search(query);
 
-        for (final candidate
-            in results) {
-          final names =
-              <String>{
-            candidate.title,
-            ...candidate.aliases,
-          }
-                  .map(_normalize)
-                  .where(
-                    (value) =>
-                        value.isNotEmpty,
-                  );
-
-          if (names.any(
-            expected.contains,
-          )) {
-            return candidate.id
-                .replaceFirst(
-              'weebcentral:',
-              '',
-            );
-          }
+        for (final value in values) {
+          candidates[value.id] =
+              value;
         }
-      } catch (_) {}
+      } catch (_) {
+        // Another alias may work.
+      }
     }
 
-    return null;
+    return SourceMatching.bestMatchId(
+      canonical,
+      candidates.values.toList(),
+      sourcePrefix:
+          'weebcentral:',
+      minimumScore: .84,
+    );
   }
 
   @override
-  Future<Manga?> getMangaDetails(
+  Future<Manga?>
+      getMangaDetails(
     String sourceMangaId,
   ) async {
     final path =
@@ -225,10 +229,51 @@ class WeebCentralSource implements MangaSource {
       return null;
     }
 
+    final aliases =
+        <String>{};
+
+    for (final element
+        in document
+            .querySelectorAll(
+      'li, div, p',
+    )) {
+      final text =
+          element.text
+              .replaceAll(
+                RegExp(r'\s+'),
+                ' ',
+              )
+              .trim();
+
+      if (!text
+          .toLowerCase()
+          .contains(
+            'associated name',
+          )) {
+        continue;
+      }
+
+      final links =
+          element.querySelectorAll(
+        'a',
+      );
+
+      for (final link in links) {
+        final alias =
+            link.text.trim();
+
+        if (alias.isNotEmpty) {
+          aliases.add(alias);
+        }
+      }
+    }
+
     return Manga(
       id:
           'weebcentral:$sourceMangaId',
       title: title,
+      aliases:
+          aliases.toList(),
       coverUrl: '',
       synopsis:
           _longestParagraph(
@@ -236,7 +281,10 @@ class WeebCentralSource implements MangaSource {
       ),
       status:
           MangaStatus.unknown,
-      chapterCount: 0,
+      chapterCount:
+          _visibleChapterCount(
+        document,
+      ),
     );
   }
 
@@ -257,12 +305,11 @@ class WeebCentralSource implements MangaSource {
     }
 
     /*
-     * CRITICAL FIX:
+     * WeebCentral's normal page intentionally
+     * shows newest + oldest chapters with a
+     * "Show All Chapters" control.
      *
-     * Normal series page may not contain every
-     * chapter.
-     *
-     * Fetch the dedicated full list instead.
+     * Use the complete list endpoint first.
      */
     Document document;
 
@@ -271,11 +318,17 @@ class WeebCentralSource implements MangaSource {
           await _document(
         '/$path/full-chapter-list',
       );
+
+      if (document
+          .querySelectorAll(
+            'a[href*="/chapters/"]',
+          )
+          .isEmpty) {
+        throw const SourceFailure(
+          'Full chapter list returned no chapters.',
+        );
+      }
     } catch (_) {
-      /*
-       * Fall back if their full-list endpoint
-       * temporarily fails.
-       */
       document =
           await _document(
         '/$path',
@@ -287,11 +340,13 @@ class WeebCentralSource implements MangaSource {
             CanonicalChapter>{};
 
     for (final anchor
-        in document.querySelectorAll(
+        in document
+            .querySelectorAll(
       'a[href*="/chapters/"]',
     )) {
       final href =
-          anchor.attributes['href'];
+          anchor.attributes[
+              'href'];
 
       if (href == null) {
         continue;
@@ -301,18 +356,13 @@ class WeebCentralSource implements MangaSource {
           _path(href);
 
       if (chapterPath == null ||
-          !chapterPath.startsWith(
+          !chapterPath
+              .startsWith(
             'chapters/',
           )) {
         continue;
       }
 
-      /*
-       * IMPORTANT:
-       *
-       * Only parse the visible chapter label.
-       * NEVER parse IDs from the URL.
-       */
       final text =
           anchor.text
               .replaceAll(
@@ -322,8 +372,10 @@ class WeebCentralSource implements MangaSource {
               .trim();
 
       final number =
-          _chapterNumber(
+          ChapterNumberParser
+              .parseVisibleLabel(
         text,
+        allowPlainNumber: true,
       );
 
       if (number == null) {
@@ -331,12 +383,17 @@ class WeebCentralSource implements MangaSource {
       }
 
       final key =
-          _numberLabel(
+          ChapterNumberParser.label(
         number,
       );
 
-      final previous =
+      final existing =
           chapters[key];
+
+      final published =
+          _nearbyDate(
+        anchor,
+      );
 
       final copy =
           ChapterSourceCopy(
@@ -345,12 +402,9 @@ class WeebCentralSource implements MangaSource {
             Uri.encodeComponent(
           chapterPath,
         ),
-        reliability: .72,
+        reliability: .82,
         publishedAt:
-            DateTime
-                .fromMillisecondsSinceEpoch(
-          0,
-        ),
+            published,
         attribution:
             'WeebCentral',
       );
@@ -360,23 +414,27 @@ class WeebCentralSource implements MangaSource {
         id:
             'chapter:number:$key',
         number: number,
-        title:
-            'Chapter $key',
+        title: text.isEmpty
+            ? 'Chapter $key'
+            : text,
         publishedAt:
-            previous?.publishedAt ??
-                DateTime
-                    .fromMillisecondsSinceEpoch(
-                  0,
-                ),
+            existing == null ||
+                    published.isBefore(
+                      existing
+                          .publishedAt,
+                    )
+                ? published
+                : existing
+                    .publishedAt,
         sourceCopies: [
-          ...?previous
+          ...?existing
               ?.sourceCopies,
           copy,
         ],
       );
     }
 
-    final result =
+    final values =
         chapters.values.toList()
           ..sort(
             (a, b) =>
@@ -386,7 +444,7 @@ class WeebCentralSource implements MangaSource {
             ),
           );
 
-    return result;
+    return values;
   }
 
   @override
@@ -416,44 +474,58 @@ class WeebCentralSource implements MangaSource {
     final urls =
         <String>[];
 
-    for (final image
-        in document.querySelectorAll(
+    /*
+     * Prefer reader/page images.
+     */
+    final candidates =
+        document.querySelectorAll(
+      '#reader img, '
+      '.reader img, '
+      'main img, '
       'img',
-    )) {
-      final source =
+    );
+
+    for (final image
+        in candidates) {
+      final raw =
           image.attributes[
                   'data-src'] ??
               image.attributes[
+                  'data-lazy-src'] ??
+              image.attributes[
                   'src'];
 
-      if (source == null ||
-          source.isEmpty) {
+      if (raw == null ||
+          raw.trim().isEmpty) {
         continue;
       }
 
       final lower =
-          source.toLowerCase();
+          raw.toLowerCase();
 
       if (lower.contains(
             'logo',
           ) ||
           lower.contains(
+            'avatar',
+          ) ||
+          lower.contains(
             'icon',
           ) ||
           lower.contains(
-            'avatar',
+            'banner',
           )) {
         continue;
       }
 
       final url =
-          _absolute(
-        source,
-      );
+          _absolute(raw);
 
-      if (!url.startsWith(
-        'https://',
-      )) {
+      final uri =
+          Uri.tryParse(url);
+
+      if (uri == null ||
+          uri.scheme != 'https') {
         continue;
       }
 
@@ -463,7 +535,7 @@ class WeebCentralSource implements MangaSource {
     }
 
     if (urls.isEmpty ||
-        urls.length > 500) {
+        urls.length > 600) {
       throw const SourceFailure(
         'WeebCentral chapter unavailable.',
       );
@@ -517,32 +589,64 @@ class WeebCentralSource implements MangaSource {
     );
   }
 
-  double? _chapterNumber(
-    String text,
+  DateTime _nearbyDate(
+    Element anchor,
   ) {
-    /*
-     * Examples accepted:
-     *
-     * Chapter 1
-     * Chapter 98
-     * Ch. 12
-     * Chapter 12.5
-     *
-     * No generic "first number found" fallback.
-     */
-    final match =
-        RegExp(
-      r'\b(?:chapter|ch\.?)\s*#?\s*(\d+(?:\.\d+)?)\b',
-      caseSensitive: false,
-    ).firstMatch(text);
+    Element? node =
+        anchor.parent;
 
-    if (match == null) {
-      return null;
+    for (var depth = 0;
+        depth < 4 &&
+            node != null;
+        depth++) {
+      final time =
+          node.querySelector(
+        'time',
+      );
+
+      final raw =
+          time?.attributes[
+                  'datetime'] ??
+              time?.text;
+
+      if (raw != null) {
+        final parsed =
+            DateTime.tryParse(
+          raw.trim(),
+        );
+
+        if (parsed != null) {
+          return parsed;
+        }
+      }
+
+      node = node.parent;
     }
 
-    return double.tryParse(
-      match.group(1) ?? '',
+    return DateTime
+        .fromMillisecondsSinceEpoch(
+      0,
     );
+  }
+
+  int _visibleChapterCount(
+    Document document,
+  ) {
+    final pattern =
+        RegExp(
+      r'(\d+)\s+chapters?',
+      caseSensitive: false,
+    );
+
+    final match =
+        pattern.firstMatch(
+      document.body?.text ?? '',
+    );
+
+    return int.tryParse(
+          match?.group(1) ?? '',
+        ) ??
+        0;
   }
 
   String _longestParagraph(
@@ -551,7 +655,8 @@ class WeebCentralSource implements MangaSource {
     var result = '';
 
     for (final paragraph
-        in document.querySelectorAll(
+        in document
+            .querySelectorAll(
       'p',
     )) {
       final text =
@@ -615,24 +720,4 @@ class WeebCentralSource implements MangaSource {
     return 'https://weebcentral.com/'
         '$trimmed';
   }
-
-  String _normalize(
-    String value,
-  ) =>
-      value
-          .toLowerCase()
-          .replaceAll(
-            RegExp(
-              r'[^a-z0-9]',
-            ),
-            '',
-          );
-
-  String _numberLabel(
-    double value,
-  ) =>
-      value ==
-              value.roundToDouble()
-          ? value.toInt().toString()
-          : value.toString();
 }
