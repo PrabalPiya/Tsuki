@@ -14,24 +14,26 @@ import 'package:tsuki/features/search/data/anilist_metadata_provider.dart'
 import 'package:shared_preferences/shared_preferences.dart';
 
 const _localConfig = AppConfig(
-    environment: AppEnvironment.production,
-    useDemoData: false,
-    firebaseProjectId: '',
-    firebaseAppId: '',
-    firebaseApiKey: '',
-    firebaseMessagingSenderId: '',
-    backendBaseUrl: '');
+  environment: AppEnvironment.production,
+  useDemoData: false,
+  firebaseProjectId: '',
+  firebaseAppId: '',
+  firebaseApiKey: '',
+  firebaseMessagingSenderId: '',
+  backendBaseUrl: '',
+);
 
 const _manga = Manga(
-    id: 'anilist:1',
-    anilistId: 1,
-    malId: 2,
-    title: 'Paper Moon',
-    coverUrl: 'https://example.com/cover.jpg',
-    synopsis: 'A test manga.',
-    status: MangaStatus.ongoing,
-    chapterCount: 4,
-    rating: 8.4);
+  id: 'anilist:1',
+  anilistId: 1,
+  malId: 2,
+  title: 'Paper Moon',
+  coverUrl: 'https://example.com/cover.jpg',
+  synopsis: 'A test manga.',
+  status: MangaStatus.ongoing,
+  chapterCount: 4,
+  rating: 8.4,
+);
 
 class _BrowsingMetadata extends anilist.AniListMetadataProvider {
   final requested = <RankingPeriod>[];
@@ -60,19 +62,21 @@ void main() {
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test('an unconfigured production build starts a usable local profile',
-      () async {
-    final controller = AuthController(_localConfig);
-    await Future<void>.delayed(Duration.zero);
+  test(
+    'an unconfigured production build starts a usable local profile',
+    () async {
+      final controller = AuthController(_localConfig);
+      await Future<void>.delayed(Duration.zero);
 
-    expect(controller.state.status, SessionStatus.ready);
-    expect(controller.state.uid, 'local-user');
-    expect(controller.state.isLocalProfile, isTrue);
+      expect(controller.state.status, SessionStatus.ready);
+      expect(controller.state.uid, 'local-user');
+      expect(controller.state.isLocalProfile, isTrue);
 
-    await controller.signOut();
-    expect(controller.state.status, SessionStatus.ready);
-    controller.dispose();
-  });
+      await controller.signOut();
+      expect(controller.state.status, SessionStatus.ready);
+      controller.dispose();
+    },
+  );
 
   test('local library metadata survives restart and clears safely', () async {
     const store = LocalUserStore();
@@ -89,23 +93,25 @@ void main() {
     expect(cleared.bookmarkedManga, isEmpty);
   });
 
-  test('trending, top rated, and popular rankings use distinct AniList feeds',
-      () async {
-    final metadata = _BrowsingMetadata();
-    final provider = AniListRankingProvider(metadata);
+  test(
+    'trending, top rated, and popular rankings use distinct AniList feeds',
+    () async {
+      final metadata = _BrowsingMetadata();
+      final provider = AniListRankingProvider(metadata);
 
-    for (final period in RankingPeriod.values) {
-      final result = await provider.rankings(period);
-      expect(result.items.single.title, _manga.title);
-      expect(result.isPreview, isFalse);
-    }
+      for (final period in RankingPeriod.values) {
+        final result = await provider.rankings(period);
+        expect(result.items.single.title, _manga.title);
+        expect(result.isPreview, isFalse);
+      }
 
-    expect(metadata.requested, [
-      RankingPeriod.trending,
-      RankingPeriod.topRated,
-      RankingPeriod.popular,
-    ]);
-  });
+      expect(metadata.requested, [
+        RankingPeriod.trending,
+        RankingPeriod.topRated,
+        RankingPeriod.popular,
+      ]);
+    },
+  );
 
   test('legacy progress marks only its current chapter as opened', () {
     final progress = ReadingProgress.fromJson({
@@ -114,27 +120,33 @@ void main() {
       'pageIndex': 2,
       'relativeOffset': .5,
       'chapterProgress': .4,
-      'updatedAt': '2026-01-01T00:00:00.000Z'
+      'updatedAt': '2026-01-01T00:00:00.000Z',
     });
 
     expect(progress.openedChapterIds, {'chapter-4'});
     expect(progress.toJson()['openedChapterIds'], ['chapter-4']);
   });
 
-  testWidgets('demo reader opens a chapter and has no dead overflow action',
-      (tester) async {
+  testWidgets('demo reader opens a chapter and has no dead overflow action', (
+    tester,
+  ) async {
     const config = AppConfig(
-        environment: AppEnvironment.development,
-        useDemoData: true,
-        firebaseProjectId: '',
-        firebaseAppId: '',
-        firebaseApiKey: '',
-        firebaseMessagingSenderId: '',
-        backendBaseUrl: '');
-    await tester.pumpWidget(ProviderScope(
+      environment: AppEnvironment.development,
+      useDemoData: true,
+      firebaseProjectId: '',
+      firebaseAppId: '',
+      firebaseApiKey: '',
+      firebaseMessagingSenderId: '',
+      backendBaseUrl: '',
+    );
+    await tester.pumpWidget(
+      ProviderScope(
         overrides: [appConfigProvider.overrideWithValue(config)],
-        child:
-            const MaterialApp(home: ReaderScreen(mangaId: 'demo:paper-moon'))));
+        child: const MaterialApp(
+          home: ReaderScreen(mangaId: 'demo:paper-moon'),
+        ),
+      ),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 

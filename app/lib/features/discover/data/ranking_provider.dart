@@ -4,8 +4,11 @@ import '../../search/data/anilist_metadata_provider.dart';
 enum RankingPeriod { trending, topRated, popular }
 
 class RankingResult {
-  const RankingResult(
-      {required this.items, this.unavailableReason, this.isPreview = false});
+  const RankingResult({
+    required this.items,
+    this.unavailableReason,
+    this.isPreview = false,
+  });
   final List<Manga> items;
   final String? unavailableReason;
   final bool isPreview;
@@ -18,10 +21,13 @@ abstract interface class RankingProvider {
 class UnavailableRankingProvider implements RankingProvider {
   const UnavailableRankingProvider();
   @override
-  Future<RankingResult> rankings(RankingPeriod period) async => const RankingResult(
-      items: [],
-      unavailableReason:
-          'Historical ranking data is unavailable. No ranking has been invented.');
+  Future<RankingResult> rankings(
+    RankingPeriod period,
+  ) async => const RankingResult(
+    items: [],
+    unavailableReason:
+        'Historical ranking data is unavailable. No ranking has been invented.',
+  );
 }
 
 class DemoRankingProvider implements RankingProvider {

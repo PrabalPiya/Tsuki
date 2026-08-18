@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
 import '../../../core/models/manga.dart';
 import '../../../core/state/providers.dart';
 import '../../../core/theme/app_theme.dart';
@@ -43,8 +44,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             child: IconButton(
               onPressed: () => context.push('/settings'),
               icon: const Icon(Icons.settings_outlined),
-              tooltip: 'Settings'),
+              tooltip: 'Settings',
             ),
+          ),
         ],
       ),
       body: Column(
@@ -65,12 +67,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     : IconButton(
                         onPressed: () {
                           _controller.clear();
-                          ref
-                              .read(searchProvider.notifier)
-                              .updateQuery('');
+                          ref.read(searchProvider.notifier).updateQuery('');
                           setState(() {});
                         },
-                        icon: const Icon(Icons.close_rounded)),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
               ),
             ),
           ),
@@ -78,15 +79,17 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           if (state.error != null)
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Text(state.error!,
-                  style: const TextStyle(color: AppColors.muted)),
+              child: Text(
+                state.error!,
+                style: const TextStyle(color: AppColors.muted),
+              ),
             ),
           Expanded(
             child: state.query.length < 2
                 ? _SearchHint()
                 : state.submitted
-                    ? _buildResultGrid(state.results)
-                    : _buildSuggestionList(state.results),
+                ? _buildResultGrid(state.results)
+                : _buildSuggestionList(state.results),
           ),
         ],
       ),
@@ -106,8 +109,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             child: CoverArt(
               url: manga.coverUrl,
               title: manga.title,
-              borderRadius: 10),
+              borderRadius: 10,
             ),
+          ),
           title: Text(
             manga.title,
             maxLines: 1,
@@ -121,38 +125,46 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.star_rounded,
-                      size: 14, color: AppColors.accent),
+                  const Icon(
+                    Icons.star_rounded,
+                    size: 14,
+                    color: AppColors.accent,
+                  ),
                   const SizedBox(width: 3),
-                  Text(manga.ratingLabel,
-                      style: const TextStyle(fontSize: 12)),
+                  Text(manga.ratingLabel, style: const TextStyle(fontSize: 12)),
                 ],
               ),
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.bolt_rounded,
-                      size: 14, color: AppColors.accent),
+                  const Icon(
+                    Icons.bolt_rounded,
+                    size: 14,
+                    color: AppColors.accent,
+                  ),
                   const SizedBox(width: 3),
-                  Text(manga.statusLabel,
-                      style: const TextStyle(fontSize: 12)),
+                  Text(manga.statusLabel, style: const TextStyle(fontSize: 12)),
                 ],
               ),
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.library_books_rounded,
-                      size: 14, color: AppColors.accent),
+                  const Icon(
+                    Icons.library_books_rounded,
+                    size: 14,
+                    color: AppColors.accent,
+                  ),
                   const SizedBox(width: 3),
-                  Text('${manga.chapterCount} chp',
-                      style: const TextStyle(fontSize: 12)),
+                  Text(
+                    '${manga.chapterCount} chp',
+                    style: const TextStyle(fontSize: 12),
+                  ),
                 ],
               ),
             ],
           ),
           trailing: const Icon(Icons.chevron_right_rounded),
-          onTap: () =>
-              context.push('/manga/${Uri.encodeComponent(manga.id)}'),
+          onTap: () => context.push('/manga/${Uri.encodeComponent(manga.id)}'),
         ),
       );
     },
@@ -171,16 +183,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       final manga = items[index];
       return InkWell(
         borderRadius: BorderRadius.circular(18),
-        onTap: () =>
-            context.push('/manga/${Uri.encodeComponent(manga.id)}'),
+        onTap: () => context.push('/manga/${Uri.encodeComponent(manga.id)}'),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: CoverArt(
-                url: manga.coverUrl,
-                title: manga.title,
-              ),
+              child: CoverArt(url: manga.coverUrl, title: manga.title),
             ),
             const SizedBox(height: 10),
             Text(
@@ -195,35 +203,50 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.star_rounded,
-                        size: 14, color: AppColors.accent),
+                    const Icon(
+                      Icons.star_rounded,
+                      size: 14,
+                      color: AppColors.accent,
+                    ),
                     const SizedBox(width: 3),
                     Flexible(
-                      child: Text(manga.ratingLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 12)),
+                      child: Text(
+                        manga.ratingLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12),
+                      ),
                     ),
                     const SizedBox(width: 10),
-                    const Icon(Icons.bolt_rounded,
-                        size: 14, color: AppColors.accent),
+                    const Icon(
+                      Icons.bolt_rounded,
+                      size: 14,
+                      color: AppColors.accent,
+                    ),
                     const SizedBox(width: 3),
                     Flexible(
-                      child: Text(manga.statusLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 12)),
+                      child: Text(
+                        manga.statusLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12),
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    const Icon(Icons.library_books_rounded,
-                        size: 14, color: AppColors.accent),
+                    const Icon(
+                      Icons.library_books_rounded,
+                      size: 14,
+                      color: AppColors.accent,
+                    ),
                     const SizedBox(width: 3),
-                    Text('${manga.chapterCount} chp',
-                        style: const TextStyle(fontSize: 12)),
+                    Text(
+                      '${manga.chapterCount} chp',
+                      style: const TextStyle(fontSize: 12),
+                    ),
                   ],
                 ),
               ],
@@ -233,7 +256,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       );
     },
   );
-
 }
 
 class _SearchHint extends StatelessWidget {

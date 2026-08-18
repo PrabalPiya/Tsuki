@@ -1,20 +1,8 @@
 String summarizeSynopsis(String text) {
   final cleaned = text
-      .replaceAll(
-        RegExp(
-          r'<br\s*/?>',
-          caseSensitive: false,
-        ),
-        ' ',
-      )
-      .replaceAll(
-        RegExp(r'<[^>]*>'),
-        ' ',
-      )
-      .replaceAll(
-        RegExp(r'\s+'),
-        ' ',
-      )
+      .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' ')
+      .replaceAll(RegExp(r'<[^>]*>'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
 
   if (cleaned.isEmpty) {
@@ -36,15 +24,9 @@ String summarizeSynopsis(String text) {
   }
 
   final sentences = cleaned
-      .split(
-        RegExp(r'(?<=[.!?])\s+'),
-      )
-      .map(
-        (sentence) => sentence.trim(),
-      )
-      .where(
-        (sentence) => sentence.isNotEmpty,
-      )
+      .split(RegExp(r'(?<=[.!?])\s+'))
+      .map((sentence) => sentence.trim())
+      .where((sentence) => sentence.isNotEmpty)
       .toList();
 
   final selected = <String>[];
@@ -55,12 +37,9 @@ String summarizeSynopsis(String text) {
       break;
     }
 
-    final extraLength =
-        sentence.length +
-        (selected.isEmpty ? 0 : 1);
+    final extraLength = sentence.length + (selected.isEmpty ? 0 : 1);
 
-    if (characterCount + extraLength >
-        maxCharacters) {
+    if (characterCount + extraLength > maxCharacters) {
       break;
     }
 
@@ -81,12 +60,9 @@ String summarizeSynopsis(String text) {
   final buffer = StringBuffer();
 
   for (final word in words) {
-    final candidate = buffer.isEmpty
-        ? word
-        : '${buffer.toString()} $word';
+    final candidate = buffer.isEmpty ? word : '${buffer.toString()} $word';
 
-    if (candidate.length >
-        maxCharacters) {
+    if (candidate.length > maxCharacters) {
       break;
     }
 
@@ -103,19 +79,13 @@ String summarizeSynopsis(String text) {
    * Prefer ending at the last full sentence if it is
    * reasonably close to the end of the shortened text.
    */
-  final punctuation =
-      RegExp(r'[.!?]')
-          .allMatches(result)
-          .toList();
+  final punctuation = RegExp(r'[.!?]').allMatches(result).toList();
 
   if (punctuation.isNotEmpty) {
-    final last =
-        punctuation.last.end;
+    final last = punctuation.last.end;
 
     if (last >= result.length * .65) {
-      result = result
-          .substring(0, last)
-          .trim();
+      result = result.substring(0, last).trim();
     }
   }
 

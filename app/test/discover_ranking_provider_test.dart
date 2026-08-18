@@ -4,16 +4,19 @@ import 'package:tsuki/features/discover/data/ranking_provider.dart';
 import 'package:tsuki/features/search/data/anilist_metadata_provider.dart';
 
 void main() {
-  test('discover periods should use the correct AniList ranking types', () async {
-    final metadata = _FakeMetadata();
-    final provider = AniListRankingProvider(metadata);
+  test(
+    'discover periods should use the correct AniList ranking types',
+    () async {
+      final metadata = _FakeMetadata();
+      final provider = AniListRankingProvider(metadata);
 
-    await provider.rankings(RankingPeriod.trending);
-    await provider.rankings(RankingPeriod.topRated);
-    await provider.rankings(RankingPeriod.popular);
+      await provider.rankings(RankingPeriod.trending);
+      await provider.rankings(RankingPeriod.topRated);
+      await provider.rankings(RankingPeriod.popular);
 
-    expect(metadata.calls, ['trending', 'topRated', 'popular']);
-  });
+      expect(metadata.calls, ['trending', 'topRated', 'popular']);
+    },
+  );
 }
 
 class _FakeMetadata extends AniListMetadataProvider {

@@ -7,20 +7,13 @@ import '../core/theme/app_theme.dart';
 import '../features/discover/presentation/discover_screen.dart';
 
 class MainShell extends ConsumerWidget {
-  const MainShell({
-    super.key,
-    required this.navigationShell,
-  });
+  const MainShell({super.key, required this.navigationShell});
 
   final StatefulNavigationShell navigationShell;
 
   @override
-  Widget build(
-    BuildContext context,
-    WidgetRef ref,
-  ) {
-    final currentIndex =
-        navigationShell.currentIndex;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final currentIndex = navigationShell.currentIndex;
 
     return Scaffold(
       body: navigationShell,
@@ -32,15 +25,11 @@ class MainShell extends ConsumerWidget {
           height: 58,
 
           decoration: BoxDecoration(
-            color: AppColors.background.withValues(
-              alpha: 0.98,
-            ),
+            color: AppColors.background.withValues(alpha: 0.98),
 
             border: Border(
               top: BorderSide(
-                color: AppColors.outline.withValues(
-                  alpha: 0.26,
-                ),
+                color: AppColors.outline.withValues(alpha: 0.26),
                 width: 0.5,
               ),
             ),
@@ -52,64 +41,42 @@ class MainShell extends ConsumerWidget {
                 child: _NavItem(
                   icon: Icons.home_outlined,
                   selectedIcon: Icons.home_rounded,
-                  selected:
-                      currentIndex == 0,
+                  selected: currentIndex == 0,
                   onTap: () {
-                    _selectDestination(
-                      ref,
-                      0,
-                    );
+                    _selectDestination(ref, 0);
                   },
                 ),
               ),
 
               Expanded(
                 child: _NavItem(
-                  icon:
-                      Icons.auto_awesome_outlined,
-                  selectedIcon:
-                      Icons.auto_awesome_rounded,
-                  selected:
-                      currentIndex == 1,
+                  icon: Icons.auto_awesome_outlined,
+                  selectedIcon: Icons.auto_awesome_rounded,
+                  selected: currentIndex == 1,
                   onTap: () {
-                    _selectDestination(
-                      ref,
-                      1,
-                    );
+                    _selectDestination(ref, 1);
                   },
                 ),
               ),
 
               Expanded(
                 child: _NavItem(
-                  icon:
-                      Icons.search_rounded,
-                  selectedIcon:
-                      Icons.search_rounded,
-                  selected:
-                      currentIndex == 2,
+                  icon: Icons.search_rounded,
+                  selectedIcon: Icons.search_rounded,
+                  selected: currentIndex == 2,
                   onTap: () {
-                    _selectDestination(
-                      ref,
-                      2,
-                    );
+                    _selectDestination(ref, 2);
                   },
                 ),
               ),
 
               Expanded(
                 child: _NavItem(
-                  icon:
-                      Icons.bookmark_border_rounded,
-                  selectedIcon:
-                      Icons.bookmark_rounded,
-                  selected:
-                      currentIndex == 3,
+                  icon: Icons.bookmark_border_rounded,
+                  selectedIcon: Icons.bookmark_rounded,
+                  selected: currentIndex == 3,
                   onTap: () {
-                    _selectDestination(
-                      ref,
-                      3,
-                    );
+                    _selectDestination(ref, 3);
                   },
                 ),
               ),
@@ -120,32 +87,19 @@ class MainShell extends ConsumerWidget {
     );
   }
 
-  void _selectDestination(
-    WidgetRef ref,
-    int index,
-  ) {
-    final currentIndex =
-        navigationShell.currentIndex;
+  void _selectDestination(WidgetRef ref, int index) {
+    final currentIndex = navigationShell.currentIndex;
 
     const discoverIndex = 1;
 
     final enteringDiscover =
-        index == discoverIndex &&
-        currentIndex != discoverIndex;
+        index == discoverIndex && currentIndex != discoverIndex;
 
     if (enteringDiscover) {
-      ref
-          .read(
-            discoverResetProvider.notifier,
-          )
-          .state++;
+      ref.read(discoverResetProvider.notifier).state++;
     }
 
-    navigationShell.goBranch(
-      index,
-      initialLocation:
-          index == currentIndex,
-    );
+    navigationShell.goBranch(index, initialLocation: index == currentIndex);
   }
 }
 
@@ -165,87 +119,55 @@ class _NavItem extends StatefulWidget {
   final VoidCallback onTap;
 
   @override
-  State<_NavItem> createState() =>
-      _NavItemState();
+  State<_NavItem> createState() => _NavItemState();
 }
 
 class _NavItemState extends State<_NavItem>
     with SingleTickerProviderStateMixin {
-  late final AnimationController
-      _controller;
+  late final AnimationController _controller;
 
-  late final Animation<double>
-      _scaleAnimation;
+  late final Animation<double> _scaleAnimation;
 
   @override
   void initState() {
     super.initState();
 
-    _controller =
-        AnimationController(
+    _controller = AnimationController(
       vsync: this,
-      duration:
-          const Duration(
-        milliseconds: 180,
+      duration: const Duration(milliseconds: 180),
+    );
+
+    _scaleAnimation = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween<double>(
+          begin: 1.0,
+          end: 1.08,
+        ).chain(CurveTween(curve: Curves.easeOutCubic)),
+        weight: 45,
       ),
-    );
 
-    _scaleAnimation =
-        TweenSequence<double>(
-      [
-        TweenSequenceItem(
-          tween:
-              Tween<double>(
-            begin: 1.0,
-            end: 1.08,
-          ).chain(
-            CurveTween(
-              curve:
-                  Curves.easeOutCubic,
-            ),
-          ),
-          weight: 45,
-        ),
-
-        TweenSequenceItem(
-          tween:
-              Tween<double>(
-            begin: 1.08,
-            end: 1.0,
-          ).chain(
-            CurveTween(
-              curve:
-                  Curves.easeOutCubic,
-            ),
-          ),
-          weight: 55,
-        ),
-      ],
-    ).animate(
-      _controller,
-    );
+      TweenSequenceItem(
+        tween: Tween<double>(
+          begin: 1.08,
+          end: 1.0,
+        ).chain(CurveTween(curve: Curves.easeOutCubic)),
+        weight: 55,
+      ),
+    ]).animate(_controller);
   }
 
   @override
-  void didUpdateWidget(
-    covariant _NavItem oldWidget,
-  ) {
-    super.didUpdateWidget(
-      oldWidget,
-    );
+  void didUpdateWidget(covariant _NavItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
 
-    if (!oldWidget.selected &&
-        widget.selected) {
-      _controller.forward(
-        from: 0.0,
-      );
+    if (!oldWidget.selected && widget.selected) {
+      _controller.forward(from: 0.0);
     }
   }
 
   void _handleTap() {
     if (!widget.selected) {
-      HapticFeedback
-          .selectionClick();
+      HapticFeedback.selectionClick();
     }
 
     widget.onTap();
@@ -259,47 +181,29 @@ class _NavItemState extends State<_NavItem>
   }
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return GestureDetector(
-      behavior:
-          HitTestBehavior.opaque,
+      behavior: HitTestBehavior.opaque,
 
-      onTap:
-          _handleTap,
+      onTap: _handleTap,
 
       child: Center(
         child: ScaleTransition(
-          scale:
-              _scaleAnimation,
+          scale: _scaleAnimation,
 
           child: AnimatedContainer(
-            duration:
-                const Duration(
-              milliseconds: 160,
-            ),
+            duration: const Duration(milliseconds: 160),
 
-            curve:
-                Curves.easeOutCubic,
+            curve: Curves.easeOutCubic,
 
             child: Icon(
-              widget.selected
-                  ? widget.selectedIcon
-                  : widget.icon,
+              widget.selected ? widget.selectedIcon : widget.icon,
 
-              size:
-                  widget.selected
-                      ? 27
-                      : 24,
+              size: widget.selected ? 27 : 24,
 
-              color:
-                  widget.selected
-                      ? AppColors.accent
-                      : AppColors.muted
-                          .withValues(
-                          alpha: 0.78,
-                        ),
+              color: widget.selected
+                  ? AppColors.accent
+                  : AppColors.muted.withValues(alpha: 0.78),
             ),
           ),
         ),

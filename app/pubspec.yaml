@@ -22,6 +22,7 @@ dependencies:
   google_sign_in: ^6.3.0
   shared_preferences: ^2.5.3
   google_fonts: ^8.2.1
+  html: ^0.15.6
 
 dev_dependencies:
   flutter_test:

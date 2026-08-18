@@ -13,13 +13,14 @@ void main() {
 
   test('production config cannot enable demo data', () {
     const config = AppConfig(
-        environment: AppEnvironment.production,
-        useDemoData: false,
-        firebaseProjectId: '',
-        firebaseAppId: '',
-        firebaseApiKey: '',
-        firebaseMessagingSenderId: '',
-        backendBaseUrl: '');
+      environment: AppEnvironment.production,
+      useDemoData: false,
+      firebaseProjectId: '',
+      firebaseAppId: '',
+      firebaseApiKey: '',
+      firebaseMessagingSenderId: '',
+      backendBaseUrl: '',
+    );
     expect(config.useDemoData, isFalse);
     expect(config.isFirebaseConfigured, isFalse);
   });

@@ -14,25 +14,18 @@ import '../../../shared/synopsis_summary.dart';
 import '../../../shared/widgets/one_time_hint.dart';
 import '../data/ranking_provider.dart';
 
-final discoverResetProvider =
-    StateProvider<int>((ref) => 0);
+final discoverResetProvider = StateProvider<int>((ref) => 0);
 
 class DiscoverScreen extends ConsumerStatefulWidget {
   const DiscoverScreen({super.key});
 
   @override
-  ConsumerState<DiscoverScreen> createState() =>
-      _DiscoverScreenState();
+  ConsumerState<DiscoverScreen> createState() => _DiscoverScreenState();
 }
 
-class _DiscoverScreenState
-    extends ConsumerState<DiscoverScreen>
+class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
     with TickerProviderStateMixin {
-  final _positions = <int, int>{
-    0: 0,
-    1: 0,
-    2: 0,
-  };
+  final _positions = <int, int>{0: 0, 1: 0, 2: 0};
 
   static const _swipeDistanceThreshold = .14;
   static const _swipeVelocityThreshold = 700.0;
@@ -57,14 +50,11 @@ class _DiscoverScreenState
 
   late final AnimationController _swipeController;
 
-  _SwipeAnimation _swipeAnimation =
-      _SwipeAnimation.none;
+  _SwipeAnimation _swipeAnimation = _SwipeAnimation.none;
 
-  Offset _animationStartOffset =
-      Offset.zero;
+  Offset _animationStartOffset = Offset.zero;
 
-  Offset _animationEndOffset =
-      Offset.zero;
+  Offset _animationEndOffset = Offset.zero;
 
   double _animationStartRotation = 0.0;
   double _animationEndRotation = 0.0;
@@ -75,21 +65,16 @@ class _DiscoverScreenState
   void initState() {
     super.initState();
 
-    _swipeController =
-        AnimationController(
-      vsync: this,
-    )..addListener(
-            () {
-          if (!mounted) return;
+    _swipeController = AnimationController(vsync: this)
+      ..addListener(() {
+        if (!mounted) return;
 
-          setState(() {
-            _animationProgress =
-                Curves.easeOutCubic.transform(
-              _swipeController.value,
-            );
-          });
-        },
-      );
+        setState(() {
+          _animationProgress = Curves.easeOutCubic.transform(
+            _swipeController.value,
+          );
+        });
+      });
   }
 
   void _resetDiscover() {
@@ -109,14 +94,11 @@ class _DiscoverScreenState
       _dragging = false;
       _animating = false;
 
-      _swipeAnimation =
-          _SwipeAnimation.none;
+      _swipeAnimation = _SwipeAnimation.none;
 
-      _animationStartOffset =
-          Offset.zero;
+      _animationStartOffset = Offset.zero;
 
-      _animationEndOffset =
-          Offset.zero;
+      _animationEndOffset = Offset.zero;
 
       _animationStartRotation = 0.0;
       _animationEndRotation = 0.0;
@@ -133,73 +115,37 @@ class _DiscoverScreenState
   }
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    ref.listen<int>(
-      discoverResetProvider,
-      (
-        previous,
-        next,
-      ) {
-        if (previous != null &&
-            previous != next) {
-          _resetDiscover();
-        }
-      },
-    );
+  Widget build(BuildContext context) {
+    ref.listen<int>(discoverResetProvider, (previous, next) {
+      if (previous != null && previous != next) {
+        _resetDiscover();
+      }
+    });
 
-    final ranking =
-        ref.watch(
-      rankingsProvider(
-        RankingPeriod.values[
-            _period],
-      ),
-    );
+    final ranking = ref.watch(rankingsProvider(RankingPeriod.values[_period]));
 
-    final items =
-        ranking.valueOrNull?.items ??
-        const <Manga>[];
+    final items = ranking.valueOrNull?.items ?? const <Manga>[];
 
-    final preview =
-        ranking.valueOrNull
-                ?.isPreview ??
-            false;
+    final preview = ranking.valueOrNull?.isPreview ?? false;
 
-    final index =
-        items.isEmpty
-            ? 0
-            : (_positions[
-                        _period] ??
-                    0)
-                .clamp(
-                  0,
-                  items.length - 1,
-                );
+    final index = items.isEmpty
+        ? 0
+        : (_positions[_period] ?? 0).clamp(0, items.length - 1);
 
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 16,
 
-        title: const Text(
-          'Discover',
-        ),
+        title: const Text('Discover'),
 
         actions: [
           Padding(
-            padding:
-                const EdgeInsets.only(
-              right: 16,
-            ),
+            padding: const EdgeInsets.only(right: 16),
             child: IconButton(
               onPressed: () {
-                context.push(
-                  '/settings',
-                );
+                context.push('/settings');
               },
-              icon: const Icon(
-                Icons.settings_outlined,
-              ),
+              icon: const Icon(Icons.settings_outlined),
               tooltip: 'Settings',
             ),
           ),
@@ -209,21 +155,11 @@ class _DiscoverScreenState
       body: Column(
         children: [
           Padding(
-            padding:
-                const EdgeInsets.fromLTRB(
-              12,
-              8,
-              12,
-              10,
-            ),
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
             child: _DiscoverPeriodTabs(
-              selectedIndex:
-                  _period,
-              onChanged:
-                  (value) {
-                if (value ==
-                        _period ||
-                    _animating) {
+              selectedIndex: _period,
+              onChanged: (value) {
+                if (value == _period || _animating) {
                   return;
                 }
 
@@ -233,19 +169,12 @@ class _DiscoverScreenState
                   _dragY = 0;
                   _dragging = false;
 
-                  _swipeAnimation =
-                      _SwipeAnimation.none;
+                  _swipeAnimation = _SwipeAnimation.none;
 
-                  _animationProgress =
-                      0.0;
+                  _animationProgress = 0.0;
                 });
 
-                ref.invalidate(
-                  rankingsProvider(
-                    RankingPeriod.values[
-                        value],
-                  ),
-                );
+                ref.invalidate(rankingsProvider(RankingPeriod.values[value]));
 
                 /*
                  * Do NOT show the hint again here.
@@ -259,72 +188,39 @@ class _DiscoverScreenState
 
           if (preview)
             const Padding(
-              padding:
-                  EdgeInsets.only(
-                bottom: 8,
-              ),
+              padding: EdgeInsets.only(bottom: 8),
               child: Text(
                 'Preview · live rankings unavailable',
-                style:
-                    TextStyle(
-                  color:
-                      AppColors.muted,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: AppColors.muted, fontSize: 12),
               ),
             ),
 
           Expanded(
-            child:
-                ranking.isLoading
-                    ? const Center(
-                        child:
-                            CircularProgressIndicator(),
-                      )
-                    : items.isEmpty
-                        ? Center(
-                            child: Padding(
-                              padding:
-                                  const EdgeInsets.all(
-                                32,
-                              ),
-                              child: Text(
-                                ranking
-                                        .valueOrNull
-                                        ?.unavailableReason ??
-                                    'Rankings unavailable.',
-                                textAlign:
-                                    TextAlign.center,
-                                style:
-                                    const TextStyle(
-                                  color:
-                                      AppColors.muted,
-                                ),
-                              ),
-                            ),
-                          )
-                        : LayoutBuilder(
-                            builder:
-                                (
-                              context,
-                              constraints,
-                            ) {
-                              return _buildCardStack(
-                                items:
-                                    items,
-                                index:
-                                    index,
-                                preview:
-                                    preview,
-                                width:
-                                    constraints
-                                        .maxWidth,
-                                height:
-                                    constraints
-                                        .maxHeight,
-                              );
-                            },
-                          ),
+            child: ranking.isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : items.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Text(
+                        ranking.valueOrNull?.unavailableReason ??
+                            'Rankings unavailable.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: AppColors.muted),
+                      ),
+                    ),
+                  )
+                : LayoutBuilder(
+                    builder: (context, constraints) {
+                      return _buildCardStack(
+                        items: items,
+                        index: index,
+                        preview: preview,
+                        width: constraints.maxWidth,
+                        height: constraints.maxHeight,
+                      );
+                    },
+                  ),
           ),
         ],
       ),
@@ -338,65 +234,31 @@ class _DiscoverScreenState
     required double width,
     required double height,
   }) {
-    final next =
-        index + 1 <
-                items.length
-            ? items[
-                index + 1]
-            : null;
+    final next = index + 1 < items.length ? items[index + 1] : null;
 
-    final previous =
-        index > 0
-            ? items[
-                index - 1]
-            : null;
+    final previous = index > 0 ? items[index - 1] : null;
 
-    final upwardDragProgress =
-        _dragY < 0
-            ? (-_dragY /
-                    (height * .42))
-                .clamp(
-                  0.0,
-                  1.0,
-                )
-                .toDouble()
-            : 0.0;
+    final upwardDragProgress = _dragY < 0
+        ? (-_dragY / (height * .42)).clamp(0.0, 1.0).toDouble()
+        : 0.0;
 
-    final downwardDragProgress =
-        _dragY > 0
-            ? (_dragY /
-                    (height * .42))
-                .clamp(
-                  0.0,
-                  1.0,
-                )
-                .toDouble()
-            : 0.0;
+    final downwardDragProgress = _dragY > 0
+        ? (_dragY / (height * .42)).clamp(0.0, 1.0).toDouble()
+        : 0.0;
 
-    Offset currentOffset =
-        Offset.zero;
+    Offset currentOffset = Offset.zero;
 
-    double currentRotation =
-        0.0;
+    double currentRotation = 0.0;
 
-    if (_dragging &&
-        _dragY < 0) {
+    if (_dragging && _dragY < 0) {
       currentOffset = Offset(
-        _dragPreviewHorizontal *
-            upwardDragProgress,
-        -_dragPreviewVertical *
-            upwardDragProgress,
+        _dragPreviewHorizontal * upwardDragProgress,
+        -_dragPreviewVertical * upwardDragProgress,
       );
 
-      currentRotation =
-          _dragPreviewRotation *
-              upwardDragProgress;
-    } else if (_swipeAnimation ==
-            _SwipeAnimation
-                .throwNext ||
-        _swipeAnimation ==
-            _SwipeAnimation
-                .snapCurrent) {
+      currentRotation = _dragPreviewRotation * upwardDragProgress;
+    } else if (_swipeAnimation == _SwipeAnimation.throwNext ||
+        _swipeAnimation == _SwipeAnimation.snapCurrent) {
       currentOffset =
           Offset.lerp(
             _animationStartOffset,
@@ -405,19 +267,16 @@ class _DiscoverScreenState
           ) ??
           Offset.zero;
 
-      currentRotation =
-          _lerpDouble(
+      currentRotation = _lerpDouble(
         _animationStartRotation,
         _animationEndRotation,
         _animationProgress,
       );
     }
 
-    var nextProgress =
-        upwardDragProgress;
+    var nextProgress = upwardDragProgress;
 
-        if (_swipeAnimation ==
-        _SwipeAnimation.throwNext) {
+    if (_swipeAnimation == _SwipeAnimation.throwNext) {
       /*
       * Continue the next card from exactly where
       * the user's drag left it.
@@ -425,69 +284,36 @@ class _DiscoverScreenState
       * _dragY is intentionally still preserved
       * until the throw animation finishes.
       */
-      final startProgress =
-          (-_dragY / (height * .42))
-              .clamp(
-                0.0,
-                1.0,
-              )
-              .toDouble();
+      final startProgress = (-_dragY / (height * .42))
+          .clamp(0.0, 1.0)
+          .toDouble();
 
-      nextProgress = _lerpDouble(
-        startProgress,
-        1.0,
-        _animationProgress,
-      );
+      nextProgress = _lerpDouble(startProgress, 1.0, _animationProgress);
     }
 
-    final throwOffset =
-        Offset(
-      width *
-          _throwHorizontalFactor,
-      -height *
-          _throwVerticalFactor,
+    final throwOffset = Offset(
+      width * _throwHorizontalFactor,
+      -height * _throwVerticalFactor,
     );
 
-    Offset previousOffset =
-        throwOffset;
+    Offset previousOffset = throwOffset;
 
-    double previousRotation =
-        _throwRotation;
+    double previousRotation = _throwRotation;
 
-    bool showPrevious =
-        false;
+    bool showPrevious = false;
 
     if (previous != null) {
-      if (_dragging &&
-          _dragY > 0) {
+      if (_dragging && _dragY > 0) {
         showPrevious = true;
 
-        final reveal =
-            Curves.easeOutCubic
-                .transform(
-          downwardDragProgress,
-        );
+        final reveal = Curves.easeOutCubic.transform(downwardDragProgress);
 
         previousOffset =
-            Offset.lerp(
-              throwOffset,
-              Offset.zero,
-              reveal,
-            ) ??
-            throwOffset;
+            Offset.lerp(throwOffset, Offset.zero, reveal) ?? throwOffset;
 
-        previousRotation =
-            _lerpDouble(
-          _throwRotation,
-          0.0,
-          reveal,
-        );
-      } else if (_swipeAnimation ==
-              _SwipeAnimation
-                  .restorePrevious ||
-          _swipeAnimation ==
-              _SwipeAnimation
-                  .dismissPrevious) {
+        previousRotation = _lerpDouble(_throwRotation, 0.0, reveal);
+      } else if (_swipeAnimation == _SwipeAnimation.restorePrevious ||
+          _swipeAnimation == _SwipeAnimation.dismissPrevious) {
         showPrevious = true;
 
         previousOffset =
@@ -498,8 +324,7 @@ class _DiscoverScreenState
             ) ??
             throwOffset;
 
-        previousRotation =
-            _lerpDouble(
+        previousRotation = _lerpDouble(
           _animationStartRotation,
           _animationEndRotation,
           _animationProgress,
@@ -508,36 +333,22 @@ class _DiscoverScreenState
     }
 
     return GestureDetector(
-      behavior:
-          HitTestBehavior.translucent,
+      behavior: HitTestBehavior.translucent,
 
-      onVerticalDragStart:
-          _handleDragStart,
+      onVerticalDragStart: _handleDragStart,
 
-      onVerticalDragUpdate:
-          (details) {
-        _handleDragUpdate(
-          details,
-          index,
-        );
+      onVerticalDragUpdate: (details) {
+        _handleDragUpdate(details, index);
       },
 
-      onVerticalDragEnd:
-          (details) {
-        _handleDragEnd(
-          details,
-          width,
-          height,
-          items.length,
-        );
+      onVerticalDragEnd: (details) {
+        _handleDragEnd(details, width, height, items.length);
       },
 
       child: Stack(
-        clipBehavior:
-            Clip.none,
+        clipBehavior: Clip.none,
 
-        alignment:
-            Alignment.topCenter,
+        alignment: Alignment.topCenter,
 
         children: [
           /*
@@ -545,17 +356,9 @@ class _DiscoverScreenState
            */
           if (next != null)
             Transform.translate(
-              offset: Offset(
-                0,
-                _nextCardYOffset *
-                    (1.0 - nextProgress),
-              ),
+              offset: Offset(0, _nextCardYOffset * (1.0 - nextProgress)),
               child: Transform.scale(
-                scale: _lerpDouble(
-                  _nextCardScale,
-                  1.0,
-                  nextProgress,
-                ),
+                scale: _lerpDouble(_nextCardScale, 1.0, nextProgress),
                 alignment: Alignment.center,
                 child: SizedBox(
                   height: height,
@@ -573,25 +376,16 @@ class _DiscoverScreenState
            * CURRENT CARD
            */
           Transform.translate(
-            offset:
-                currentOffset,
-            child:
-                Transform.rotate(
-              angle:
-                  currentRotation,
+            offset: currentOffset,
+            child: Transform.rotate(
+              angle: currentRotation,
               child: SizedBox(
-                height:
-                    height,
-                child:
-                    _DiscoverCard(
-                  manga:
-                      items[index],
-                  rank:
-                      index + 1,
-                  period:
-                      _period,
-                  preview:
-                      preview,
+                height: height,
+                child: _DiscoverCard(
+                  manga: items[index],
+                  rank: index + 1,
+                  period: _period,
+                  preview: preview,
                 ),
               ),
             ),
@@ -600,30 +394,19 @@ class _DiscoverScreenState
           /*
            * PREVIOUS CARD
            */
-          if (showPrevious &&
-              previous != null)
+          if (showPrevious && previous != null)
             Transform.translate(
-              offset:
-                  previousOffset,
-              child:
-                  Transform.rotate(
-                angle:
-                    previousRotation,
+              offset: previousOffset,
+              child: Transform.rotate(
+                angle: previousRotation,
                 child: SizedBox(
-                  height:
-                      height,
-                  child:
-                      _DiscoverCard(
-                    manga:
-                        previous,
-                    rank:
-                        index,
-                    period:
-                        _period,
-                    inert:
-                        true,
-                    preview:
-                        preview,
+                  height: height,
+                  child: _DiscoverCard(
+                    manga: previous,
+                    rank: index,
+                    period: _period,
+                    inert: true,
+                    preview: preview,
                   ),
                 ),
               ),
@@ -641,13 +424,9 @@ class _DiscoverScreenState
           const Positioned(
             bottom: 56,
             child: OneTimeHint(
-              id:
-                  'discover_swipe',
-              icon:
-                  Icons
-                      .swipe_vertical_rounded,
-              text:
-                  'Swipe up for next · down for previous',
+              id: 'discover_swipe',
+              icon: Icons.swipe_vertical_rounded,
+              text: 'Swipe up for next · down for previous',
             ),
           ),
         ],
@@ -655,9 +434,7 @@ class _DiscoverScreenState
     );
   }
 
-  void _handleDragStart(
-    DragStartDetails details,
-  ) {
+  void _handleDragStart(DragStartDetails details) {
     if (_animating) {
       return;
     }
@@ -669,44 +446,29 @@ class _DiscoverScreenState
      * its own animation state.
      */
     setState(() {
-      _dragging =
-          true;
+      _dragging = true;
 
-      _dragY =
-          0.0;
+      _dragY = 0.0;
 
-      _swipeAnimation =
-          _SwipeAnimation.none;
+      _swipeAnimation = _SwipeAnimation.none;
 
-      _animationProgress =
-          0.0;
+      _animationProgress = 0.0;
     });
   }
 
-  void _handleDragUpdate(
-    DragUpdateDetails details,
-    int index,
-  ) {
-    if (_animating ||
-        !_dragging) {
+  void _handleDragUpdate(DragUpdateDetails details, int index) {
+    if (_animating || !_dragging) {
       return;
     }
 
-    var nextDragY =
-        _dragY +
-            details.delta.dy;
+    var nextDragY = _dragY + details.delta.dy;
 
-    if (nextDragY > 0 &&
-        index == 0) {
-      nextDragY =
-          _edgeResistance(
-        nextDragY,
-      );
+    if (nextDragY > 0 && index == 0) {
+      nextDragY = _edgeResistance(nextDragY);
     }
 
     setState(() {
-      _dragY =
-          nextDragY;
+      _dragY = nextDragY;
     });
   }
 
@@ -716,48 +478,30 @@ class _DiscoverScreenState
     double height,
     int length,
   ) async {
-    if (_animating ||
-        !_dragging) {
+    if (_animating || !_dragging) {
       return;
     }
 
-    final velocity =
-        details.primaryVelocity ??
-            0.0;
+    final velocity = details.primaryVelocity ?? 0.0;
 
-    final index =
-        _positions[_period] ??
-            0;
+    final index = _positions[_period] ?? 0;
 
-    final distanceThreshold =
-        height *
-            _swipeDistanceThreshold;
+    final distanceThreshold = height * _swipeDistanceThreshold;
 
     final goNext =
-        index <
-                length - 1 &&
-            (_dragY <=
-                    -distanceThreshold ||
-                velocity <=
-                    -_swipeVelocityThreshold);
+        index < length - 1 &&
+        (_dragY <= -distanceThreshold || velocity <= -_swipeVelocityThreshold);
 
     final goPrevious =
         index > 0 &&
-            (_dragY >=
-                    distanceThreshold ||
-                velocity >=
-                    _swipeVelocityThreshold);
+        (_dragY >= distanceThreshold || velocity >= _swipeVelocityThreshold);
 
     if (goNext) {
       await _commitNext(
-        index:
-            index,
-        width:
-            width,
-        height:
-            height,
-        velocity:
-            velocity.abs(),
+        index: index,
+        width: width,
+        height: height,
+        velocity: velocity.abs(),
       );
 
       return;
@@ -765,28 +509,20 @@ class _DiscoverScreenState
 
     if (goPrevious) {
       await _commitPrevious(
-        index:
-            index,
-        width:
-            width,
-        height:
-            height,
-        velocity:
-            velocity.abs(),
+        index: index,
+        width: width,
+        height: height,
+        velocity: velocity.abs(),
       );
 
       return;
     }
 
     await _cancelDrag(
-      index:
-          index,
-      width:
-          width,
-      height:
-          height,
-      velocity:
-          velocity.abs(),
+      index: index,
+      width: width,
+      height: height,
+      velocity: velocity.abs(),
     );
   }
 
@@ -796,98 +532,59 @@ class _DiscoverScreenState
     required double height,
     required double velocity,
   }) async {
-    final dragProgress =
-        (-_dragY /
-                (height * .42))
-            .clamp(
-              0.0,
-              1.0,
-            )
-            .toDouble();
+    final dragProgress = (-_dragY / (height * .42)).clamp(0.0, 1.0).toDouble();
 
-    final startOffset =
-        Offset(
-      _dragPreviewHorizontal *
-          dragProgress,
-      -_dragPreviewVertical *
-          dragProgress,
+    final startOffset = Offset(
+      _dragPreviewHorizontal * dragProgress,
+      -_dragPreviewVertical * dragProgress,
     );
 
-    final startRotation =
-        _dragPreviewRotation *
-            dragProgress;
+    final startRotation = _dragPreviewRotation * dragProgress;
 
-    final endOffset =
-        Offset(
-      width *
-          _throwHorizontalFactor,
-      -height *
-          _throwVerticalFactor,
+    final endOffset = Offset(
+      width * _throwHorizontalFactor,
+      -height * _throwVerticalFactor,
     );
 
-    final duration =
-        _momentumDuration(
-      start:
-          startOffset,
-      end:
-          endOffset,
-      velocity:
-          velocity,
-      fallbackMs:
-          300,
-      minMs:
-          90,
-      maxMs:
-          420,
+    final duration = _momentumDuration(
+      start: startOffset,
+      end: endOffset,
+      velocity: velocity,
+      fallbackMs: 300,
+      minMs: 90,
+      maxMs: 420,
     );
 
     _prepareAnimation(
-      type:
-          _SwipeAnimation
-              .throwNext,
-      startOffset:
-          startOffset,
-      endOffset:
-          endOffset,
-      startRotation:
-          startRotation,
-      endRotation:
-          _throwRotation,
-      duration:
-          duration,
+      type: _SwipeAnimation.throwNext,
+      startOffset: startOffset,
+      endOffset: endOffset,
+      startRotation: startRotation,
+      endRotation: _throwRotation,
+      duration: duration,
     );
 
-    await _swipeController
-        .forward(
-      from: 0.0,
-    );
+    await _swipeController.forward(from: 0.0);
 
     if (!mounted) {
       return;
     }
 
     setState(() {
-      _positions[_period] =
-          index + 1;
+      _positions[_period] = index + 1;
 
-      _dragY =
-          0.0;
+      _dragY = 0.0;
 
-      _dragging =
-          false;
+      _dragging = false;
 
-      _animating =
-          false;
+      _animating = false;
 
-      _swipeAnimation =
-          _SwipeAnimation.none;
+      _swipeAnimation = _SwipeAnimation.none;
 
-      _animationProgress =
-          0.0;
+      _animationProgress = 0.0;
     });
 
-    HapticFeedback
-        .selectionClick();
+    HapticFeedback.selectionClick();
   }
 
   Future<void> _commitPrevious({
@@ -896,107 +593,59 @@ class _DiscoverScreenState
     required double height,
     required double velocity,
   }) async {
-    final throwOffset =
-        Offset(
-      width *
-          _throwHorizontalFactor,
-      -height *
-          _throwVerticalFactor,
+    final throwOffset = Offset(
+      width * _throwHorizontalFactor,
+      -height * _throwVerticalFactor,
     );
 
-    final dragProgress =
-        (_dragY /
-                (height * .42))
-            .clamp(
-              0.0,
-              1.0,
-            )
-            .toDouble();
+    final dragProgress = (_dragY / (height * .42)).clamp(0.0, 1.0).toDouble();
 
-    final reveal =
-        Curves.easeOutCubic
-            .transform(
-      dragProgress,
-    );
+    final reveal = Curves.easeOutCubic.transform(dragProgress);
 
     final startOffset =
-        Offset.lerp(
-          throwOffset,
-          Offset.zero,
-          reveal,
-        ) ??
-        throwOffset;
+        Offset.lerp(throwOffset, Offset.zero, reveal) ?? throwOffset;
 
-    final startRotation =
-        _lerpDouble(
-      _throwRotation,
-      0.0,
-      reveal,
-    );
+    final startRotation = _lerpDouble(_throwRotation, 0.0, reveal);
 
-    final duration =
-        _momentumDuration(
-      start:
-          startOffset,
-      end:
-          Offset.zero,
-      velocity:
-          velocity,
-      fallbackMs:
-          300,
-      minMs:
-          90,
-      maxMs:
-          420,
+    final duration = _momentumDuration(
+      start: startOffset,
+      end: Offset.zero,
+      velocity: velocity,
+      fallbackMs: 300,
+      minMs: 90,
+      maxMs: 420,
     );
 
     _prepareAnimation(
-      type:
-          _SwipeAnimation
-              .restorePrevious,
-      startOffset:
-          startOffset,
-      endOffset:
-          Offset.zero,
-      startRotation:
-          startRotation,
-      endRotation:
-          0.0,
-      duration:
-          duration,
+      type: _SwipeAnimation.restorePrevious,
+      startOffset: startOffset,
+      endOffset: Offset.zero,
+      startRotation: startRotation,
+      endRotation: 0.0,
+      duration: duration,
     );
 
-    await _swipeController
-        .forward(
-      from: 0.0,
-    );
+    await _swipeController.forward(from: 0.0);
 
     if (!mounted) {
       return;
     }
 
     setState(() {
-      _positions[_period] =
-          index - 1;
+      _positions[_period] = index - 1;
 
-      _dragY =
-          0.0;
+      _dragY = 0.0;
 
-      _dragging =
-          false;
+      _dragging = false;
 
-      _animating =
-          false;
+      _animating = false;
 
-      _swipeAnimation =
-          _SwipeAnimation.none;
+      _swipeAnimation = _SwipeAnimation.none;
 
-      _animationProgress =
-          0.0;
+      _animationProgress = 0.0;
     });
 
-    HapticFeedback
-        .selectionClick();
+    HapticFeedback.selectionClick();
   }
 
   Future<void> _cancelDrag({
@@ -1005,124 +654,60 @@ class _DiscoverScreenState
     required double height,
     required double velocity,
   }) async {
-    if (_dragY > 0 &&
-        index > 0) {
-      final throwOffset =
-          Offset(
-        width *
-            _throwHorizontalFactor,
-        -height *
-            _throwVerticalFactor,
+    if (_dragY > 0 && index > 0) {
+      final throwOffset = Offset(
+        width * _throwHorizontalFactor,
+        -height * _throwVerticalFactor,
       );
 
-      final dragProgress =
-          (_dragY /
-                  (height * .42))
-              .clamp(
-                0.0,
-                1.0,
-              )
-              .toDouble();
+      final dragProgress = (_dragY / (height * .42)).clamp(0.0, 1.0).toDouble();
 
-      final reveal =
-          Curves.easeOutCubic
-              .transform(
-        dragProgress,
-      );
+      final reveal = Curves.easeOutCubic.transform(dragProgress);
 
       final startOffset =
-          Offset.lerp(
-            throwOffset,
-            Offset.zero,
-            reveal,
-          ) ??
-          throwOffset;
+          Offset.lerp(throwOffset, Offset.zero, reveal) ?? throwOffset;
 
-      final startRotation =
-          _lerpDouble(
-        _throwRotation,
-        0.0,
-        reveal,
-      );
+      final startRotation = _lerpDouble(_throwRotation, 0.0, reveal);
 
       _prepareAnimation(
-        type:
-            _SwipeAnimation
-                .dismissPrevious,
-        startOffset:
-            startOffset,
-        endOffset:
-            throwOffset,
-        startRotation:
-            startRotation,
-        endRotation:
-            _throwRotation,
-        duration:
-            _momentumDuration(
-          start:
-              startOffset,
-          end:
-              throwOffset,
-          velocity:
-              velocity,
-          fallbackMs:
-              300,
-          minMs:
-              90,
-          maxMs:
-              420,
+        type: _SwipeAnimation.dismissPrevious,
+        startOffset: startOffset,
+        endOffset: throwOffset,
+        startRotation: startRotation,
+        endRotation: _throwRotation,
+        duration: _momentumDuration(
+          start: startOffset,
+          end: throwOffset,
+          velocity: velocity,
+          fallbackMs: 300,
+          minMs: 90,
+          maxMs: 420,
         ),
       );
 
-      await _swipeController
-          .forward(
-        from: 0.0,
-      );
+      await _swipeController.forward(from: 0.0);
     } else if (_dragY < 0) {
-      final dragProgress =
-          (-_dragY /
-                  (height * .42))
-              .clamp(
-                0.0,
-                1.0,
-              )
-              .toDouble();
+      final dragProgress = (-_dragY / (height * .42))
+          .clamp(0.0, 1.0)
+          .toDouble();
 
-      final startOffset =
-          Offset(
-        _dragPreviewHorizontal *
-            dragProgress,
-        -_dragPreviewVertical *
-            dragProgress,
+      final startOffset = Offset(
+        _dragPreviewHorizontal * dragProgress,
+        -_dragPreviewVertical * dragProgress,
       );
 
-      final startRotation =
-          _dragPreviewRotation *
-              dragProgress;
+      final startRotation = _dragPreviewRotation * dragProgress;
 
       _prepareAnimation(
-        type:
-            _SwipeAnimation
-                .snapCurrent,
-        startOffset:
-            startOffset,
-        endOffset:
-            Offset.zero,
-        startRotation:
-            startRotation,
-        endRotation:
-            0.0,
-        duration:
-            const Duration(
-          milliseconds:
-              220,
-        ),
+        type: _SwipeAnimation.snapCurrent,
+        startOffset: startOffset,
+        endOffset: Offset.zero,
+        startRotation: startRotation,
+        endRotation: 0.0,
+        duration: const Duration(milliseconds: 220),
       );
 
-      await _swipeController
-          .forward(
-        from: 0.0,
-      );
+      await _swipeController.forward(from: 0.0);
     }
 
     if (!mounted) {
@@ -1130,20 +715,15 @@ class _DiscoverScreenState
     }
 
     setState(() {
-      _dragY =
-          0.0;
+      _dragY = 0.0;
 
-      _dragging =
-          false;
+      _dragging = false;
 
-      _animating =
-          false;
+      _animating = false;
 
-      _swipeAnimation =
-          _SwipeAnimation.none;
+      _swipeAnimation = _SwipeAnimation.none;
 
-      _animationProgress =
-          0.0;
+      _animationProgress = 0.0;
     });
   }
 
@@ -1157,33 +737,24 @@ class _DiscoverScreenState
   }) {
     _swipeController.stop();
 
-    _swipeController.duration =
-        duration;
+    _swipeController.duration = duration;
 
     setState(() {
-      _dragging =
-          false;
+      _dragging = false;
 
-      _animating =
-          true;
+      _animating = true;
 
-      _swipeAnimation =
-          type;
+      _swipeAnimation = type;
 
-      _animationStartOffset =
-          startOffset;
+      _animationStartOffset = startOffset;
 
-      _animationEndOffset =
-          endOffset;
+      _animationEndOffset = endOffset;
 
-      _animationStartRotation =
-          startRotation;
+      _animationStartRotation = startRotation;
 
-      _animationEndRotation =
-          endRotation;
+      _animationEndRotation = endRotation;
 
-      _animationProgress =
-          0.0;
+      _animationProgress = 0.0;
     });
   }
 
@@ -1195,57 +766,24 @@ class _DiscoverScreenState
     required int minMs,
     required int maxMs,
   }) {
-    final remainingDistance =
-        (end - start).distance;
+    final remainingDistance = (end - start).distance;
 
     if (velocity >= 80.0) {
-      final milliseconds =
-          ((remainingDistance /
-                          velocity) *
-                      1000 *
-                      .72)
-                  .round();
+      final milliseconds = ((remainingDistance / velocity) * 1000 * .72)
+          .round();
 
-      return Duration(
-        milliseconds:
-            milliseconds
-                .clamp(
-                  minMs,
-                  maxMs,
-                )
-                .toInt(),
-      );
+      return Duration(milliseconds: milliseconds.clamp(minMs, maxMs).toInt());
     }
 
-    return Duration(
-      milliseconds:
-          fallbackMs
-              .clamp(
-                minMs,
-                maxMs,
-              )
-              .toInt(),
-    );
+    return Duration(milliseconds: fallbackMs.clamp(minMs, maxMs).toInt());
   }
 
-  double _edgeResistance(
-    double value,
-  ) {
-    return 48.0 *
-        (1.0 -
-            1.0 /
-                (1.0 +
-                    value.abs() /
-                        48.0));
+  double _edgeResistance(double value) {
+    return 48.0 * (1.0 - 1.0 / (1.0 + value.abs() / 48.0));
   }
 
-  double _lerpDouble(
-    double a,
-    double b,
-    double t,
-  ) {
-    return a +
-        (b - a) * t;
+  double _lerpDouble(double a, double b, double t) {
+    return a + (b - a) * t;
   }
 }
 
@@ -1261,8 +799,7 @@ enum _SwipeAnimation {
  * DISCOVER PERIOD TABS
  * ========================================================= */
 
-class _DiscoverPeriodTabs
-    extends StatelessWidget {
+class _DiscoverPeriodTabs extends StatelessWidget {
   const _DiscoverPeriodTabs({
     required this.selectedIndex,
     required this.onChanged,
@@ -1272,76 +809,33 @@ class _DiscoverPeriodTabs
   final ValueChanged<int> onChanged;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Container(
       height: 46,
-      padding:
-          const EdgeInsets.all(
-        3,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: AppColors.raised.withValues(alpha: .36),
+        borderRadius: BorderRadius.circular(15),
       ),
-      decoration:
-          BoxDecoration(
-        color:
-            AppColors.raised
-                .withValues(
-          alpha: .36,
-        ),
-        borderRadius:
-            BorderRadius.circular(
-          15,
-        ),
-      ),
-      child:
-          LayoutBuilder(
-        builder:
-            (
-          context,
-          constraints,
-        ) {
-          final indicatorWidth =
-              constraints.maxWidth /
-                  3.0;
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final indicatorWidth = constraints.maxWidth / 3.0;
 
-          final indicatorLeft =
-              selectedIndex *
-                  indicatorWidth;
+          final indicatorLeft = selectedIndex * indicatorWidth;
 
           return Stack(
             children: [
               AnimatedPositioned(
-                duration:
-                    const Duration(
-                  milliseconds:
-                      220,
-                ),
-                curve:
-                    Curves.easeOutCubic,
-                left:
-                    indicatorLeft,
-                top:
-                    0.0,
-                bottom:
-                    0.0,
-                width:
-                    indicatorWidth,
-                child:
-                    DecoratedBox(
-                  decoration:
-                      BoxDecoration(
-                    color:
-                        AppColors
-                            .accent
-                            .withValues(
-                      alpha:
-                          .16,
-                    ),
-                    borderRadius:
-                        BorderRadius
-                            .circular(
-                      12,
-                    ),
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                left: indicatorLeft,
+                top: 0.0,
+                bottom: 0.0,
+                width: indicatorWidth,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: AppColors.accent.withValues(alpha: .16),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
               ),
@@ -1349,50 +843,26 @@ class _DiscoverPeriodTabs
               Row(
                 children: [
                   Expanded(
-                    child:
-                        _DiscoverTabButton(
-                      label:
-                          'Trending',
-                      selected:
-                          selectedIndex ==
-                              0,
-                      onTap:
-                          () =>
-                              onChanged(
-                        0,
-                      ),
+                    child: _DiscoverTabButton(
+                      label: 'Trending',
+                      selected: selectedIndex == 0,
+                      onTap: () => onChanged(0),
                     ),
                   ),
 
                   Expanded(
-                    child:
-                        _DiscoverTabButton(
-                      label:
-                          'Top Rated',
-                      selected:
-                          selectedIndex ==
-                              1,
-                      onTap:
-                          () =>
-                              onChanged(
-                        1,
-                      ),
+                    child: _DiscoverTabButton(
+                      label: 'Top Rated',
+                      selected: selectedIndex == 1,
+                      onTap: () => onChanged(1),
                     ),
                   ),
 
                   Expanded(
-                    child:
-                        _DiscoverTabButton(
-                      label:
-                          'Popular',
-                      selected:
-                          selectedIndex ==
-                              2,
-                      onTap:
-                          () =>
-                              onChanged(
-                        2,
-                      ),
+                    child: _DiscoverTabButton(
+                      label: 'Popular',
+                      selected: selectedIndex == 2,
+                      onTap: () => onChanged(2),
                     ),
                   ),
                 ],
@@ -1405,8 +875,7 @@ class _DiscoverPeriodTabs
   }
 }
 
-class _DiscoverTabButton
-    extends StatelessWidget {
+class _DiscoverTabButton extends StatelessWidget {
   const _DiscoverTabButton({
     required this.label,
     required this.selected,
@@ -1418,50 +887,26 @@ class _DiscoverTabButton
   final VoidCallback onTap;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return GestureDetector(
-      onTap:
-          onTap,
+      onTap: onTap,
 
-      behavior:
-          HitTestBehavior.opaque,
+      behavior: HitTestBehavior.opaque,
 
-      child:
-          AnimatedDefaultTextStyle(
-        duration:
-            const Duration(
-          milliseconds:
-              160,
+      child: AnimatedDefaultTextStyle(
+        duration: const Duration(milliseconds: 160),
+
+        curve: Curves.easeOut,
+
+        style: TextStyle(
+          color: selected ? AppColors.text : AppColors.muted,
+
+          fontSize: 13,
+
+          fontWeight: FontWeight.w900,
         ),
 
-        curve:
-            Curves.easeOut,
-
-        style:
-            TextStyle(
-          color:
-              selected
-                  ? AppColors.text
-                  : AppColors.muted,
-
-          fontSize:
-              13,
-
-          fontWeight:
-              FontWeight.w900,
-        ),
-
-        child:
-            Center(
-          child:
-              Text(
-            label,
-            maxLines:
-                1,
-          ),
-        ),
+        child: Center(child: Text(label, maxLines: 1)),
       ),
     );
   }
@@ -1471,8 +916,7 @@ class _DiscoverTabButton
  * DISCOVER CARD
  * ========================================================= */
 
-class _DiscoverCard
-    extends ConsumerWidget {
+class _DiscoverCard extends ConsumerWidget {
   const _DiscoverCard({
     required this.manga,
     required this.rank,
@@ -1490,218 +934,113 @@ class _DiscoverCard
   final bool preview;
 
   @override
-  Widget build(
-    BuildContext context,
-    WidgetRef ref,
-  ) {
-    final marked =
-        ref
-            .watch(
-              userLibraryProvider,
-            )
-            .bookmarks
-            .contains(
-              manga.id,
-            );
+  Widget build(BuildContext context, WidgetRef ref) {
+    final marked = ref.watch(userLibraryProvider).bookmarks.contains(manga.id);
 
-    final periodLabel =
-        [
-      'Trending',
-      'Top Rated',
-      'Popular',
-    ][period];
+    final periodLabel = ['Trending', 'Top Rated', 'Popular'][period];
 
-    final details =
-        ref
-            .watch(
-              catalogProvider,
-            )
-            .cached(
-              manga.id,
-            );
+    final details = ref.watch(catalogProvider).cached(manga.id);
 
-    final chapterCount =
-        details?.chapterCount ??
-            manga.chapterCount;
+    final chapterCount = details?.chapterCount ?? manga.chapterCount;
 
-    final rawSynopsis =
-        (details?.synopsis.isNotEmpty ??
-                false)
-            ? details!.synopsis
-            : manga.synopsis;
+    final rawSynopsis = (details?.synopsis.isNotEmpty ?? false)
+        ? details!.synopsis
+        : manga.synopsis;
 
-    final synopsis =
-        summarizeSynopsis(
-      rawSynopsis,
-    );
+    final synopsis = summarizeSynopsis(rawSynopsis);
 
     return IgnorePointer(
-      ignoring:
-          inert,
+      ignoring: inert,
 
-      child:
-          Padding(
-        padding:
-            const EdgeInsets.fromLTRB(
-          24,
-          8,
-          24,
-          24,
-        ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
 
-        child:
-            ConstrainedBox(
-          constraints:
-              const BoxConstraints(
-            maxWidth:
-                430,
-          ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 430),
 
-          child:
-              ClipRRect(
-            borderRadius:
-                BorderRadius.circular(
-              18,
-            ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
 
-            child:
-                Material(
-              color:
-                  AppColors.surface,
+            child: Material(
+              color: AppColors.surface,
 
-              child:
-                  InkWell(
-                onTap:
-                    () {
-                  context.push(
-                    '/manga/${Uri.encodeComponent(manga.id)}',
-                  );
+              child: InkWell(
+                onTap: () {
+                  context.push('/manga/${Uri.encodeComponent(manga.id)}');
                 },
 
-                child:
-                    Stack(
-                  fit:
-                      StackFit.expand,
+                child: Stack(
+                  fit: StackFit.expand,
 
                   children: [
                     /*
                      * COVER
                      */
                     Positioned.fill(
-                      child:
-                          manga.coverUrl
-                                  .isEmpty
-                              ? _CoverFallback(
-                                  title:
-                                      manga.title,
-                                )
-                              : CachedNetworkImage(
-                                  imageUrl:
-                                      manga.coverUrl,
+                      child: manga.coverUrl.isEmpty
+                          ? _CoverFallback(title: manga.title)
+                          : CachedNetworkImage(
+                              imageUrl: manga.coverUrl,
 
-                                  cacheManager:
-                                      MangaImageCache
-                                          .instance,
+                              cacheManager: MangaImageCache.instance,
 
-                                  fit:
-                                      BoxFit.cover,
+                              fit: BoxFit.cover,
 
-                                  placeholder:
-                                      (_, __) =>
-                                          _CoverFallback(
-                                    title:
-                                        manga.title,
-                                  ),
+                              placeholder: (_, __) =>
+                                  _CoverFallback(title: manga.title),
 
-                                  errorWidget:
-                                      (
-                                    _,
-                                    __,
-                                    ___,
-                                  ) =>
-                                          _CoverFallback(
-                                    title:
-                                        manga.title,
-                                  ),
-                                ),
+                              errorWidget: (_, __, ___) =>
+                                  _CoverFallback(title: manga.title),
+                            ),
                     ),
 
                     /*
                      * RANK BADGE
                      */
                     Positioned(
-                      top:
-                          14,
+                      top: 14,
 
-                      left:
-                          14,
+                      left: 14,
 
-                      child:
-                          Container(
-                        padding:
-                            const EdgeInsets.symmetric(
-                          horizontal:
-                              12,
-                          vertical:
-                              6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
                         ),
 
-                        decoration:
-                            BoxDecoration(
-                          color:
-                              AppColors.glass,
+                        decoration: BoxDecoration(
+                          color: AppColors.glass,
 
-                          borderRadius:
-                              BorderRadius.circular(
-                            999,
-                          ),
+                          borderRadius: BorderRadius.circular(999),
 
-                          border:
-                              Border.all(
-                            color:
-                                AppColors.outline,
-                          ),
+                          border: Border.all(color: AppColors.outline),
                         ),
 
-                        child:
-                            Row(
-                          mainAxisSize:
-                              MainAxisSize.min,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
 
                           children: [
                             const Icon(
                               Icons.auto_awesome,
 
-                              size:
-                                  14,
+                              size: 14,
 
-                              color:
-                                  AppColors.accent,
+                              color: AppColors.accent,
                             ),
 
-                            const SizedBox(
-                              width:
-                                  6,
-                            ),
+                            const SizedBox(width: 6),
 
                             Text(
-                              preview
-                                  ? 'Preview $rank'
-                                  : '#$rank $periodLabel',
+                              preview ? 'Preview $rank' : '#$rank $periodLabel',
 
-                              style:
-                                  const TextStyle(
-                                color:
-                                    AppColors.text,
+                              style: const TextStyle(
+                                color: AppColors.text,
 
-                                fontSize:
-                                    11,
+                                fontSize: 11,
 
-                                fontWeight:
-                                    FontWeight.w800,
+                                fontWeight: FontWeight.w800,
 
-                                letterSpacing:
-                                    .4,
+                                letterSpacing: .4,
                               ),
                             ),
                           ],
@@ -1713,45 +1052,24 @@ class _DiscoverCard
                      * DARK GRADIENT
                      */
                     Positioned.fill(
-                      child:
-                          DecoratedBox(
-                        decoration:
-                            BoxDecoration(
-                          gradient:
-                              LinearGradient(
-                            begin:
-                                Alignment.topCenter,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
 
-                            end:
-                                Alignment.bottomCenter,
+                            end: Alignment.bottomCenter,
 
-                            colors:
-                                [
+                            colors: [
                               Colors.transparent,
 
-                              Colors.black.withValues(
-                                alpha:
-                                    .62,
-                              ),
+                              Colors.black.withValues(alpha: .62),
 
-                              Colors.black.withValues(
-                                alpha:
-                                    .88,
-                              ),
+                              Colors.black.withValues(alpha: .88),
 
-                              Colors.black.withValues(
-                                alpha:
-                                    .96,
-                              ),
+                              Colors.black.withValues(alpha: .96),
                             ],
 
-                            stops:
-                                const [
-                              0,
-                              .42,
-                              .72,
-                              1,
-                            ],
+                            stops: const [0, .42, .72, 1],
                           ),
                         ),
                       ),
@@ -1761,58 +1079,30 @@ class _DiscoverCard
                      * CARD CONTENT
                      */
                     Positioned.fill(
-                      child:
-                          Align(
-                        alignment:
-                            Alignment.bottomLeft,
+                      child: Align(
+                        alignment: Alignment.bottomLeft,
 
-                        child:
-                            Padding(
-                          padding:
-                              const EdgeInsets.fromLTRB(
-                            18,
-                            18,
-                            18,
-                            18,
-                          ),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
 
-                          child:
-                              Column(
-                            mainAxisSize:
-                                MainAxisSize.min,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
 
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
 
                             children: [
                               Text(
                                 manga.title,
 
-                                maxLines:
-                                    2,
+                                maxLines: 2,
 
-                                overflow:
-                                    TextOverflow.ellipsis,
+                                overflow: TextOverflow.ellipsis,
 
-                                style:
-                                    Theme.of(
-                                  context,
-                                )
-                                        .textTheme
-                                        .headlineSmall
-                                        ?.copyWith(
-                                          fontSize:
-                                              22,
-
-                                          height:
-                                              1.18,
-                                        ),
+                                style: Theme.of(context).textTheme.headlineSmall
+                                    ?.copyWith(fontSize: 22, height: 1.18),
                               ),
 
-                              const SizedBox(
-                                height:
-                                    10,
-                              ),
+                              const SizedBox(height: 10),
 
                               /*
                                * INFO CHIPS
@@ -1820,54 +1110,36 @@ class _DiscoverCard
                               Row(
                                 children: [
                                   Expanded(
-                                    child:
-                                        _InfoChip(
-                                      icon:
-                                          Icons.star_rounded,
+                                    child: _InfoChip(
+                                      icon: Icons.star_rounded,
 
-                                      label:
-                                          manga.ratingLabel,
+                                      label: manga.ratingLabel,
                                     ),
                                   ),
 
-                                  const SizedBox(
-                                    width:
-                                        6,
-                                  ),
+                                  const SizedBox(width: 6),
 
                                   Expanded(
-                                    child:
-                                        _InfoChip(
-                                      icon:
-                                          Icons.bolt_rounded,
+                                    child: _InfoChip(
+                                      icon: Icons.bolt_rounded,
 
-                                      label:
-                                          manga.statusLabel,
+                                      label: manga.statusLabel,
                                     ),
                                   ),
 
-                                  const SizedBox(
-                                    width:
-                                        6,
-                                  ),
+                                  const SizedBox(width: 6),
 
                                   Expanded(
-                                    child:
-                                        _InfoChip(
-                                      icon:
-                                          Icons.library_books_rounded,
+                                    child: _InfoChip(
+                                      icon: Icons.library_books_rounded,
 
-                                      label:
-                                          '$chapterCount chp',
+                                      label: '$chapterCount chp',
                                     ),
                                   ),
                                 ],
                               ),
 
-                              const SizedBox(
-                                height:
-                                    12,
-                              ),
+                              const SizedBox(height: 12),
 
                               /*
                                * SYNOPSIS
@@ -1875,60 +1147,38 @@ class _DiscoverCard
                               Text(
                                 synopsis,
 
-                                softWrap:
-                                    true,
+                                softWrap: true,
 
-                                textAlign:
-                                    TextAlign.justify,
+                                textAlign: TextAlign.justify,
 
-                                maxLines:
-                                    4,
+                                maxLines: 4,
 
-                                overflow:
-                                    TextOverflow.ellipsis,
+                                overflow: TextOverflow.ellipsis,
 
-                                style:
-                                    Theme.of(
-                                  context,
-                                )
-                                        .textTheme
-                                        .bodyMedium
-                                        ?.copyWith(
-                                          color:
-                                              Colors.white.withValues(
-                                            alpha:
-                                                .94,
-                                          ),
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(
+                                      color: Colors.white.withValues(
+                                        alpha: .94,
+                                      ),
 
-                                          height:
-                                              1.45,
+                                      height: 1.45,
 
-                                          letterSpacing:
-                                              .02,
-                                        ),
+                                      letterSpacing: .02,
+                                    ),
                               ),
 
-                              const SizedBox(
-                                height:
-                                    20,
-                              ),
+                              const SizedBox(height: 20),
 
                               /*
                                * BOOKMARK BUTTON
                                */
                               _BookmarkButton(
-                                bookmarked:
-                                    marked,
+                                bookmarked: marked,
 
-                                onPressed:
-                                    () {
+                                onPressed: () {
                                   ref
-                                      .read(
-                                        userLibraryProvider.notifier,
-                                      )
-                                      .toggleBookmark(
-                                        manga,
-                                      );
+                                      .read(userLibraryProvider.notifier)
+                                      .toggleBookmark(manga);
                                 },
                               ),
                             ],
@@ -1951,70 +1201,41 @@ class _DiscoverCard
  * COVER FALLBACK
  * ========================================================= */
 
-class _CoverFallback
-    extends StatelessWidget {
-  const _CoverFallback({
-    required this.title,
-  });
+class _CoverFallback extends StatelessWidget {
+  const _CoverFallback({required this.title});
 
   final String title;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Container(
-      decoration:
-          const BoxDecoration(
-        gradient:
-            LinearGradient(
-          begin:
-              Alignment.topLeft,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
 
-          end:
-              Alignment.bottomRight,
+          end: Alignment.bottomRight,
 
-          colors:
-              [
-            Color(
-              0xFF39325F,
-            ),
-
-            Color(
-              0xFF1A1923,
-            ),
-          ],
+          colors: [Color(0xFF39325F), Color(0xFF1A1923)],
         ),
       ),
 
-      padding:
-          const EdgeInsets.all(
-        14,
-      ),
+      padding: const EdgeInsets.all(14),
 
-      alignment:
-          Alignment.bottomLeft,
+      alignment: Alignment.bottomLeft,
 
-      child:
-          Text(
+      child: Text(
         title,
 
-        maxLines:
-            3,
+        maxLines: 3,
 
-        overflow:
-            TextOverflow.ellipsis,
+        overflow: TextOverflow.ellipsis,
 
-        style:
-            const TextStyle(
-          color:
-              AppColors.text,
+        style: const TextStyle(
+          color: AppColors.text,
 
-          fontWeight:
-              FontWeight.w700,
+          fontWeight: FontWeight.w700,
 
-          fontSize:
-              16,
+          fontSize: 16,
         ),
       ),
     );
@@ -2025,90 +1246,44 @@ class _CoverFallback
  * INFO CHIP
  * ========================================================= */
 
-class _InfoChip
-    extends StatelessWidget {
-  const _InfoChip({
-    required this.icon,
-    required this.label,
-  });
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({required this.icon, required this.label});
 
   final IconData icon;
   final String label;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Container(
-      height:
-          34,
+      height: 34,
 
-      padding:
-          const EdgeInsets.symmetric(
-        horizontal:
-            8,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+
+      decoration: BoxDecoration(
+        color: AppColors.raised.withValues(alpha: .86),
+
+        borderRadius: BorderRadius.circular(999),
+
+        border: Border.all(color: AppColors.outline),
       ),
 
-      decoration:
-          BoxDecoration(
-        color:
-            AppColors.raised.withValues(
-          alpha:
-              .86,
-        ),
-
-        borderRadius:
-            BorderRadius.circular(
-          999,
-        ),
-
-        border:
-            Border.all(
-          color:
-              AppColors.outline,
-        ),
-      ),
-
-      child:
-          Row(
-        mainAxisAlignment:
-            MainAxisAlignment.center,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
 
         children: [
-          Icon(
-            icon,
+          Icon(icon, size: 14, color: AppColors.accent),
 
-            size:
-                14,
-
-            color:
-                AppColors.accent,
-          ),
-
-          const SizedBox(
-            width:
-                5,
-          ),
+          const SizedBox(width: 5),
 
           Flexible(
-            child:
-                Text(
+            child: Text(
               label,
 
-              maxLines:
-                  1,
+              maxLines: 1,
 
-              overflow:
-                  TextOverflow.ellipsis,
+              overflow: TextOverflow.ellipsis,
 
-              style:
-                  const TextStyle(
-                fontSize:
-                    12,
-
-                fontWeight:
-                    FontWeight.w800,
-              ),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
             ),
           ),
         ],
@@ -2121,114 +1296,59 @@ class _InfoChip
  * BOOKMARK BUTTON
  * ========================================================= */
 
-class _BookmarkButton
-    extends StatelessWidget {
-  const _BookmarkButton({
-    required this.bookmarked,
-    required this.onPressed,
-  });
+class _BookmarkButton extends StatelessWidget {
+  const _BookmarkButton({required this.bookmarked, required this.onPressed});
 
   final bool bookmarked;
   final VoidCallback onPressed;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius:
-          BorderRadius.circular(
-        14,
-      ),
+      borderRadius: BorderRadius.circular(14),
 
-      child:
-          BackdropFilter(
-        filter:
-            ImageFilter.blur(
-          sigmaX:
-              12,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
 
-          sigmaY:
-              12,
-        ),
+        child: SizedBox(
+          width: double.infinity,
 
-        child:
-            SizedBox(
-          width:
-              double.infinity,
+          height: 50,
 
-          height:
-              50,
+          child: IconButton(
+            onPressed: onPressed,
 
-          child:
-              IconButton(
-            onPressed:
-                onPressed,
+            tooltip: bookmarked ? 'Bookmarked' : 'Bookmark',
 
-            tooltip:
-                bookmarked
-                    ? 'Bookmarked'
-                    : 'Bookmark',
+            style: IconButton.styleFrom(
+              backgroundColor: bookmarked
+                  ? AppColors.accent.withValues(alpha: .3)
+                  : AppColors.raised.withValues(alpha: .6),
 
-            style:
-                IconButton.styleFrom(
-              backgroundColor:
-                  bookmarked
-                      ? AppColors.accent.withValues(
-                          alpha:
-                              .3,
-                        )
-                      : AppColors.raised.withValues(
-                          alpha:
-                              .6,
-                        ),
+              foregroundColor: bookmarked ? AppColors.accent : AppColors.text,
 
-              foregroundColor:
-                  bookmarked
-                      ? AppColors.accent
-                      : AppColors.text,
+              side: bookmarked
+                  ? BorderSide(
+                      color: AppColors.accent.withValues(alpha: .65),
 
-              side:
-                  bookmarked
-                      ? BorderSide(
-                          color:
-                              AppColors.accent.withValues(
-                            alpha:
-                                .65,
-                          ),
+                      width: 1.2,
+                    )
+                  : const BorderSide(color: AppColors.outline, width: 1),
 
-                          width:
-                              1.2,
-                        )
-                      : const BorderSide(
-                          color:
-                              AppColors.outline,
-
-                          width:
-                              1,
-                        ),
-
-              shape:
-                  RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(
-                  14,
-                ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
               ),
             ),
 
-            icon:
-                Icon(
+            icon: Icon(
               bookmarked
                   ? Icons.favorite_rounded
                   : Icons.favorite_border_rounded,
 
-              size:
-                  22,
+              size: 22,
             ),
 
-            padding:
-                EdgeInsets.zero,
+            padding: EdgeInsets.zero,
           ),
         ),
       ),

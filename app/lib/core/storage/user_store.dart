@@ -1,14 +1,17 @@
 import 'dart:convert';
+
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/manga.dart';
 import '../models/reading_progress.dart';
 
 class UserSnapshot {
-  const UserSnapshot(
-      {required this.bookmarks,
-      required this.bookmarkedManga,
-      required this.progress,
-      required this.adultContent});
+  const UserSnapshot({
+    required this.bookmarks,
+    required this.bookmarkedManga,
+    required this.progress,
+    required this.adultContent,
+  });
   final Set<String> bookmarks;
   final Map<String, Manga> bookmarkedManga;
   final Map<String, ReadingProgress> progress;
@@ -18,7 +21,10 @@ class UserSnapshot {
 abstract interface class UserStore {
   Future<UserSnapshot> load(String uid);
   Future<void> saveBookmarks(
-      String uid, Set<String> ids, Map<String, Manga> manga);
+    String uid,
+    Set<String> ids,
+    Map<String, Manga> manga,
+  );
   Future<void> saveProgress(String uid, ReadingProgress progress);
   Future<void> saveAdultContent(String uid, bool enabled);
   Future<void> clearSession(String uid);
@@ -40,8 +46,9 @@ class LocalUserStore implements UserStore {
         final map = jsonDecode(catalog) as Map<String, dynamic>;
         for (final entry in map.entries) {
           try {
-            bookmarkedManga[entry.key] =
-                Manga.fromJson(entry.value as Map<String, dynamic>);
+            bookmarkedManga[entry.key] = Manga.fromJson(
+              entry.value as Map<String, dynamic>,
+            );
           } catch (_) {
             // Ignore one corrupt legacy entry instead of losing the library.
           }
@@ -56,8 +63,9 @@ class LocalUserStore implements UserStore {
         final map = jsonDecode(encoded) as Map<String, dynamic>;
         for (final entry in map.entries) {
           try {
-            progress[entry.key] =
-                ReadingProgress.fromJson(entry.value as Map<String, dynamic>);
+            progress[entry.key] = ReadingProgress.fromJson(
+              entry.value as Map<String, dynamic>,
+            );
           } catch (_) {
             // Keep valid progress if one legacy entry is malformed.
           }
@@ -67,19 +75,25 @@ class LocalUserStore implements UserStore {
       }
     }
     return UserSnapshot(
-        bookmarks: bookmarks,
-        bookmarkedManga: bookmarkedManga,
-        progress: progress,
-        adultContent: p.getBool('${prefix}adult') ?? false);
+      bookmarks: bookmarks,
+      bookmarkedManga: bookmarkedManga,
+      progress: progress,
+      adultContent: p.getBool('${prefix}adult') ?? false,
+    );
   }
 
   @override
   Future<void> saveBookmarks(
-      String uid, Set<String> ids, Map<String, Manga> manga) async {
+    String uid,
+    Set<String> ids,
+    Map<String, Manga> manga,
+  ) async {
     final p = await SharedPreferences.getInstance();
     await p.setStringList('user.$uid.bookmarks', ids.toList());
-    await p.setString('user.$uid.catalog',
-        jsonEncode(manga.map((key, value) => MapEntry(key, value.toJson()))));
+    await p.setString(
+      'user.$uid.catalog',
+      jsonEncode(manga.map((key, value) => MapEntry(key, value.toJson()))),
+    );
   }
 
   @override
@@ -98,8 +112,10 @@ class LocalUserStore implements UserStore {
 
   @override
   Future<void> saveAdultContent(String uid, bool enabled) async {
-    await (await SharedPreferences.getInstance())
-        .setBool('user.$uid.adult', enabled);
+    await (await SharedPreferences.getInstance()).setBool(
+      'user.$uid.adult',
+      enabled,
+    );
   }
 
   @override
@@ -110,7 +126,7 @@ class LocalUserStore implements UserStore {
       p.remove('${prefix}bookmarks'),
       p.remove('${prefix}catalog'),
       p.remove('${prefix}progress'),
-      p.remove('${prefix}adult')
+      p.remove('${prefix}adult'),
     ]);
   }
 }

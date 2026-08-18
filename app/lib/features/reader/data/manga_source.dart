@@ -2,13 +2,14 @@ import '../../../core/models/chapter.dart';
 import '../../../core/models/manga.dart';
 
 class SourceCapabilities {
-  const SourceCapabilities(
-      {this.search = false,
-      this.details = false,
-      this.chapters = false,
-      this.pages = false,
-      this.updates = false,
-      this.officialUrl = false});
+  const SourceCapabilities({
+    this.search = false,
+    this.details = false,
+    this.chapters = false,
+    this.pages = false,
+    this.updates = false,
+    this.officialUrl = false,
+  });
   final bool search, details, chapters, pages, updates, officialUrl;
 }
 

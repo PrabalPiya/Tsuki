@@ -1,8 +1,10 @@
 import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+
 import '../config/app_config.dart';
 import '../storage/user_store.dart';
 
@@ -12,12 +14,16 @@ enum SessionStatus {
   signedOut,
   accessDenied,
   backendMissing,
-  error
+  error,
 }
 
 class AppSession {
-  const AppSession(this.status,
-      {this.uid, this.message, this.isLocalProfile = false});
+  const AppSession(
+    this.status, {
+    this.uid,
+    this.message,
+    this.isLocalProfile = false,
+  });
   final SessionStatus status;
   final String? uid;
   final String? message;
@@ -26,19 +32,23 @@ class AppSession {
 
 class AuthController extends StateNotifier<AppSession> {
   AuthController(this._config)
-      : super(const AppSession(SessionStatus.loading)) {
+    : super(const AppSession(SessionStatus.loading)) {
     _start();
   }
   final AppConfig _config;
   StreamSubscription<User?>? _subscription;
   Future<void> _start() async {
     if (!_config.isFirebaseConfigured) {
-      state = const AppSession(SessionStatus.ready,
-          uid: 'local-user', isLocalProfile: true);
+      state = const AppSession(
+        SessionStatus.ready,
+        uid: 'local-user',
+        isLocalProfile: true,
+      );
       return;
     }
-    _subscription =
-        FirebaseAuth.instance.authStateChanges().listen(_handleUser);
+    _subscription = FirebaseAuth.instance.authStateChanges().listen(
+      _handleUser,
+    );
   }
 
   Future<void> _handleUser(User? user) async {
@@ -48,37 +58,47 @@ class AuthController extends StateNotifier<AppSession> {
     }
     final claims =
         (await user.getIdTokenResult(true)).claims ?? const <String, dynamic>{};
-    final allowed = _config.environment != AppEnvironment.production ||
+    final allowed =
+        _config.environment != AppEnvironment.production ||
         claims['appAccess'] == true;
     state = allowed
         ? AppSession(SessionStatus.ready, uid: user.uid)
-        : const AppSession(SessionStatus.accessDenied,
-            message: 'This account is not authorized for this backend.');
+        : const AppSession(
+            SessionStatus.accessDenied,
+            message: 'This account is not authorized for this backend.',
+          );
   }
 
   Future<void> signIn() async {
     if (!_config.isFirebaseConfigured) return;
     try {
       final google = await GoogleSignIn(
-              serverClientId: _config.googleOAuthServerClientId.isEmpty
-                  ? null
-                  : _config.googleOAuthServerClientId)
-          .signIn();
+        serverClientId: _config.googleOAuthServerClientId.isEmpty
+            ? null
+            : _config.googleOAuthServerClientId,
+      ).signIn();
       if (google == null) return;
       final auth = await google.authentication;
       await FirebaseAuth.instance.signInWithCredential(
-          GoogleAuthProvider.credential(
-              accessToken: auth.accessToken, idToken: auth.idToken));
+        GoogleAuthProvider.credential(
+          accessToken: auth.accessToken,
+          idToken: auth.idToken,
+        ),
+      );
     } catch (_) {
-      state = const AppSession(SessionStatus.error,
-          message: 'Sign in failed. Try again.');
+      state = const AppSession(
+        SessionStatus.error,
+        message: 'Sign in failed. Try again.',
+      );
     }
   }
 
   Future<void> signOut() async {
     if (!_config.isFirebaseConfigured) return;
-    await Future.wait(
-        [FirebaseAuth.instance.signOut(), GoogleSignIn().signOut()]);
+    await Future.wait([
+      FirebaseAuth.instance.signOut(),
+      GoogleSignIn().signOut(),
+    ]);
     state = const AppSession(SessionStatus.signedOut);
   }
 
@@ -89,8 +109,9 @@ class AuthController extends StateNotifier<AppSession> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return 'Sign in again to delete this account.';
-      final document =
-          FirebaseFirestore.instance.collection('users').doc(user.uid);
+      final document = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid);
       await _deleteCollection(document.collection('bookmarks'));
       await _deleteCollection(document.collection('progress'));
       await document.delete();
@@ -110,7 +131,8 @@ class AuthController extends StateNotifier<AppSession> {
   }
 
   Future<void> _deleteCollection(
-      CollectionReference<Map<String, dynamic>> collection) async {
+    CollectionReference<Map<String, dynamic>> collection,
+  ) async {
     while (true) {
       final page = await collection.limit(400).get();
       if (page.docs.isEmpty) return;

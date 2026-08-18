@@ -33,39 +33,32 @@ class HomeEntry {
     return caughtUp
         ? 0
         : (chapters.length - currentIndex - 1)
-            .clamp(0, chapters.length)
-            .toInt();
+              .clamp(0, chapters.length)
+              .toInt();
   }
 
-  CanonicalChapter? get latest =>
-      chapters.isEmpty ? null : chapters.last;
+  CanonicalChapter? get latest => chapters.isEmpty ? null : chapters.last;
 
   bool get hasChapters => chapters.isNotEmpty;
 }
 
-typedef _HomeCatalogEntry = ({
-  Manga manga,
-  List<CanonicalChapter> chapters,
-});
+typedef _HomeCatalogEntry = ({Manga manga, List<CanonicalChapter> chapters});
 
-final _homeCatalogProvider =
-    FutureProvider<List<_HomeCatalogEntry>>((ref) async {
+final _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((
+  ref,
+) async {
   ref.watch(_homeRefreshProvider);
 
   final state = ref.watch(
     userLibraryProvider.select(
-      (value) => (
-        bookmarks: value.bookmarks,
-        bookmarkedManga: value.bookmarkedManga,
-      ),
+      (value) =>
+          (bookmarks: value.bookmarks, bookmarkedManga: value.bookmarkedManga),
     ),
   );
 
-  final repository =
-      ref.watch(catalogProvider);
+  final repository = ref.watch(catalogProvider);
 
-  final entries =
-      <_HomeCatalogEntry>[];
+  final entries = <_HomeCatalogEntry>[];
 
   for (final id in state.bookmarks) {
     try {
@@ -80,15 +73,10 @@ final _homeCatalogProvider =
 
       repository.remember(manga);
 
-      List<CanonicalChapter> chapters =
-          const <CanonicalChapter>[];
+      List<CanonicalChapter> chapters = const <CanonicalChapter>[];
 
       try {
-        chapters =
-            await repository.chapters(
-          manga,
-          refresh: true,
-        );
+        chapters = await repository.chapters(manga, refresh: true);
       } catch (_) {
         /*
          * IMPORTANT:
@@ -99,16 +87,10 @@ final _homeCatalogProvider =
          * We keep the manga and show it with
          * unavailable chapter information.
          */
-        chapters =
-            const <CanonicalChapter>[];
+        chapters = const <CanonicalChapter>[];
       }
 
-      entries.add(
-        (
-          manga: manga,
-          chapters: chapters,
-        ),
-      );
+      entries.add((manga: manga, chapters: chapters));
     } catch (_) {
       /*
        * Only completely unavailable manga
@@ -120,23 +102,16 @@ final _homeCatalogProvider =
   return entries;
 });
 
-final homeEntriesProvider =
-    Provider<AsyncValue<List<HomeEntry>>>((ref) {
-  final libraryState =
-      ref.watch(userLibraryProvider);
+final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
+  final libraryState = ref.watch(userLibraryProvider);
 
-  final progress =
-      libraryState.progress;
+  final progress = libraryState.progress;
 
-  final bool adultContentEnabled =
-      libraryState.adultContent;
+  final bool adultContentEnabled = libraryState.adultContent;
 
-  return ref
-      .watch(_homeCatalogProvider)
-      .whenData(
-    (catalog) {
-      final entries = catalog
-          /*
+  return ref.watch(_homeCatalogProvider).whenData((catalog) {
+    final entries = catalog
+        /*
            * Adult visibility only.
            *
            * OFF:
@@ -147,37 +122,22 @@ final homeEntriesProvider =
            *
            * Bookmark and progress remain stored.
            */
-          .where(
-            (entry) =>
-                adultContentEnabled ||
-                !entry.manga.isAdult,
-          )
-          .map(
-        (entry) {
-          final mangaProgress =
-              progress[entry.manga.id];
+        .where((entry) => adultContentEnabled || !entry.manga.isAdult)
+        .map((entry) {
+          final mangaProgress = progress[entry.manga.id];
 
           int current = -1;
 
-          if (mangaProgress != null &&
-              entry.chapters.isNotEmpty) {
-            current =
-                entry.chapters.indexWhere(
-              (chapter) =>
-                  chapter.id ==
-                  mangaProgress.chapterId,
+          if (mangaProgress != null && entry.chapters.isNotEmpty) {
+            current = entry.chapters.indexWhere(
+              (chapter) => chapter.id == mangaProgress.chapterId,
             );
           }
 
           final bool caught =
               entry.chapters.isNotEmpty &&
-                  current ==
-                      entry.chapters.length -
-                          1 &&
-                  (mangaProgress
-                              ?.chapterProgress ??
-                          0.0) >=
-                      0.95;
+              current == entry.chapters.length - 1 &&
+              (mangaProgress?.chapterProgress ?? 0.0) >= 0.95;
 
           /*
            * Manga without chapters still need
@@ -188,20 +148,13 @@ final homeEntriesProvider =
           if (caught) {
             sort =
                 mangaProgress?.updatedAt ??
-                    DateTime
-                        .fromMillisecondsSinceEpoch(
-                      0,
-                    );
+                DateTime.fromMillisecondsSinceEpoch(0);
           } else if (entry.chapters.isNotEmpty) {
-            sort =
-                entry.chapters.last.publishedAt;
+            sort = entry.chapters.last.publishedAt;
           } else {
             sort =
                 mangaProgress?.updatedAt ??
-                    DateTime
-                        .fromMillisecondsSinceEpoch(
-                      0,
-                    );
+                DateTime.fromMillisecondsSinceEpoch(0);
           }
 
           return HomeEntry(
@@ -212,60 +165,37 @@ final homeEntriesProvider =
             caughtUp: caught,
             sortTime: sort,
           );
-        },
-      ).toList();
+        })
+        .toList();
 
-      entries.sort(
-        (a, b) =>
-            b.sortTime.compareTo(
-          a.sortTime,
-        ),
-      );
+    entries.sort((a, b) => b.sortTime.compareTo(a.sortTime));
 
-      return entries;
-    },
-  );
+    return entries;
+  });
 });
 
-final _homeRefreshProvider =
-    StreamProvider<int>(
-  (ref) => Stream<int>.periodic(
-    const Duration(
-      minutes: 15,
-    ),
-    (value) => value,
-  ),
+final _homeRefreshProvider = StreamProvider<int>(
+  (ref) => Stream<int>.periodic(const Duration(minutes: 15), (value) => value),
 );
 
-class HomeScreen
-    extends ConsumerStatefulWidget {
-  const HomeScreen({
-    super.key,
-  });
+class HomeScreen extends ConsumerStatefulWidget {
+  const HomeScreen({super.key});
 
   @override
-  ConsumerState<HomeScreen>
-      createState() =>
-          _HomeScreenState();
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState
-    extends ConsumerState<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen> {
   PageController? _pageController;
 
   int _selectedSection = 0;
 
   bool _isAnimating = false;
 
-  PageController get _page =>
-      _pageController ??=
-          PageController();
+  PageController get _page => _pageController ??= PageController();
 
-  void _switchTab(
-    int index,
-  ) {
-    if (_isAnimating ||
-        _selectedSection == index) {
+  void _switchTab(int index) {
+    if (_isAnimating || _selectedSection == index) {
       return;
     }
 
@@ -277,21 +207,17 @@ class _HomeScreenState
 
     _page
         .animateToPage(
-      index,
-      duration: const Duration(
-        milliseconds: 300,
-      ),
-      curve: Curves.easeOutCubic,
-    )
-        .then(
-      (_) {
-        if (!mounted) return;
+          index,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOutCubic,
+        )
+        .then((_) {
+          if (!mounted) return;
 
-        setState(() {
-          _isAnimating = false;
+          setState(() {
+            _isAnimating = false;
+          });
         });
-      },
-    );
   }
 
   @override
@@ -301,55 +227,29 @@ class _HomeScreenState
   }
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final homeEntries =
-        ref.watch(homeEntriesProvider);
+  Widget build(BuildContext context) {
+    final homeEntries = ref.watch(homeEntriesProvider);
 
-    final activeCount =
-        homeEntries.maybeWhen(
-      data: (entries) =>
-          entries
-              .where(
-                (entry) =>
-                    !entry.caughtUp,
-              )
-              .length,
+    final activeCount = homeEntries.maybeWhen(
+      data: (entries) => entries.where((entry) => !entry.caughtUp).length,
       orElse: () => null,
     );
 
-    final caughtUpCount =
-        homeEntries.maybeWhen(
-      data: (entries) =>
-          entries
-              .where(
-                (entry) =>
-                    entry.caughtUp,
-              )
-              .length,
+    final caughtUpCount = homeEntries.maybeWhen(
+      data: (entries) => entries.where((entry) => entry.caughtUp).length,
       orElse: () => null,
     );
 
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 16,
-        title:
-            const _TsukiTitle(),
+        title: const _TsukiTitle(),
         actions: [
           Padding(
-            padding:
-                const EdgeInsets.only(
-              right: 16,
-            ),
+            padding: const EdgeInsets.only(right: 16),
             child: IconButton(
-              onPressed: () =>
-                  context.push(
-                '/settings',
-              ),
-              icon: const Icon(
-                Icons.settings_outlined,
-              ),
+              onPressed: () => context.push('/settings'),
+              icon: const Icon(Icons.settings_outlined),
               tooltip: 'Settings',
             ),
           ),
@@ -359,93 +259,54 @@ class _HomeScreenState
       body: Column(
         children: [
           _HomeTabs(
-            activeCount:
-                activeCount,
-            caughtUpCount:
-                caughtUpCount,
-            selectedIndex:
-                _selectedSection,
-            onTabChanged:
-                _switchTab,
+            activeCount: activeCount,
+            caughtUpCount: caughtUpCount,
+            selectedIndex: _selectedSection,
+            onTabChanged: _switchTab,
           ),
 
           Expanded(
             child: homeEntries.when(
-              loading: () =>
-                  const Center(
-                child:
-                    CircularProgressIndicator(),
-              ),
+              loading: () => const Center(child: CircularProgressIndicator()),
 
-              error: (_, __) =>
-                  const _Empty(
-                'Home is unavailable right now.',
-              ),
+              error: (_, __) => const _Empty('Home is unavailable right now.'),
 
               data: (entries) {
-                final active =
-                    entries
-                        .where(
-                          (entry) =>
-                              !entry
-                                  .caughtUp,
-                        )
-                        .toList();
+                final active = entries
+                    .where((entry) => !entry.caughtUp)
+                    .toList();
 
-                final caughtUp =
-                    entries
-                        .where(
-                          (entry) =>
-                              entry
-                                  .caughtUp,
-                        )
-                        .toList();
+                final caughtUp = entries
+                    .where((entry) => entry.caughtUp)
+                    .toList();
 
-                WidgetsBinding
-                    .instance
-                    .addPostFrameCallback(
-                  (_) {
-                    if (!mounted ||
-                        !_page.hasClients) {
-                      return;
-                    }
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!mounted || !_page.hasClients) {
+                    return;
+                  }
 
-                    final page =
-                        _page.page?.round();
+                  final page = _page.page?.round();
 
-                    if (page !=
-                        _selectedSection) {
-                      _page.jumpToPage(
-                        _selectedSection,
-                      );
-                    }
-                  },
-                );
+                  if (page != _selectedSection) {
+                    _page.jumpToPage(_selectedSection);
+                  }
+                });
 
                 return PageView(
-                  controller:
-                      _page,
+                  controller: _page,
 
-                  onPageChanged:
-                      (index) {
+                  onPageChanged: (index) {
                     if (!_isAnimating) {
                       setState(() {
-                        _selectedSection =
-                            index;
+                        _selectedSection = index;
                       });
                     }
                   },
 
                   children: [
-                    _EntryList(
-                      entries: active,
-                    ),
+                    _EntryList(entries: active),
 
-                    _EntryList(
-                      entries: caughtUp,
-                      caughtUpSection:
-                          true,
-                    ),
+                    _EntryList(entries: caughtUp, caughtUpSection: true),
                   ],
                 );
               },
@@ -461,9 +322,7 @@ class _TsukiTitle extends StatelessWidget {
   const _TsukiTitle();
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -474,9 +333,7 @@ class _TsukiTitle extends StatelessWidget {
           fit: BoxFit.contain,
         ),
 
-        const SizedBox(
-          width: 6,
-        ),
+        const SizedBox(width: 6),
 
         Text(
           'Tsuki',
@@ -493,8 +350,7 @@ class _TsukiTitle extends StatelessWidget {
   }
 }
 
-class _HomeTabs
-    extends StatelessWidget {
+class _HomeTabs extends StatelessWidget {
   const _HomeTabs({
     required this.activeCount,
     required this.caughtUpCount,
@@ -505,73 +361,34 @@ class _HomeTabs
   final int? activeCount;
   final int? caughtUpCount;
   final int selectedIndex;
-  final ValueChanged<int>
-      onTabChanged;
+  final ValueChanged<int> onTabChanged;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Padding(
-      padding:
-          const EdgeInsets.fromLTRB(
-        12,
-        8,
-        12,
-        10,
-      ),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       child: Container(
         height: 46,
-        padding:
-            const EdgeInsets.all(
-          3,
-        ),
-        decoration:
-            BoxDecoration(
-          color:
-              AppColors.raised
-                  .withValues(
-            alpha: 0.36,
-          ),
-          borderRadius:
-              BorderRadius.circular(
-            15,
-          ),
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: AppColors.raised.withValues(alpha: 0.36),
+          borderRadius: BorderRadius.circular(15),
         ),
         child: Stack(
           children: [
             AnimatedAlign(
-              alignment:
-                  selectedIndex == 0
-                      ? Alignment
-                          .centerLeft
-                      : Alignment
-                          .centerRight,
-              duration:
-                  const Duration(
-                milliseconds:
-                    220,
-              ),
-              curve:
-                  Curves.easeOutCubic,
-              child:
-                  FractionallySizedBox(
+              alignment: selectedIndex == 0
+                  ? Alignment.centerLeft
+                  : Alignment.centerRight,
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              child: FractionallySizedBox(
                 widthFactor: 0.5,
                 heightFactor: 1.0,
                 child: DecoratedBox(
-                  decoration:
-                      BoxDecoration(
-                    color:
-                        AppColors
-                            .accent
-                            .withValues(
-                      alpha: 0.16,
-                    ),
-                    borderRadius:
-                        BorderRadius
-                            .circular(
-                      12,
-                    ),
+                  decoration: BoxDecoration(
+                    color: AppColors.accent.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
               ),
@@ -580,35 +397,20 @@ class _HomeTabs
             Row(
               children: [
                 Expanded(
-                  child:
-                      _HomeTabButton(
+                  child: _HomeTabButton(
                     label: 'Active',
-                    count:
-                        activeCount,
-                    selected:
-                        selectedIndex ==
-                            0,
-                    onTap: () =>
-                        onTabChanged(
-                      0,
-                    ),
+                    count: activeCount,
+                    selected: selectedIndex == 0,
+                    onTap: () => onTabChanged(0),
                   ),
                 ),
 
                 Expanded(
-                  child:
-                      _HomeTabButton(
-                    label:
-                        'Caught Up',
-                    count:
-                        caughtUpCount,
-                    selected:
-                        selectedIndex ==
-                            1,
-                    onTap: () =>
-                        onTabChanged(
-                      1,
-                    ),
+                  child: _HomeTabButton(
+                    label: 'Caught Up',
+                    count: caughtUpCount,
+                    selected: selectedIndex == 1,
+                    onTap: () => onTabChanged(1),
                   ),
                 ),
               ],
@@ -620,8 +422,7 @@ class _HomeTabs
   }
 }
 
-class _HomeTabButton
-    extends StatelessWidget {
+class _HomeTabButton extends StatelessWidget {
   const _HomeTabButton({
     required this.label,
     required this.count,
@@ -635,77 +436,44 @@ class _HomeTabButton
   final VoidCallback onTap;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final countLabel =
-        count == null
-            ? '-'
-            : '$count';
+  Widget build(BuildContext context) {
+    final countLabel = count == null ? '-' : '$count';
 
-    final contentColor =
-        selected
-            ? AppColors.text
-            : AppColors.muted;
+    final contentColor = selected ? AppColors.text : AppColors.muted;
 
     return GestureDetector(
       onTap: onTap,
-      behavior:
-          HitTestBehavior.opaque,
-      child:
-          AnimatedDefaultTextStyle(
-        duration:
-            const Duration(
-          milliseconds: 160,
-        ),
-        curve:
-            Curves.easeOut,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedDefaultTextStyle(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
         style: TextStyle(
           color: contentColor,
           fontSize: 13,
-          fontWeight:
-              FontWeight.w900,
+          fontWeight: FontWeight.w900,
         ),
         child: Center(
           child: Row(
-            mainAxisAlignment:
-                MainAxisAlignment
-                    .center,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Flexible(
                 child: Text(
                   label,
                   maxLines: 1,
-                  overflow:
-                      TextOverflow
-                          .ellipsis,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
 
-              const SizedBox(
-                width: 6,
-              ),
+              const SizedBox(width: 6),
 
               Text(
                 countLabel,
                 style: TextStyle(
-                  color:
-                      selected
-                          ? AppColors
-                              .text
-                              .withValues(
-                              alpha:
-                                  0.76,
-                            )
-                          : AppColors
-                              .muted
-                              .withValues(
-                              alpha:
-                                  0.80,
-                            ),
+                  color: selected
+                      ? AppColors.text.withValues(alpha: 0.76)
+                      : AppColors.muted.withValues(alpha: 0.80),
                   fontSize: 12,
-                  fontWeight:
-                      FontWeight.w800,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
             ],
@@ -716,23 +484,15 @@ class _HomeTabButton
   }
 }
 
-class _EntryList
-    extends StatelessWidget {
-  const _EntryList({
-    required this.entries,
-    this.caughtUpSection = false,
-  });
+class _EntryList extends StatelessWidget {
+  const _EntryList({required this.entries, this.caughtUpSection = false});
 
-  final List<HomeEntry>
-      entries;
+  final List<HomeEntry> entries;
 
-  final bool
-      caughtUpSection;
+  final bool caughtUpSection;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     if (entries.isEmpty) {
       return _Empty(
         caughtUpSection
@@ -742,255 +502,131 @@ class _EntryList
     }
 
     return ListView.separated(
-      padding:
-          const EdgeInsets.fromLTRB(
-        12,
-        8,
-        12,
-        0,
-      ),
-      itemCount:
-          entries.length,
-      separatorBuilder:
-          (_, __) =>
-              const SizedBox(
-        height: 8,
-      ),
-      itemBuilder:
-          (
-        context,
-        index,
-      ) =>
-              _HomeCard(
-        entry:
-            entries[index],
-      ),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      itemCount: entries.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (context, index) => _HomeCard(entry: entries[index]),
     );
   }
 }
 
-class _HomeCard
-    extends StatelessWidget {
-  const _HomeCard({
-    required this.entry,
-  });
+class _HomeCard extends StatelessWidget {
+  const _HomeCard({required this.entry});
 
   final HomeEntry entry;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     final String last;
 
     if (entry.progress == null) {
       last = 'Not started';
     } else if (entry.currentIndex >= 0 &&
-        entry.currentIndex <
-            entry.chapters.length) {
-      last = entry
-          .chapters[
-              entry.currentIndex]
-          .numberLabel;
+        entry.currentIndex < entry.chapters.length) {
+      last = entry.chapters[entry.currentIndex].numberLabel;
     } else {
       last = 'Saved';
     }
 
-    const cardRadius =
-        18.0;
+    const cardRadius = 18.0;
 
-    const buttonRadius =
-        12.0;
+    const buttonRadius = 12.0;
 
-    const contentHeight =
-        146.0;
+    const contentHeight = 146.0;
 
-    const titleHeight =
-        40.0;
+    const titleHeight = 40.0;
 
-    const buttonHeight =
-        38.0;
+    const buttonHeight = 38.0;
 
     return Card(
-      clipBehavior:
-          Clip.antiAlias,
-      shape:
-          RoundedRectangleBorder(
-        borderRadius:
-            BorderRadius.circular(
-          cardRadius,
-        ),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(cardRadius),
       ),
       child: InkWell(
-        borderRadius:
-            BorderRadius.circular(
-          cardRadius,
-        ),
+        borderRadius: BorderRadius.circular(cardRadius),
         onTap: () =>
-            context.push(
-          '/manga/${Uri.encodeComponent(entry.manga.id)}',
-        ),
+            context.push('/manga/${Uri.encodeComponent(entry.manga.id)}'),
         child: Padding(
-          padding:
-              const EdgeInsets.all(
-            10,
-          ),
+          padding: const EdgeInsets.all(10),
           child: SizedBox(
-            height:
-                contentHeight,
+            height: contentHeight,
             child: Row(
-              crossAxisAlignment:
-                  CrossAxisAlignment
-                      .stretch,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 SizedBox(
                   width: 94,
                   child: CoverArt(
-                    url:
-                        entry.manga
-                            .coverUrl,
-                    title:
-                        entry.manga
-                            .title,
-                    borderRadius:
-                        12,
+                    url: entry.manga.coverUrl,
+                    title: entry.manga.title,
+                    borderRadius: 12,
                   ),
                 ),
 
-                const SizedBox(
-                  width: 12,
-                ),
+                const SizedBox(width: 12),
 
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment
-                            .start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       SizedBox(
-                        height:
-                            titleHeight,
+                        height: titleHeight,
                         child: Align(
-                          alignment:
-                              Alignment
-                                  .topLeft,
+                          alignment: Alignment.topLeft,
                           child: Text(
-                            entry.manga
-                                .title,
+                            entry.manga.title,
                             maxLines: 2,
-                            overflow:
-                                TextOverflow
-                                    .ellipsis,
-                            style:
-                                Theme.of(
-                              context,
-                            )
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(
-                                      height:
-                                          1.2,
-                                    ),
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(height: 1.2),
                           ),
                         ),
                       ),
 
-                      const SizedBox(
-                        height: 5,
-                      ),
+                      const SizedBox(height: 5),
 
                       _ChapterInfoLine(
-                        label:
-                            'New chapter',
-                        value:
-                            entry.latest
-                                    ?.numberLabel ??
-                                '—',
-                        valueColor:
-                            entry.hasChapters
-                                ? AppColors
-                                    .accent
-                                : AppColors
-                                    .muted,
+                        label: 'New chapter',
+                        value: entry.latest?.numberLabel ?? '—',
+                        valueColor: entry.hasChapters
+                            ? AppColors.accent
+                            : AppColors.muted,
                       ),
 
-                      const SizedBox(
-                        height: 2,
-                      ),
+                      const SizedBox(height: 2),
 
                       _ChapterInfoLine(
-                        label:
-                            'Last read',
+                        label: 'Last read',
                         value: last,
-                        valueColor:
-                            entry.progress ==
-                                    null
-                                ? AppColors
-                                    .muted
-                                : AppColors
-                                    .accent,
+                        valueColor: entry.progress == null
+                            ? AppColors.muted
+                            : AppColors.accent,
                       ),
 
-                      const SizedBox(
-                        height: 2,
-                      ),
+                      const SizedBox(height: 2),
 
                       _ChapterInfoLine(
-                        label:
-                            'Unread chapters',
-                        value:
-                            entry.hasChapters
-                                ? '${entry.unreadCount}'
-                                : '—',
-                        valueColor:
-                            entry.hasChapters
-                                ? AppColors
-                                    .text
-                                : AppColors
-                                    .muted,
+                        label: 'Unread chapters',
+                        value: entry.hasChapters ? '${entry.unreadCount}' : '—',
+                        valueColor: entry.hasChapters
+                            ? AppColors.text
+                            : AppColors.muted,
                       ),
 
-                      const SizedBox(
-                        height: 8,
-                      ),
+                      const SizedBox(height: 8),
 
                       SizedBox(
-                        height:
-                            buttonHeight,
-                        width:
-                            double.infinity,
-                        child:
-                            FilledButton(
-                          style:
-                              FilledButton
-                                  .styleFrom(
-                            minimumSize:
-                                const Size(
-                              0,
-                              buttonHeight,
-                            ),
-                            padding:
-                                const EdgeInsets
-                                    .symmetric(
-                              horizontal:
-                                  12,
-                            ),
-                            tapTargetSize:
-                                MaterialTapTargetSize
-                                    .shrinkWrap,
-                            disabledBackgroundColor:
-                                AppColors
-                                    .raised,
-                            disabledForegroundColor:
-                                AppColors
-                                    .muted,
-                            shape:
-                                RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius
-                                      .circular(
-                                buttonRadius,
-                              ),
+                        height: buttonHeight,
+                        width: double.infinity,
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(0, buttonHeight),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            disabledBackgroundColor: AppColors.raised,
+                            disabledForegroundColor: AppColors.muted,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(buttonRadius),
                             ),
                           ),
 
@@ -998,21 +634,12 @@ class _HomeCard
                            * No chapters = keep manga visible,
                            * but don't open an invalid reader.
                            */
-                          onPressed:
-                              !entry
-                                      .hasChapters ||
-                                  entry
-                                      .caughtUp
+                          onPressed: !entry.hasChapters || entry.caughtUp
                               ? null
                               : () {
                                   final chapterId =
-                                      entry
-                                              .progress
-                                              ?.chapterId ??
-                                          entry
-                                              .chapters
-                                              .first
-                                              .id;
+                                      entry.progress?.chapterId ??
+                                      entry.chapters.first.id;
 
                                   context.push(
                                     '/reader/${Uri.encodeComponent(entry.manga.id)}?chapter=${Uri.encodeComponent(chapterId)}',
@@ -1022,10 +649,9 @@ class _HomeCard
                           child: Text(
                             !entry.hasChapters
                                 ? 'Chapters unavailable'
-                                : entry.progress ==
-                                        null
-                                    ? 'Start Reading'
-                                    : 'Continue Reading',
+                                : entry.progress == null
+                                ? 'Start Reading'
+                                : 'Continue Reading',
                           ),
                         ),
                       ),
@@ -1041,8 +667,7 @@ class _HomeCard
   }
 }
 
-class _ChapterInfoLine
-    extends StatelessWidget {
+class _ChapterInfoLine extends StatelessWidget {
   const _ChapterInfoLine({
     required this.label,
     required this.value,
@@ -1054,87 +679,50 @@ class _ChapterInfoLine
   final Color valueColor;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final style =
-        Theme.of(context)
-            .textTheme
-            .bodySmall;
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.bodySmall;
 
     return Text.rich(
       TextSpan(
         children: [
-          TextSpan(
-            text:
-                '$label: ',
-            style: style,
-          ),
+          TextSpan(text: '$label: ', style: style),
           TextSpan(
             text: value,
-            style:
-                style?.copyWith(
-              color:
-                  valueColor,
-              fontWeight:
-                  FontWeight.w800,
+            style: style?.copyWith(
+              color: valueColor,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ],
       ),
       maxLines: 1,
-      overflow:
-          TextOverflow.ellipsis,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }
 
-class _Empty
-    extends StatelessWidget {
-  const _Empty(
-    this.message,
-  );
+class _Empty extends StatelessWidget {
+  const _Empty(this.message);
 
   final String message;
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding:
-            const EdgeInsets.all(
-          32,
-        ),
+        padding: const EdgeInsets.all(32),
         child: Card(
           child: Padding(
-            padding:
-                const EdgeInsets.all(
-              22,
-            ),
+            padding: const EdgeInsets.all(22),
             child: Column(
-              mainAxisSize:
-                  MainAxisSize.min,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(
-                  Icons
-                      .auto_stories_outlined,
-                  color:
-                      AppColors.muted,
-                ),
-                const SizedBox(
-                  height: 10,
-                ),
+                const Icon(Icons.auto_stories_outlined, color: AppColors.muted),
+                const SizedBox(height: 10),
                 Text(
                   message,
-                  textAlign:
-                      TextAlign.center,
-                  style:
-                      const TextStyle(
-                    color:
-                        AppColors.muted,
-                  ),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: AppColors.muted),
                 ),
               ],
             ),

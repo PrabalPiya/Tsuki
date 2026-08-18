@@ -20,14 +20,12 @@ class OneTimeHint extends StatefulWidget {
   final Duration duration;
 
   @override
-  State<OneTimeHint> createState() =>
-      _OneTimeHintState();
+  State<OneTimeHint> createState() => _OneTimeHintState();
 }
 
 class _OneTimeHintState extends State<OneTimeHint>
     with SingleTickerProviderStateMixin {
-  static const String _prefix =
-      'tsuki_hint_seen_';
+  static const String _prefix = 'tsuki_hint_seen_';
 
   late final AnimationController _controller;
 
@@ -42,25 +40,18 @@ class _OneTimeHintState extends State<OneTimeHint>
 
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(
-        milliseconds: 900,
-      ),
+      duration: const Duration(milliseconds: 900),
     );
 
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _checkAndShow(),
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkAndShow());
   }
 
   Future<void> _checkAndShow() async {
-    final prefs =
-        await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
 
-    final key =
-        '$_prefix${widget.id}';
+    final key = '$_prefix${widget.id}';
 
-    final bool seen =
-        prefs.getBool(key) ?? false;
+    final bool seen = prefs.getBool(key) ?? false;
 
     if (!mounted) return;
 
@@ -79,10 +70,7 @@ class _OneTimeHintState extends State<OneTimeHint>
      * Even if the user navigates away before the
      * animation finishes, it will not show again.
      */
-    await prefs.setBool(
-      key,
-      true,
-    );
+    await prefs.setBool(key, true);
 
     if (!mounted) return;
 
@@ -94,16 +82,11 @@ class _OneTimeHintState extends State<OneTimeHint>
     /*
      * Same blink behaviour as Discover.
      */
-    _controller.repeat(
-      reverse: true,
-    );
+    _controller.repeat(reverse: true);
 
     _timer?.cancel();
 
-    _timer = Timer(
-      widget.duration,
-      _hide,
-    );
+    _timer = Timer(widget.duration, _hide);
   }
 
   Future<void> _hide() async {
@@ -115,9 +98,7 @@ class _OneTimeHintState extends State<OneTimeHint>
 
     await _controller.animateTo(
       0.0,
-      duration: const Duration(
-        milliseconds: 220,
-      ),
+      duration: const Duration(milliseconds: 220),
       curve: Curves.easeOut,
     );
 
@@ -137,52 +118,31 @@ class _OneTimeHintState extends State<OneTimeHint>
   }
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     if (!_checked || !_visible) {
       return const SizedBox.shrink();
     }
 
     return IgnorePointer(
       child: FadeTransition(
-        opacity: CurvedAnimation(
-          parent: _controller,
-          curve: Curves.easeInOut,
-        ),
+        opacity: CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
         child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: 9,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
           decoration: BoxDecoration(
             color: AppColors.glass,
-            borderRadius: BorderRadius.circular(
-              24,
-            ),
-            border: Border.all(
-              color: AppColors.outline,
-            ),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppColors.outline),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                widget.icon,
-                size: 18,
-                color: Colors.white,
-              ),
+              Icon(widget.icon, size: 18, color: Colors.white),
 
-              const SizedBox(
-                width: 8,
-              ),
+              const SizedBox(width: 8),
 
               Text(
                 widget.text,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                ),
+                style: const TextStyle(color: Colors.white, fontSize: 12),
               ),
             ],
           ),
