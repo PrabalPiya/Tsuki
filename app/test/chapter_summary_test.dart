@@ -23,14 +23,60 @@ void main() {
 
     expect(manga.chapterDisplayLabel, '~999');
 
-    MangaChapterRegistry.remember(
-      manga.id,
-      121,
-      latestNumber: 124,
-    );
+    MangaChapterRegistry.remember(manga.id, 121, latestNumber: 124);
 
     expect(manga.chapterDisplayLabel, '124');
     expect(manga.chapterCount, 121);
+  });
+
+  test(
+    'empty verification does not replace useful AniList metadata with zero',
+    () {
+      const manga = Manga(
+        id: 'anilist:zero-fallback',
+        title: 'Zero fallback',
+        coverUrl: '',
+        synopsis: '',
+        status: MangaStatus.ongoing,
+        chapterCount: 73,
+      );
+
+      MangaChapterRegistry.remember(manga.id, 0, latestNumber: null);
+
+      expect(manga.hasVerifiedChapterSummary, isFalse);
+      expect(manga.chapterDisplayLabel, '~73');
+      expect(manga.chapterCount, 73);
+    },
+  );
+
+  test('unknown metadata stays unknown rather than displaying zero', () {
+    const manga = Manga(
+      id: 'anilist:unknown',
+      title: 'Unknown',
+      coverUrl: '',
+      synopsis: '',
+      status: MangaStatus.ongoing,
+      chapterCount: 0,
+    );
+
+    MangaChapterRegistry.remember(manga.id, 0, latestNumber: null);
+
+    expect(manga.chapterDisplayLabel, '—');
+  });
+
+  test('startup ignores stale pre-V11 adult summaries', () async {
+    SharedPreferences.setMockInitialValues({
+      'tsuki.chapterSummary.v6.anilist:adult-old|adult:v8': '{"version":6,"mangaId":"anilist:adult-old","count":0,"latestNumber":88}',
+      'tsuki.chapterSummary.v6.anilist:adult-v9|adult:v9': '{"version":6,"mangaId":"anilist:adult-v9","count":17,"latestNumber":17}',
+      'tsuki.chapterSummary.v6.anilist:adult-v10|adult:v10': '{"version":6,"mangaId":"anilist:adult-v10","count":22,"latestNumber":22}',
+    });
+    MangaChapterRegistry.clear();
+
+    await ChapterIndexCache.warmGlobalSummaries();
+
+    expect(MangaChapterRegistry.summaryFor('anilist:adult-old'), isNull);
+    expect(MangaChapterRegistry.summaryFor('anilist:adult-v9'), isNull);
+    expect(MangaChapterRegistry.summaryFor('anilist:adult-v10'), isNull);
   });
 
   test('verified latest chapter survives app-style cache warm-up', () async {
@@ -98,16 +144,9 @@ void main() {
       ],
     );
 
-    await cache.writeChapters(
-      'anilist:adult|adult:true',
-      [externalOnly],
-    );
+    await cache.writeChapters('anilist:adult|adult:true', [externalOnly]);
 
-    expect(
-      await cache.readChapters('anilist:adult|adult:true'),
-      isNull,
-    );
+    expect(await cache.readChapters('anilist:adult|adult:true'), isNull);
     expect(MangaChapterRegistry.summaryFor('anilist:adult'), isNull);
   });
-
 }

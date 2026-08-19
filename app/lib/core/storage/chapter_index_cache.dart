@@ -12,7 +12,7 @@ import '../models/manga.dart';
 /// and are requested by the reader when a chapter is opened.
 class ChapterIndexCache {
   ChapterIndexCache({Future<SharedPreferences>? preferences})
-      : _preferences = preferences ?? SharedPreferences.getInstance() {
+    : _preferences = preferences ?? SharedPreferences.getInstance() {
     // Keep this fallback for tests/alternate entrypoints. Normal app startup
     // explicitly awaits [warmGlobalSummaries] before runApp.
     unawaited(_bootstrapSummaries());
@@ -23,7 +23,7 @@ class ChapterIndexCache {
   // v6 invalidates all earlier partial/wrong source mappings and indexes.
   static const _version = 6;
   static const _chapterPrefix = 'tsuki.chapterIndex.v6.';
-  static const _mappingPrefix = 'tsuki.sourceMapping.v8.';
+  static const _mappingPrefix = 'tsuki.sourceMapping.v10.';
   static const _checkedPrefix = 'tsuki.chapterChecked.v6.';
   static const _deepCheckedPrefix = 'tsuki.chapterDeepChecked.v6.';
   static const _summaryPrefix = 'tsuki.chapterSummary.v6.';
@@ -51,6 +51,18 @@ class ChapterIndexCache {
   static void _loadSummariesFromPreferences(SharedPreferences prefs) {
     for (final key in prefs.getKeys()) {
       if (!key.startsWith(_summaryPrefix)) continue;
+
+      // Normal-mode summaries remain compatible, but adult summaries from
+      // V6-V8 may have been produced by the broken adult resolver. Ignore
+      // those old adult keys during startup so they cannot repopulate the
+      // global registry before the V11 adult index is checked.
+      final cacheKey = key.substring(_summaryPrefix.length);
+      if (cacheKey.contains('|adult:') &&
+          !cacheKey.endsWith('|adult:false') &&
+          !cacheKey.endsWith('|adult:v11')) {
+        continue;
+      }
+
       final raw = prefs.getString(key);
       if (raw == null || raw.isEmpty) continue;
       try {
@@ -62,10 +74,7 @@ class ChapterIndexCache {
         final mangaId = map['mangaId']?.toString();
         final count = (map['count'] as num?)?.toInt();
         final latestNumber = (map['latestNumber'] as num?)?.toDouble();
-        if (mangaId == null ||
-            mangaId.isEmpty ||
-            count == null ||
-            count < 0) {
+        if (mangaId == null || mangaId.isEmpty || count == null || count < 0) {
           continue;
         }
         MangaChapterRegistry.remember(
@@ -161,10 +170,7 @@ class ChapterIndexCache {
     }
   }
 
-  Future<void> _forgetSummary(
-    SharedPreferences prefs,
-    String cacheKey,
-  ) async {
+  Future<void> _forgetSummary(SharedPreferences prefs, String cacheKey) async {
     await prefs.remove('$_summaryPrefix$cacheKey');
     final mangaId = _mangaIdFromCacheKey(cacheKey);
     if (mangaId.isNotEmpty) MangaChapterRegistry.remove(mangaId);
@@ -178,13 +184,15 @@ class ChapterIndexCache {
   }) async {
     if (chapters.isEmpty) return;
 
-    final clean = chapters.where((chapter) {
-      final number = chapter.number;
-      return chapter.sourceCopies.isNotEmpty &&
-          chapter.hasDirectlyReadableCopy &&
-          (number == null ||
-              (number.isFinite && number >= 0 && number <= 20000));
-    }).toList(growable: false);
+    final clean = chapters
+        .where((chapter) {
+          final number = chapter.number;
+          return chapter.sourceCopies.isNotEmpty &&
+              chapter.hasDirectlyReadableCopy &&
+              (number == null ||
+                  (number.isFinite && number >= 0 && number <= 20000));
+        })
+        .toList(growable: false);
 
     if (clean.isEmpty) return;
 
@@ -228,10 +236,7 @@ class ChapterIndexCache {
     );
   }
 
-  void _rememberSummary(
-    String cacheKey,
-    List<CanonicalChapter> chapters,
-  ) {
+  void _rememberSummary(String cacheKey, List<CanonicalChapter> chapters) {
     final mangaId = _mangaIdFromCacheKey(cacheKey);
     if (mangaId.isEmpty || chapters.isEmpty) return;
     MangaChapterRegistry.rememberSummary(mangaId, _summaryFor(chapters));
@@ -293,23 +298,23 @@ class ChapterIndexCache {
   }
 
   Map<String, Object?> _chapterToJson(CanonicalChapter chapter) => {
-        'id': chapter.id,
-        'number': chapter.number,
-        'title': chapter.title,
-        'publishedAt': chapter.publishedAt.millisecondsSinceEpoch,
-        'sourceCopies': chapter.sourceCopies
-            .map(
-              (copy) => <String, Object?>{
-                'sourceId': copy.sourceId,
-                'chapterId': copy.chapterId,
-                'reliability': copy.reliability,
-                'publishedAt': copy.publishedAt.millisecondsSinceEpoch,
-                'attribution': copy.attribution,
-                'externalUrl': copy.externalUrl,
-              },
-            )
-            .toList(growable: false),
-      };
+    'id': chapter.id,
+    'number': chapter.number,
+    'title': chapter.title,
+    'publishedAt': chapter.publishedAt.millisecondsSinceEpoch,
+    'sourceCopies': chapter.sourceCopies
+        .map(
+          (copy) => <String, Object?>{
+            'sourceId': copy.sourceId,
+            'chapterId': copy.chapterId,
+            'reliability': copy.reliability,
+            'publishedAt': copy.publishedAt.millisecondsSinceEpoch,
+            'attribution': copy.attribution,
+            'externalUrl': copy.externalUrl,
+          },
+        )
+        .toList(growable: false),
+  };
 
   CanonicalChapter? _chapterFromJson(Map<String, dynamic> json) {
     final id = json['id']?.toString();

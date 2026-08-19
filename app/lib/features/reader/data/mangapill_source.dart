@@ -13,7 +13,7 @@ import 'source_matching.dart';
 
 class MangaPillSource implements MangaSource {
   MangaPillSource({Dio? client})
-      : _client = client ?? createHttpClient(baseUrl: 'https://mangapill.com');
+    : _client = client ?? createHttpClient(baseUrl: 'https://mangapill.com');
 
   final Dio _client;
 
@@ -25,12 +25,12 @@ class MangaPillSource implements MangaSource {
 
   @override
   SourceCapabilities get capabilities => const SourceCapabilities(
-        search: true,
-        details: true,
-        chapters: true,
-        pages: true,
-        updates: true,
-      );
+    search: true,
+    details: true,
+    chapters: true,
+    pages: true,
+    updates: true,
+  );
 
   @override
   Set<String> get allowedImageHosts => const {};
@@ -57,12 +57,13 @@ class MangaPillSource implements MangaSource {
       final sourceId = _sourceIdFromMangaHref(href);
       if (sourceId == null) continue;
 
-      final title = (card.querySelector('div.line-clamp-2')?.text ??
-              anchor.attributes['title'] ??
-              anchor.querySelector('img')?.attributes['alt'] ??
-              anchor.text)
-          .replaceAll(RegExp(r'\s+'), ' ')
-          .trim();
+      final title =
+          (card.querySelector('div.line-clamp-2')?.text ??
+                  anchor.attributes['title'] ??
+                  anchor.querySelector('img')?.attributes['alt'] ??
+                  anchor.text)
+              .replaceAll(RegExp(r'\s+'), ' ')
+              .trim();
       if (title.isEmpty) continue;
 
       final image = card.querySelector('img') ?? anchor.querySelector('img');
@@ -85,11 +86,12 @@ class MangaPillSource implements MangaSource {
         if (href == null) continue;
         final sourceId = _sourceIdFromMangaHref(href);
         if (sourceId == null) continue;
-        final title = (anchor.querySelector('img')?.attributes['alt'] ??
-                anchor.attributes['title'] ??
-                anchor.text)
-            .replaceAll(RegExp(r'\s+'), ' ')
-            .trim();
+        final title =
+            (anchor.querySelector('img')?.attributes['alt'] ??
+                    anchor.attributes['title'] ??
+                    anchor.text)
+                .replaceAll(RegExp(r'\s+'), ' ')
+                .trim();
         if (title.isEmpty) continue;
         results[sourceId] = Manga(
           id: 'mangapill:$sourceId',
@@ -110,15 +112,15 @@ class MangaPillSource implements MangaSource {
   }
 
   Future<String?> findConservativeMatch(Manga canonical) async {
-    final canonicalNames = <String>{canonical.title, ...canonical.aliases}
-        .map(SourceMatching.normalize)
-        .where((value) => value.isNotEmpty)
-        .toSet();
+    final canonicalNames = <String>{
+      canonical.title,
+      ...canonical.aliases,
+    }.map(SourceMatching.normalize).where((value) => value.isNotEmpty).toSet();
 
-    final queries = <String>{canonical.title, ...canonical.aliases}
-        .map((value) => value.trim())
-        .where((value) => value.length >= 2)
-        .take(8);
+    final queries = <String>{
+      canonical.title,
+      ...canonical.aliases,
+    }.map((value) => value.trim()).where((value) => value.length >= 2).take(8);
 
     for (final query in queries) {
       try {
@@ -126,7 +128,9 @@ class MangaPillSource implements MangaSource {
         if (candidates.isEmpty) continue;
 
         for (final candidate in candidates) {
-          if (canonicalNames.contains(SourceMatching.normalize(candidate.title))) {
+          if (canonicalNames.contains(
+            SourceMatching.normalize(candidate.title),
+          )) {
             return candidate.id.replaceFirst('mangapill:', '');
           }
         }
@@ -163,7 +167,8 @@ class MangaPillSource implements MangaSource {
         document.querySelector('div.container img')?.attributes['data-src'] ??
             '',
       ),
-      synopsis: document
+      synopsis:
+          document
               .querySelector('div.container p')
               ?.text
               .replaceAll(RegExp(r'\s+'), ' ')
@@ -242,10 +247,7 @@ class MangaPillSource implements MangaSource {
   Future<ChapterPages> getChapterPages(String sourceChapterId) async {
     final path = Uri.decodeComponent(sourceChapterId);
     if (!path.startsWith('/chapters/')) {
-      throw const SourceFailure(
-        'Invalid MangaPill chapter.',
-        retryable: false,
-      );
+      throw const SourceFailure('Invalid MangaPill chapter.', retryable: false);
     }
 
     final document = await _document(path);
@@ -270,11 +272,7 @@ class MangaPillSource implements MangaSource {
       throw const SourceFailure('MangaPill chapter unavailable.');
     }
 
-    return ChapterPages(
-      chapterId: sourceChapterId,
-      sourceId: id,
-      urls: urls,
-    );
+    return ChapterPages(chapterId: sourceChapterId, sourceId: id, urls: urls);
   }
 
   @override

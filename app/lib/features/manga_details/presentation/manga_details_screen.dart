@@ -146,6 +146,19 @@ class _Details extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final library = ref.watch(userLibraryProvider);
 
+    if (manga.isAdult != library.adultContent) {
+      return Scaffold(
+        body: _ModernMessage(
+          icon: Icons.visibility_off_rounded,
+          message: 'This title is hidden in the current content mode.',
+          retryLabel: 'Go Back',
+          onRetry: () {
+            if (context.canPop()) context.pop();
+          },
+        ),
+      );
+    }
+
     final chaptersAsync = ref.watch(chapterProvider(manga));
 
     final bookmarked = library.bookmarks.contains(manga.id);
@@ -159,9 +172,8 @@ class _Details extends ConsumerWidget {
         .where((chapter) => chapter.hasDirectlyReadableCopy)
         .toList(growable: false);
 
-    final chapterCountLabel = ref
-            .watch(chapterSummaryLabelProvider(manga))
-            .valueOrNull ??
+    final chapterCountLabel =
+        ref.watch(chapterSummaryLabelProvider(manga)).valueOrNull ??
         manga.chapterDisplayLabel;
 
     final startReadingLabel = progress == null
@@ -335,7 +347,9 @@ class _Details extends ConsumerWidget {
                       ),
                       child: _ModernMessage(
                         icon: Icons.menu_book_outlined,
-                        message: 'No English chapters available from the configured sources.',
+                        message: library.adultContent
+                            ? 'No directly readable adult chapters were found from the supported public sources for this title.'
+                            : 'No English chapters available from the configured sources.',
                         retryLabel: 'Refresh',
                         onRetry: () {
                           ref.invalidate(chapterProvider(manga));
@@ -612,7 +626,7 @@ class _MangaHero extends StatelessWidget {
       text: TextSpan(text: title, style: titleStyle),
       textDirection: TextDirection.ltr,
       maxLines: 2,
-      ellipsis: 'Ã¢â‚¬Â¦',
+      ellipsis: 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦',
     )..layout(maxWidth: contentWidth);
 
     final synopsisPainter = TextPainter(
@@ -642,6 +656,7 @@ class _MangaHero extends StatelessWidget {
         titlePainter.height +
         _heroTitleToInfoSpacing +
         34 +
+        42 +
         _heroInfoToSynopsisSpacing +
         synopsisPainter.height +
         _heroSynopsisToActionsSpacing +
@@ -812,6 +827,36 @@ class _MangaHero extends StatelessWidget {
                       ),
                     ),
                   ],
+                ),
+
+                const SizedBox(height: 9),
+
+                Text(
+                  manga.compactIdentityLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: .82),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+
+                const SizedBox(height: 4),
+
+                Text(
+                  <String>[
+                    if (manga.volumeCount > 0) '${manga.volumeCount} volumes',
+                    if ((manga.popularity ?? 0) > 0)
+                      'Popularity ${manga.popularityLabel}',
+                    ...manga.displayGenres.take(2),
+                  ].join(' â€¢ '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: .70),
+                    fontSize: 11,
+                  ),
                 ),
 
                 const SizedBox(height: _heroInfoToSynopsisSpacing),

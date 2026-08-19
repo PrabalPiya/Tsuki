@@ -43,17 +43,15 @@ Dio createHttpClient({String? baseUrl}) {
 
         if (retryable && request.extra['tsukiRetried'] != true) {
           final retryAfter =
-              int.tryParse(error.response?.headers.value('retry-after') ?? '') ??
-                  1;
-          await Future<void>.delayed(
-            Duration(seconds: retryAfter.clamp(1, 3)),
-          );
+              int.tryParse(
+                error.response?.headers.value('retry-after') ?? '',
+              ) ??
+              1;
+          await Future<void>.delayed(Duration(seconds: retryAfter.clamp(1, 3)));
 
           try {
             final response = await client.fetch<dynamic>(
-              request.copyWith(
-                extra: {...request.extra, 'tsukiRetried': true},
-              ),
+              request.copyWith(extra: {...request.extra, 'tsukiRetried': true}),
             );
             handler.resolve(response);
             return;

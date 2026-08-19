@@ -17,10 +17,7 @@ void main() {
       ChapterNumberParser.parseVisibleLabel('uploaded 2026-08-19'),
       isNull,
     );
-    expect(
-      ChapterNumberParser.parseVisibleLabel('series id 123456'),
-      isNull,
-    );
+    expect(ChapterNumberParser.parseVisibleLabel('series id 123456'), isNull);
     expect(
       ChapterNumberParser.parseVisibleLabel('123', allowPlainNumber: false),
       isNull,

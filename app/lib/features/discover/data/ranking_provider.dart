@@ -39,15 +39,23 @@ class DemoRankingProvider implements RankingProvider {
 }
 
 class AniListRankingProvider implements RankingProvider {
-  const AniListRankingProvider(this.metadata);
+  const AniListRankingProvider(this.metadata, {this.adultOnly = false});
+
   final AniListMetadataProvider metadata;
+  final bool adultOnly;
 
   @override
   Future<RankingResult> rankings(RankingPeriod period) async {
     final items = switch (period) {
-      RankingPeriod.trending => await metadata.browseTrending(),
-      RankingPeriod.topRated => await metadata.browseTopRated(),
-      RankingPeriod.popular => await metadata.browsePopular(),
+      RankingPeriod.trending => await metadata.browseTrending(
+        adultOnly: adultOnly,
+      ),
+      RankingPeriod.topRated => await metadata.browseTopRated(
+        adultOnly: adultOnly,
+      ),
+      RankingPeriod.popular => await metadata.browsePopular(
+        adultOnly: adultOnly,
+      ),
     };
     return RankingResult(items: items);
   }

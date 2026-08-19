@@ -7,14 +7,16 @@ import '../../../core/theme/app_theme.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(userLibraryProvider);
     final session = ref.watch(authProvider);
+
     return Scaffold(
       appBar: AppBar(titleSpacing: 16, title: const Text('Settings')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
           _SectionCard(
             title: 'Reading preferences',
@@ -22,8 +24,9 @@ class SettingsScreen extends ConsumerWidget {
               _SwitchRow(
                 icon: Icons.shield_moon_rounded,
                 title: 'Adult content',
-                subtitle:
-                    'Allow mature titles in search. Discover stays filtered.',
+                subtitle: state.adultContent
+                    ? 'Only 18+ manga are shown.'
+                    : '18+ manga are hidden.',
                 value: state.adultContent,
                 onChanged: ref
                     .read(userLibraryProvider.notifier)
@@ -38,7 +41,7 @@ class SettingsScreen extends ConsumerWidget {
               _ActionRow(
                 icon: Icons.image_rounded,
                 title: 'Image cache',
-                subtitle: 'Stores covers so pages load faster.',
+                subtitle: 'Stores covers and recently viewed pages for speed.',
                 action: TextButton(
                   onPressed: () async {
                     await MangaImageCache.instance.emptyCache();
@@ -154,16 +157,133 @@ class SettingsScreen extends ConsumerWidget {
     required String message,
     required String confirmLabel,
     bool destructive = false,
-  }) => showDialog<bool>(
-    context: context,
-    builder: (context) => _ConfirmDialog(
-      icon: icon,
-      title: title,
-      message: message,
-      confirmLabel: confirmLabel,
-      destructive: destructive,
-    ),
-  );
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => _ConfirmDialog(
+        icon: icon,
+        title: title,
+        message: message,
+        confirmLabel: confirmLabel,
+        destructive: destructive,
+      ),
+    );
+  }
+}
+
+class _SmoothModeSwitch extends StatefulWidget {
+  const _SmoothModeSwitch({required this.value});
+
+  final bool value;
+
+  @override
+  State<_SmoothModeSwitch> createState() => _SmoothModeSwitchState();
+}
+
+class _SmoothModeSwitchState extends State<_SmoothModeSwitch>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _curve;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
+      value: widget.value ? 1 : 0,
+    );
+    _curve = CurvedAnimation(
+      parent: _controller,
+      curve: const Cubic(0.22, 0.61, 0.36, 1),
+      reverseCurve: const Cubic(0.22, 0.61, 0.36, 1),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _SmoothModeSwitch oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value) {
+      _controller.animateTo(
+        widget.value ? 1 : 0,
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.linear,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      toggled: widget.value,
+      label: 'Adult content',
+      child: IgnorePointer(
+        child: AnimatedBuilder(
+          animation: _curve,
+          builder: (context, _) {
+            final t = _curve.value;
+            final track = Color.lerp(AppColors.raised, AppColors.accent, t)!;
+            final border = Color.lerp(
+              AppColors.outline,
+              AppColors.accent.withValues(alpha: .76),
+              t,
+            )!;
+            final knob = Color.lerp(AppColors.text, AppColors.background, t)!;
+
+            return Container(
+              width: 54,
+              height: 31,
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                color: track,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: border),
+                boxShadow: t <= .01
+                    ? const <BoxShadow>[]
+                    : <BoxShadow>[
+                        BoxShadow(
+                          color: AppColors.accent.withValues(alpha: .18 * t),
+                          blurRadius: 12 * t,
+                        ),
+                      ],
+              ),
+              child: Align(
+                alignment: Alignment.lerp(
+                  Alignment.centerLeft,
+                  Alignment.centerRight,
+                  t,
+                )!,
+                child: Transform.scale(
+                  scale: .94 + (.06 * (1 - (2 * t - 1).abs())),
+                  child: Container(
+                    width: 25,
+                    height: 25,
+                    decoration: BoxDecoration(
+                      color: knob,
+                      shape: BoxShape.circle,
+                      boxShadow: const <BoxShadow>[
+                        BoxShadow(
+                          color: Color(0x55000000),
+                          blurRadius: 5,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
 }
 
 class _ConfirmDialog extends StatelessWidget {
@@ -174,6 +294,7 @@ class _ConfirmDialog extends StatelessWidget {
     required this.confirmLabel,
     required this.destructive,
   });
+
   final IconData icon;
   final String title;
   final String message;
@@ -183,6 +304,7 @@ class _ConfirmDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = destructive ? AppColors.danger : AppColors.accent;
+
     return Dialog(
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 28),
@@ -256,26 +378,30 @@ class _ConfirmDialog extends StatelessWidget {
 
 class _SectionCard extends StatelessWidget {
   const _SectionCard({required this.title, required this.children});
+
   final String title;
   final List<Widget> children;
+
   @override
-  Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.bodySmall
-                ?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 8),
-          ...children,
-        ],
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            ...children,
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _InfoRow extends StatelessWidget {
@@ -284,15 +410,20 @@ class _InfoRow extends StatelessWidget {
     required this.title,
     required this.subtitle,
   });
+
   final IconData icon;
-  final String title, subtitle;
+  final String title;
+  final String subtitle;
+
   @override
-  Widget build(BuildContext context) => _RowShell(
-    icon: icon,
-    title: title,
-    subtitle: subtitle,
-    trailing: const SizedBox.shrink(),
-  );
+  Widget build(BuildContext context) {
+    return _RowShell(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
+      trailing: const SizedBox.shrink(),
+    );
+  }
 }
 
 class _ActionRow extends StatelessWidget {
@@ -304,29 +435,34 @@ class _ActionRow extends StatelessWidget {
     this.onTap,
     this.destructive = false,
   });
+
   final IconData icon;
-  final String title, subtitle;
+  final String title;
+  final String subtitle;
   final Widget? action;
   final VoidCallback? onTap;
   final bool destructive;
+
   @override
-  Widget build(BuildContext context) => _RowShell(
-    icon: icon,
-    title: title,
-    subtitle: subtitle,
-    iconColor: destructive ? AppColors.danger : null,
-    titleColor: destructive ? AppColors.danger : null,
-    iconBackgroundColor: destructive
-        ? AppColors.danger.withValues(alpha: .12)
-        : null,
-    trailing:
-        action ??
-        Icon(
-          Icons.chevron_right_rounded,
-          color: destructive ? AppColors.danger : null,
-        ),
-    onTap: onTap,
-  );
+  Widget build(BuildContext context) {
+    return _RowShell(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
+      iconColor: destructive ? AppColors.danger : null,
+      titleColor: destructive ? AppColors.danger : null,
+      iconBackgroundColor: destructive
+          ? AppColors.danger.withValues(alpha: .12)
+          : null,
+      trailing:
+          action ??
+          Icon(
+            Icons.chevron_right_rounded,
+            color: destructive ? AppColors.danger : null,
+          ),
+      onTap: onTap,
+    );
+  }
 }
 
 class _SwitchRow extends StatelessWidget {
@@ -337,18 +473,23 @@ class _SwitchRow extends StatelessWidget {
     required this.value,
     required this.onChanged,
   });
+
   final IconData icon;
-  final String title, subtitle;
+  final String title;
+  final String subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
+
   @override
-  Widget build(BuildContext context) => _RowShell(
-    icon: icon,
-    title: title,
-    subtitle: subtitle,
-    trailing: Switch(value: value, onChanged: onChanged),
-    onTap: () => onChanged(!value),
-  );
+  Widget build(BuildContext context) {
+    return _RowShell(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
+      trailing: _SmoothModeSwitch(value: value),
+      onTap: () => onChanged(!value),
+    );
+  }
 }
 
 class _RowShell extends StatelessWidget {
@@ -362,54 +503,69 @@ class _RowShell extends StatelessWidget {
     this.iconBackgroundColor,
     this.onTap,
   });
+
   final IconData icon;
-  final String title, subtitle;
+  final String title;
+  final String subtitle;
   final Widget trailing;
   final Color? iconColor;
   final Color? titleColor;
   final Color? iconBackgroundColor;
   final VoidCallback? onTap;
+
   @override
-  Widget build(BuildContext context) => InkWell(
-    borderRadius: BorderRadius.circular(18),
-    onTap: onTap,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: iconBackgroundColor ?? AppColors.raised,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: iconColor?.withValues(alpha: .18) ?? AppColors.outline,
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutCubic,
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: iconBackgroundColor ?? AppColors.raised,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: iconColor?.withValues(alpha: .18) ?? AppColors.outline,
+                ),
+              ),
+              child: Icon(icon, color: iconColor, size: 21),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: AnimatedSize(
+                duration: const Duration(milliseconds: 240),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.centerLeft,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: titleColor ?? AppColors.text,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
               ),
             ),
-            child: Icon(icon, color: iconColor, size: 21),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: titleColor ?? AppColors.text,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          trailing,
-        ],
+            const SizedBox(width: 10),
+            trailing,
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }

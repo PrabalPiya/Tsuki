@@ -34,9 +34,7 @@ void main() {
       markChecked: true,
     );
 
-    final restored = await cache.readChapters(
-      'anilist:1|adult:false',
-    );
+    final restored = await cache.readChapters('anilist:1|adult:false');
 
     expect(restored, isNotNull);
     expect(restored, hasLength(1));
@@ -47,14 +45,8 @@ void main() {
   test('source mappings are persisted locally', () async {
     final cache = ChapterIndexCache();
 
-    await cache.writeMapping(
-      'anilist:1|comick',
-      'hid|slug',
-    );
+    await cache.writeMapping('anilist:1|comick', 'hid|slug');
 
-    expect(
-      await cache.readMapping('anilist:1|comick'),
-      'hid|slug',
-    );
+    expect(await cache.readMapping('anilist:1|comick'), 'hid|slug');
   });
 }

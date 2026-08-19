@@ -52,11 +52,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   Future<void> _initialize() async {
     try {
       final repository = ref.read(catalogProvider);
-      final saved =
-          ref.read(userLibraryProvider).bookmarkedManga[widget.mangaId];
+      final saved = ref
+          .read(userLibraryProvider)
+          .bookmarkedManga[widget.mangaId];
       if (saved != null) repository.remember(saved);
 
-      final manga = repository.cached(widget.mangaId) ??
+      final manga =
+          repository.cached(widget.mangaId) ??
           await repository.details(widget.mangaId);
       if (manga == null) {
         _setFatal('Manga unavailable right now.');
@@ -64,10 +66,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       }
 
       repository.remember(manga);
-      final chapters = await repository.chapters(
-        manga,
-        allowAdult: ref.read(userLibraryProvider).adultContent,
-      );
+      final adultMode = ref.read(userLibraryProvider).adultContent;
+      if (manga.isAdult != adultMode) {
+        _setFatal('This title is hidden in the current content mode.');
+        return;
+      }
+
+      final chapters = await repository.chapters(manga, allowAdult: adultMode);
       if (chapters.isEmpty) {
         _setFatal('No readable English chapters were found.');
         return;
@@ -219,7 +224,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     if (!mounted || !_scroll.hasClients || _loaded.isEmpty) return;
     final value = _locate(_scroll.offset);
 
-    await ref.read(userLibraryProvider.notifier).saveProgress(
+    await ref
+        .read(userLibraryProvider.notifier)
+        .saveProgress(
           ReadingProgress(
             mangaId: widget.mangaId,
             chapterId: _chapters[value.index].id,
@@ -235,7 +242,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final existing = ref.read(userLibraryProvider).progress[widget.mangaId];
     final sameChapter = existing?.chapterId == _chapters[index].id;
 
-    await ref.read(userLibraryProvider.notifier).saveProgress(
+    await ref
+        .read(userLibraryProvider.notifier)
+        .saveProgress(
           ReadingProgress(
             mangaId: widget.mangaId,
             chapterId: _chapters[index].id,
@@ -260,10 +269,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     if (!failed.add(failedSourceId)) return;
 
     try {
-      final replacement = await ref.read(catalogProvider).pages(
-            _chapters[index],
-            skipSourceIds: failed,
-          );
+      final replacement = await ref
+          .read(catalogProvider)
+          .pages(_chapters[index], skipSourceIds: failed);
       if (!mounted || replacement.urls.isEmpty) return;
       setState(() {
         _loaded[index] = replacement;
@@ -330,11 +338,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         ..._loaded.keys,
         ..._loading,
         ..._errors.keys,
-      }.toList()
-        ..sort();
+      }.toList()..sort();
 
       for (final index in indexes) {
-        final isRead = progress != null &&
+        final isRead =
+            progress != null &&
             progress.openedChapterIds.contains(_chapters[index].id);
 
         blocks.add((
@@ -409,42 +417,42 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                     return switch (block.type) {
                       _BlockType.header => _ChapterHeader(chapter: chapter),
                       _BlockType.page => _ReaderPage(
-                          url: block.url!,
-                          sourceId: _loaded[block.chapter]!.sourceId,
-                          page: block.page,
-                          onAspectRatio: (ratio) =>
-                              _pageRatios[block.url!] = ratio,
-                          onLoadError: () => _retryChapterWithNextSource(
-                            block.chapter,
-                            _loaded[block.chapter]!.sourceId,
-                          ),
+                        url: block.url!,
+                        sourceId: _loaded[block.chapter]!.sourceId,
+                        page: block.page,
+                        onAspectRatio: (ratio) =>
+                            _pageRatios[block.url!] = ratio,
+                        onLoadError: () => _retryChapterWithNextSource(
+                          block.chapter,
+                          _loaded[block.chapter]!.sourceId,
                         ),
+                      ),
                       _BlockType.loading => const SizedBox(
-                          height: 96,
-                          child: Center(child: CircularProgressIndicator()),
-                        ),
+                        height: 96,
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
                       _BlockType.error => _ChapterError(
-                          message: _errors[block.chapter]!,
-                          retry: () => _load(block.chapter),
-                        ),
+                        message: _errors[block.chapter]!,
+                        retry: () => _load(block.chapter),
+                      ),
                       _BlockType.end => SizedBox(
-                          height: 120,
-                          child: Container(
-                            color: AppColors.background,
-                            child: Center(
-                              child: block.chapter < _chapters.length - 1
-                                  ? FilledButton(
-                                      onPressed: () =>
-                                          _goToChapter(block.chapter + 1),
-                                      child: const Text('Next Chapter'),
-                                    )
-                                  : const Text(
-                                      "You're all caught up",
-                                      style: TextStyle(color: AppColors.muted),
-                                    ),
-                            ),
+                        height: 120,
+                        child: Container(
+                          color: AppColors.background,
+                          child: Center(
+                            child: block.chapter < _chapters.length - 1
+                                ? FilledButton(
+                                    onPressed: () =>
+                                        _goToChapter(block.chapter + 1),
+                                    child: const Text('Next Chapter'),
+                                  )
+                                : const Text(
+                                    "You're all caught up",
+                                    style: TextStyle(color: AppColors.muted),
+                                  ),
                           ),
                         ),
+                      ),
                     };
                   },
                 ),
@@ -471,8 +479,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                             ),
                             Expanded(
                               child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
                                 child: Text(
                                   manga?.title ?? 'Reader',
                                   maxLines: 1,
@@ -541,19 +550,19 @@ class _ReaderFailure extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: AppColors.text),
-            ),
-            const SizedBox(height: 16),
-            FilledButton(onPressed: retry, child: const Text('Try again')),
-          ],
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          message,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: AppColors.text),
         ),
-      );
+        const SizedBox(height: 16),
+        FilledButton(onPressed: retry, child: const Text('Try again')),
+      ],
+    ),
+  );
 }
 
 class _ChapterError extends StatelessWidget {
@@ -564,17 +573,17 @@ class _ChapterError extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-        height: 112,
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(message, style: const TextStyle(color: AppColors.muted)),
-              TextButton(onPressed: retry, child: const Text('Retry chapter')),
-            ],
-          ),
-        ),
-      );
+    height: 112,
+    child: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(message, style: const TextStyle(color: AppColors.muted)),
+          TextButton(onPressed: retry, child: const Text('Retry chapter')),
+        ],
+      ),
+    ),
+  );
 }
 
 class _ReaderPage extends StatefulWidget {
@@ -671,32 +680,34 @@ class _ReaderPageState extends State<_ReaderPage> {
       );
     }
 
-    final decodeWidth =
-        (width * MediaQuery.devicePixelRatioOf(context)).round();
+    final decodeWidth = (width * MediaQuery.devicePixelRatioOf(context))
+        .round();
     return SizedBox(
-      height: height,
       width: double.infinity,
-      child: CachedNetworkImage(
-        imageUrl: widget.url,
-        httpHeaders: _sourceImageHeaders(widget.sourceId),
-        cacheManager: MangaImageCache.instance,
-        memCacheWidth: decodeWidth,
-        imageBuilder: (_, provider) {
-          _resolveAspect(provider);
-          return _ZoomablePage(imageProvider: provider);
-        },
-        fadeInDuration: const Duration(milliseconds: 120),
-        placeholder: (_, __) =>
-            const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-        errorWidget: (_, __, ___) {
-          _reportLoadError();
-          return const Center(
-            child: Text(
-              'Trying another source…',
-              style: TextStyle(color: AppColors.muted),
-            ),
-          );
-        },
+      child: AspectRatio(
+        aspectRatio: _aspectRatio,
+        child: CachedNetworkImage(
+          imageUrl: widget.url,
+          httpHeaders: _sourceImageHeaders(widget.sourceId),
+          cacheManager: MangaImageCache.instance,
+          memCacheWidth: decodeWidth,
+          imageBuilder: (_, provider) {
+            _resolveAspect(provider);
+            return _ZoomablePage(imageProvider: provider);
+          },
+          fadeInDuration: const Duration(milliseconds: 120),
+          placeholder: (_, __) =>
+              const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          errorWidget: (_, __, ___) {
+            _reportLoadError();
+            return const Center(
+              child: Text(
+                'Trying another source…',
+                style: TextStyle(color: AppColors.muted),
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -709,6 +720,11 @@ Map<String, String>? _sourceImageHeaders(String sourceId) {
     'mangapill' => 'https://mangapill.com/',
     'comick' => 'https://comick.live/',
     'mangadex' => 'https://mangadex.org/',
+    'omegascans' => 'https://omegascans.org/',
+    'ero18x' => 'https://ero18x.com/',
+    'toon18' => 'https://toon18.to/',
+    'webtoonxyz' => 'https://www.webtoon.xyz/',
+    'hitomi' => 'https://hitomi.la/',
     _ => null,
   };
   if (referer == null) return null;
@@ -738,21 +754,26 @@ class _ZoomablePageState extends State<_ZoomablePage> {
   }
 
   @override
-  Widget build(BuildContext context) => Container(
-        color: AppColors.background,
-        child: InteractiveViewer(
-          transformationController: _transform,
-          minScale: 0.5,
-          maxScale: 5,
-          panEnabled: true,
-          clipBehavior: Clip.hardEdge,
-          onInteractionUpdate: (_) {
-            final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
-            if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
-          },
-          child: SizedBox.expand(
-            child: Image(image: widget.imageProvider, fit: BoxFit.fitWidth),
-          ),
+  Widget build(BuildContext context) => ColoredBox(
+    color: AppColors.background,
+    child: InteractiveViewer(
+      transformationController: _transform,
+      minScale: 1,
+      maxScale: 5,
+      panEnabled: true,
+      clipBehavior: Clip.none,
+      onInteractionUpdate: (_) {
+        final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
+        if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
+      },
+      child: SizedBox.expand(
+        child: Image(
+          image: widget.imageProvider,
+          fit: BoxFit.contain,
+          alignment: Alignment.center,
+          filterQuality: FilterQuality.medium,
         ),
-      );
+      ),
+    ),
+  );
 }

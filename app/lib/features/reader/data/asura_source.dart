@@ -15,7 +15,7 @@ import 'source_matching.dart';
 
 class AsuraSource implements MangaSource {
   AsuraSource({Dio? client})
-      : _client = client ?? createHttpClient(baseUrl: 'https://asurascans.com');
+    : _client = client ?? createHttpClient(baseUrl: 'https://asurascans.com');
 
   static const _apiSeries = 'https://api.asurascans.com/api/series';
 
@@ -29,12 +29,12 @@ class AsuraSource implements MangaSource {
 
   @override
   SourceCapabilities get capabilities => const SourceCapabilities(
-        search: true,
-        details: true,
-        chapters: true,
-        pages: true,
-        updates: true,
-      );
+    search: true,
+    details: true,
+    chapters: true,
+    pages: true,
+    updates: true,
+  );
 
   @override
   Set<String> get allowedImageHosts => const {};
@@ -48,14 +48,8 @@ class AsuraSource implements MangaSource {
     // far faster and less fragile than crawling every /browse page.
     final response = await _client.get<dynamic>(
       _apiSeries,
-      queryParameters: {
-        'offset': 0,
-        'limit': 20,
-        'search': cleaned,
-      },
-      options: Options(
-        headers: const {'Referer': 'https://asurascans.com/'},
-      ),
+      queryParameters: {'offset': 0, 'limit': 20, 'search': cleaned},
+      options: Options(headers: const {'Referer': 'https://asurascans.com/'}),
     );
 
     final root = response.data;
@@ -68,16 +62,16 @@ class AsuraSource implements MangaSource {
       final row = Map<String, dynamic>.from(raw);
       final title = row['title']?.toString().trim() ?? '';
       final stableSlug = row['slug']?.toString().trim() ?? '';
-      final publicUrl = row['public_url']?.toString().trim() ??
+      final publicUrl =
+          row['public_url']?.toString().trim() ??
           row['publicUrl']?.toString().trim() ??
           '';
       final randomSlug = _publicSlug(publicUrl) ?? stableSlug;
       if (title.isEmpty || randomSlug.isEmpty) continue;
 
       final path = 'comics/$randomSlug';
-      final cover = row['cover']?.toString() ??
-          row['coverUrl']?.toString() ??
-          '';
+      final cover =
+          row['cover']?.toString() ?? row['coverUrl']?.toString() ?? '';
       result.add(
         Manga(
           id: 'asura:${Uri.encodeComponent(path)}',
@@ -93,19 +87,20 @@ class AsuraSource implements MangaSource {
   }
 
   Future<String?> findConservativeMatch(Manga canonical) async {
-    final queries = <String>{canonical.title, ...canonical.aliases}
-        .map((value) => value.trim())
-        .where((value) => value.length >= 2)
-        .take(8);
+    final queries = <String>{
+      canonical.title,
+      ...canonical.aliases,
+    }.map((value) => value.trim()).where((value) => value.length >= 2).take(8);
 
     for (final query in queries) {
       try {
         final candidates = await search(query);
         if (candidates.isEmpty) continue;
 
-        final exactNames = <String>{canonical.title, ...canonical.aliases}
-            .map(SourceMatching.normalize)
-            .toSet();
+        final exactNames = <String>{
+          canonical.title,
+          ...canonical.aliases,
+        }.map(SourceMatching.normalize).toSet();
         for (final candidate in candidates) {
           if (exactNames.contains(SourceMatching.normalize(candidate.title))) {
             return candidate.id.replaceFirst('asura:', '');
@@ -135,8 +130,13 @@ class AsuraSource implements MangaSource {
     final document = await _documentWithRedirectFallback(path);
     final astro = _findAstroObject(document, const ['title', 'description']);
 
-    final title = astro?['title']?.toString().trim() ??
-        document.querySelector('h1')?.text.replaceAll(RegExp(r'\s+'), ' ').trim() ??
+    final title =
+        astro?['title']?.toString().trim() ??
+        document
+            .querySelector('h1')
+            ?.text
+            .replaceAll(RegExp(r'\s+'), ' ')
+            .trim() ??
         '';
     if (title.isEmpty) return null;
 
@@ -207,9 +207,8 @@ class AsuraSource implements MangaSource {
       final title = titleRaw.isEmpty
           ? 'Chapter $key'
           : 'Chapter $key - ${_plainText(titleRaw)}';
-      final published = DateTime.tryParse(
-            row['created_at']?.toString() ?? '',
-          ) ??
+      final published =
+          DateTime.tryParse(row['created_at']?.toString() ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0);
 
       final chapterPath = '$mangaPath/chapter/$key';
@@ -285,10 +284,7 @@ class AsuraSource implements MangaSource {
   Future<ChapterPages> getChapterPages(String sourceChapterId) async {
     final path = Uri.decodeComponent(sourceChapterId);
     if (!path.startsWith('comics/') || !path.contains('/chapter/')) {
-      throw const SourceFailure(
-        'Invalid Asura chapter.',
-        retryable: false,
-      );
+      throw const SourceFailure('Invalid Asura chapter.', retryable: false);
     }
 
     final document = await _documentWithRedirectFallback(path);
@@ -340,7 +336,8 @@ class AsuraSource implements MangaSource {
     for (final image in document.querySelectorAll(
       'img[alt^="Page"], main img, .reader img, #readerarea img',
     )) {
-      final raw = image.attributes['data-src'] ??
+      final raw =
+          image.attributes['data-src'] ??
           image.attributes['data-lazy-src'] ??
           image.attributes['src'];
       _addTrustedPageUrl(raw, urls);
@@ -350,11 +347,7 @@ class AsuraSource implements MangaSource {
       throw const SourceFailure('Asura chapter unavailable.');
     }
 
-    return ChapterPages(
-      chapterId: sourceChapterId,
-      sourceId: id,
-      urls: urls,
-    );
+    return ChapterPages(chapterId: sourceChapterId, sourceId: id, urls: urls);
   }
 
   @override
@@ -447,7 +440,9 @@ class AsuraSource implements MangaSource {
 
   bool _isLockedChapter(Map<String, dynamic> row) {
     if (row['is_premium'] == true || row['is_locked'] == true) return true;
-    final until = DateTime.tryParse(row['early_access_until']?.toString() ?? '');
+    final until = DateTime.tryParse(
+      row['early_access_until']?.toString() ?? '',
+    );
     return until != null && until.isAfter(DateTime.now().toUtc());
   }
 
@@ -475,7 +470,9 @@ class AsuraSource implements MangaSource {
   }
 
   DateTime _nearbyDate(Element anchor) {
-    final direct = anchor.querySelector('time[datetime]')?.attributes['datetime'];
+    final direct = anchor
+        .querySelector('time[datetime]')
+        ?.attributes['datetime'];
     final directDate = direct == null ? null : DateTime.tryParse(direct);
     if (directDate != null) return directDate;
 
@@ -498,7 +495,9 @@ class AsuraSource implements MangaSource {
   }
 
   String _findCover(Document document) =>
-      document.querySelector('#desktop-cover-container img')?.attributes['src'] ??
+      document
+          .querySelector('#desktop-cover-container img')
+          ?.attributes['src'] ??
       document.querySelector('article img[alt]')?.attributes['src'] ??
       '';
 

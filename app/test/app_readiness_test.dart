@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tsuki/core/auth/auth_controller.dart';
 import 'package:tsuki/core/config/app_config.dart';
 import 'package:tsuki/core/models/manga.dart';
@@ -11,7 +12,6 @@ import 'package:tsuki/features/discover/data/ranking_provider.dart';
 import 'package:tsuki/features/reader/presentation/reader_screen.dart';
 import 'package:tsuki/features/search/data/anilist_metadata_provider.dart'
     as anilist;
-import 'package:shared_preferences/shared_preferences.dart';
 
 const _localConfig = AppConfig(
   environment: AppEnvironment.production,
@@ -39,19 +39,19 @@ class _BrowsingMetadata extends anilist.AniListMetadataProvider {
   final requested = <RankingPeriod>[];
 
   @override
-  Future<List<Manga>> browseTopRated() async {
+  Future<List<Manga>> browseTopRated({bool adultOnly = false}) async {
     requested.add(RankingPeriod.topRated);
     return const [_manga];
   }
 
   @override
-  Future<List<Manga>> browseTrending() async {
+  Future<List<Manga>> browseTrending({bool adultOnly = false}) async {
     requested.add(RankingPeriod.trending);
     return const [_manga];
   }
 
   @override
-  Future<List<Manga>> browsePopular() async {
+  Future<List<Manga>> browsePopular({bool adultOnly = false}) async {
     requested.add(RankingPeriod.popular);
     return const [_manga];
   }
@@ -97,7 +97,7 @@ void main() {
     'trending, top rated, and popular rankings use distinct AniList feeds',
     () async {
       final metadata = _BrowsingMetadata();
-      final provider = AniListRankingProvider(metadata);
+      final provider = AniListRankingProvider(metadata, adultOnly: false);
 
       for (final period in RankingPeriod.values) {
         final result = await provider.rankings(period);

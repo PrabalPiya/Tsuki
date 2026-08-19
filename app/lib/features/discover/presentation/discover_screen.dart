@@ -122,6 +122,13 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
       }
     });
 
+    final adultMode = ref.watch(adultModeProvider);
+
+    ref.listen<bool>(adultModeProvider, (previous, next) {
+      if (previous != null && previous != next) {
+        _resetDiscover();
+      }
+    });
     final ranking = ref.watch(rankingsProvider(RankingPeriod.values[_period]));
 
     final items = ranking.valueOrNull?.items ?? const <Manga>[];
@@ -136,7 +143,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
       appBar: AppBar(
         titleSpacing: 16,
 
-        title: const Text('Discover'),
+        title: Text(adultMode ? 'Adult Discover' : 'Discover'),
 
         actions: [
           Padding(
@@ -190,7 +197,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
             const Padding(
               padding: EdgeInsets.only(bottom: 8),
               child: Text(
-                'Preview Ãƒâ€šÃ‚Â· live rankings unavailable',
+                'Preview Â· live rankings unavailable',
                 style: TextStyle(color: AppColors.muted, fontSize: 12),
               ),
             ),
@@ -426,7 +433,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
             child: OneTimeHint(
               id: 'discover_swipe',
               icon: Icons.swipe_vertical_rounded,
-              text: 'Swipe up for next Ãƒâ€šÃ‚Â· down for previous',
+              text: 'Swipe up for next ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· down for previous',
             ),
           ),
         ],
@@ -941,9 +948,8 @@ class _DiscoverCard extends ConsumerWidget {
 
     final details = ref.watch(catalogProvider).cached(manga.id);
 
-    final chapterLabel = ref
-            .watch(chapterSummaryLabelProvider(manga))
-            .valueOrNull ??
+    final chapterLabel =
+        ref.watch(chapterSummaryLabelProvider(manga)).valueOrNull ??
         (details ?? manga).chapterDisplayLabel;
 
     final rawSynopsis = (details?.synopsis.isNotEmpty ?? false)
@@ -1141,8 +1147,33 @@ class _DiscoverCard extends ConsumerWidget {
                                   ),
                                 ],
                               ),
+                              const SizedBox(height: 8),
 
-                              const SizedBox(height: 12),
+                              Text(
+                                manga.compactIdentityLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppColors.muted,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+
+                              if (manga.displayGenres.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  manga.displayGenres.take(2).join(' â€¢ '),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: AppColors.muted,
+                                    fontSize: 10.5,
+                                  ),
+                                ),
+                              ],
+
+                              const SizedBox(height: 10),
 
                               /*
                                * SYNOPSIS
@@ -1154,7 +1185,7 @@ class _DiscoverCard extends ConsumerWidget {
 
                                 textAlign: TextAlign.justify,
 
-                                maxLines: 4,
+                                maxLines: 3,
 
                                 overflow: TextOverflow.ellipsis,
 

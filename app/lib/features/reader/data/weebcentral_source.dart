@@ -13,8 +13,7 @@ import 'source_matching.dart';
 
 class WeebCentralSource implements MangaSource {
   WeebCentralSource({Dio? client})
-      : _client =
-            client ?? createHttpClient(baseUrl: 'https://weebcentral.com');
+    : _client = client ?? createHttpClient(baseUrl: 'https://weebcentral.com');
 
   final Dio _client;
 
@@ -26,12 +25,12 @@ class WeebCentralSource implements MangaSource {
 
   @override
   SourceCapabilities get capabilities => const SourceCapabilities(
-        search: true,
-        details: true,
-        chapters: true,
-        pages: true,
-        updates: true,
-      );
+    search: true,
+    details: true,
+    chapters: true,
+    pages: true,
+    updates: true,
+  );
 
   @override
   Set<String> get allowedImageHosts => const {};
@@ -39,10 +38,7 @@ class WeebCentralSource implements MangaSource {
   @override
   Future<List<Manga>> search(String query) => _search(query, adultMode: 'Any');
 
-  Future<List<Manga>> _search(
-    String query, {
-    required String adultMode,
-  }) async {
+  Future<List<Manga>> _search(String query, {required String adultMode}) async {
     final cleaned = query
         .replaceAll(RegExp(r'[!#:(),-]'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
@@ -122,23 +118,19 @@ class WeebCentralSource implements MangaSource {
     Manga canonical, {
     bool allowAdult = false,
   }) async {
-    final queries = <String>{canonical.title, ...canonical.aliases}
-        .map((value) => value.trim())
-        .where((value) => value.length >= 2)
-        .take(8);
+    final queries = <String>{
+      canonical.title,
+      ...canonical.aliases,
+    }.map((value) => value.trim()).where((value) => value.length >= 2).take(8);
 
     // Resolve a strong result as soon as one title/alias works instead of
     // serially executing every alias before making a decision.
     for (final query in queries) {
       try {
-        final preferredAdultMode = allowAdult
-            ? (canonical.isAdult ? 'True' : 'Any')
-            : 'False';
-
         final adultModes = allowAdult
             ? (canonical.isAdult
-                ? const <String>['True', 'Any']
-                : const <String>['Any'])
+                  ? const <String>['True', 'Any']
+                  : const <String>['Any'])
             : const <String>['False'];
 
         final exactCanonicalNames = <String>{
@@ -147,10 +139,7 @@ class WeebCentralSource implements MangaSource {
         }.map(SourceMatching.normalize).toSet();
 
         for (final adultMode in adultModes) {
-          final candidates = await _search(
-            query,
-            adultMode: adultMode,
-          );
+          final candidates = await _search(query, adultMode: adultMode);
           if (candidates.isEmpty) continue;
 
           for (final candidate in candidates) {
@@ -204,7 +193,9 @@ class WeebCentralSource implements MangaSource {
       title: title,
       aliases: aliases.toList(growable: false),
       coverUrl: _absolute(
-        document.querySelector('section[x-data] source')?.attributes['srcset'] ??
+        document
+                .querySelector('section[x-data] source')
+                ?.attributes['srcset'] ??
             document.querySelector('section[x-data] img')?.attributes['src'] ??
             '',
       ),
@@ -253,8 +244,10 @@ class WeebCentralSource implements MangaSource {
     // multiple seasons into duplicate Chapter 1 entries. Use the source order
     // as a stable continuous chapter number for those series.
     final useSequentialIndex = labels.any(
-      (label) => RegExp(r'\b(?:season|s)\s*\d+\b', caseSensitive: false)
-          .hasMatch(label),
+      (label) => RegExp(
+        r'\b(?:season|s)\s*\d+\b',
+        caseSensitive: false,
+      ).hasMatch(label),
     );
 
     final chapters = <String, CanonicalChapter>{};
@@ -332,9 +325,11 @@ class WeebCentralSource implements MangaSource {
       anchors = document.querySelectorAll('a[href*="/chapters/"]');
     }
     return anchors
-        .where((anchor) =>
-            (_path(anchor.attributes['href'] ?? '') ?? '')
-                .startsWith('chapters/'))
+        .where(
+          (anchor) => (_path(anchor.attributes['href'] ?? '') ?? '').startsWith(
+            'chapters/',
+          ),
+        )
         .toList(growable: false);
   }
 
@@ -398,10 +393,7 @@ class WeebCentralSource implements MangaSource {
       // current reader extensions.
       document = await _document(
         '/$path/images',
-        queryParameters: {
-          'is_prev': 'False',
-          'reading_style': 'long_strip',
-        },
+        queryParameters: {'is_prev': 'False', 'reading_style': 'long_strip'},
       );
     } catch (_) {
       document = await _document('/$path');
@@ -417,22 +409,21 @@ class WeebCentralSource implements MangaSource {
       throw const SourceFailure('WeebCentral chapter unavailable.');
     }
 
-    return ChapterPages(
-      chapterId: sourceChapterId,
-      sourceId: id,
-      urls: urls,
-    );
+    return ChapterPages(chapterId: sourceChapterId, sourceId: id, urls: urls);
   }
 
   List<String> _pageUrls(Document document) {
     var images = document.querySelectorAll('section[x-data~="scroll"] > img');
     if (images.isEmpty) {
-      images = document.querySelectorAll('section img[alt^="Page"], img[alt^="Page"]');
+      images = document.querySelectorAll(
+        'section img[alt^="Page"], img[alt^="Page"]',
+      );
     }
 
     final urls = <String>[];
     for (final image in images) {
-      var raw = image.attributes['src'] ??
+      var raw =
+          image.attributes['src'] ??
           image.attributes['data-src'] ??
           image.attributes['data-lazy-src'];
 
@@ -470,10 +461,12 @@ class WeebCentralSource implements MangaSource {
     // Series that reset numbering each season need the same sequential index
     // used by the full-list parser; comparing visible `Season 2 Chapter 3`
     // against a cached continuous chapter 120 would otherwise miss updates.
-    if (anchors.any((anchor) => RegExp(
-          r'\b(?:season|s)\s*\d+\b',
-          caseSensitive: false,
-        ).hasMatch(_chapterLabel(anchor)))) {
+    if (anchors.any(
+      (anchor) => RegExp(
+        r'\b(?:season|s)\s*\d+\b',
+        caseSensitive: false,
+      ).hasMatch(_chapterLabel(anchor)),
+    )) {
       final values = await getChapters(sourceMangaId);
       CanonicalChapter? newest;
       for (final chapter in values) {

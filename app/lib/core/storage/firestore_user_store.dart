@@ -6,8 +6,8 @@ import 'user_store.dart';
 
 class FirestoreUserStore implements UserStore {
   FirestoreUserStore({FirebaseFirestore? firestore, UserStore? local})
-      : _db = firestore ?? FirebaseFirestore.instance,
-        _local = local ?? const LocalUserStore();
+    : _db = firestore ?? FirebaseFirestore.instance,
+      _local = local ?? const LocalUserStore();
 
   final FirebaseFirestore _db;
   final UserStore _local;
@@ -23,11 +23,9 @@ class FirestoreUserStore implements UserStore {
         user.get(),
       ]);
 
-      final bookmarks =
-          (results[0] as QuerySnapshot<Map<String, dynamic>>)
-              .docs
-              .map((d) => d.id)
-              .toSet();
+      final bookmarks = (results[0] as QuerySnapshot<Map<String, dynamic>>).docs
+          .map((d) => d.id)
+          .toSet();
 
       final progress = <String, ReadingProgress>{};
       for (final doc
@@ -42,8 +40,8 @@ class FirestoreUserStore implements UserStore {
         });
       }
 
-      final settings =
-          (results[2] as DocumentSnapshot<Map<String, dynamic>>).data();
+      final settings = (results[2] as DocumentSnapshot<Map<String, dynamic>>)
+          .data();
 
       return UserSnapshot(
         bookmarks: bookmarks,
@@ -55,8 +53,7 @@ class FirestoreUserStore implements UserStore {
         // A cloud document created before this setting existed may not contain
         // adultContent. Preserve the already-durable local preference instead
         // of silently resetting an enabled toggle to false.
-        adultContent:
-            settings?['adultContent'] as bool? ?? local.adultContent,
+        adultContent: settings?['adultContent'] as bool? ?? local.adultContent,
       );
     } catch (_) {
       return local;

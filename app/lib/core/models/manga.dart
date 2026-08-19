@@ -16,33 +16,30 @@ class MangaChapterSummary {
   }
 }
 
-/// Runtime registry for source-verified chapter summaries.
-///
-/// AniList's `chapters` field is metadata, not a guaranteed live chapter
-/// total. Once Tsuki has resolved a real source index, this registry becomes
-/// the authoritative value used by the UI. The registry is warmed from the
-/// tiny on-device chapter summary before runApp, so previously-seen titles can
-/// show their verified latest chapter immediately.
 abstract final class MangaChapterRegistry {
   static final Map<String, MangaChapterSummary> _summaries =
       <String, MangaChapterSummary>{};
 
-  static MangaChapterSummary? summaryFor(String mangaId) =>
-      _summaries[mangaId];
+  static MangaChapterSummary? summaryFor(String mangaId) => _summaries[mangaId];
 
-  static int? countFor(String mangaId) => _summaries[mangaId]?.indexCount;
+  static bool _useful(MangaChapterSummary? summary) =>
+      summary != null &&
+      (summary.latestNumber != null || summary.indexCount > 0);
+
+  static int? countFor(String mangaId) {
+    final summary = _summaries[mangaId];
+    return _useful(summary) ? summary!.indexCount : null;
+  }
 
   static double? latestNumberFor(String mangaId) =>
       _summaries[mangaId]?.latestNumber;
 
-  static String? displayLabelFor(String mangaId) =>
-      _summaries[mangaId]?.displayLabel;
+  static String? displayLabelFor(String mangaId) {
+    final summary = _summaries[mangaId];
+    return _useful(summary) ? summary!.displayLabel : null;
+  }
 
-  static void remember(
-    String mangaId,
-    int count, {
-    double? latestNumber,
-  }) {
+  static void remember(String mangaId, int count, {double? latestNumber}) {
     if (mangaId.trim().isEmpty || count < 0) return;
     if (latestNumber != null &&
         (!latestNumber.isFinite || latestNumber < 0 || latestNumber > 20000)) {
@@ -55,23 +52,23 @@ abstract final class MangaChapterRegistry {
   }
 
   static void rememberSummary(String mangaId, MangaChapterSummary summary) {
-    remember(
-      mangaId,
-      summary.indexCount,
-      latestNumber: summary.latestNumber,
-    );
+    remember(mangaId, summary.indexCount, latestNumber: summary.latestNumber);
   }
 
-  static void remove(String mangaId) {
-    _summaries.remove(mangaId);
-  }
-
-  static void clear() {
-    _summaries.clear();
-  }
+  static void remove(String mangaId) => _summaries.remove(mangaId);
+  static void clear() => _summaries.clear();
 }
 
-enum MangaStatus { ongoing, completed, hiatus, cancelled, unknown }
+enum MangaStatus {
+  ongoing,
+  completed,
+  hiatus,
+  cancelled,
+  notYetReleased,
+  unknown,
+}
+
+enum MangaFormat { manga, oneShot, novel, unknown }
 
 class Manga {
   const Manga({
@@ -87,6 +84,12 @@ class Manga {
     this.rating,
     this.isAdult = false,
     this.aliases = const [],
+    this.format = MangaFormat.unknown,
+    this.countryCode,
+    this.startYear,
+    this.volumeCount = 0,
+    this.genres = const [],
+    this.popularity,
   }) : _metadataChapterCount = chapterCount;
 
   final String id;
@@ -101,25 +104,25 @@ class Manga {
   final double? rating;
   final int _metadataChapterCount;
   final bool isAdult;
+  final MangaFormat format;
+  final String? countryCode;
+  final int? startYear;
+  final int volumeCount;
+  final List<String> genres;
+  final int? popularity;
 
-  /// Number of canonical entries in the best source-verified local index.
-  /// Falls back to metadata only until Tsuki has seen a source index.
   int get chapterCount =>
       MangaChapterRegistry.countFor(id) ?? _metadataChapterCount;
 
-  /// Raw count reported by AniList. This can be 0 or stale for releasing
-  /// titles and must never be treated as proof that readable chapters exist.
   int get metadataChapterCount => _metadataChapterCount;
 
   bool get hasVerifiedChapterSummary =>
-      MangaChapterRegistry.summaryFor(id) != null;
+      MangaChapterRegistry.displayLabelFor(id) != null;
 
   String get chapterDisplayLabel {
     final verified = MangaChapterRegistry.displayLabelFor(id);
     if (verified != null) return verified;
     if (_metadataChapterCount <= 0) return '—';
-    // `~` makes the first-ever, not-yet-indexed value explicitly provisional
-    // instead of presenting AniList metadata as a verified source total.
     return '~$_metadataChapterCount';
   }
 
@@ -129,58 +132,116 @@ class Manga {
   }
 
   String get statusLabel => switch (status) {
-        MangaStatus.ongoing => 'Ongoing',
-        MangaStatus.completed => 'Completed',
-        MangaStatus.hiatus => 'On hiatus',
-        MangaStatus.cancelled => 'Cancelled',
-        MangaStatus.unknown => 'Unknown',
-      };
+    MangaStatus.ongoing => 'Ongoing',
+    MangaStatus.completed => 'Completed',
+    MangaStatus.hiatus => 'Hiatus',
+    MangaStatus.cancelled => 'Cancelled',
+    MangaStatus.notYetReleased => 'Upcoming',
+    MangaStatus.unknown => 'Unknown',
+  };
+
+  String get formatLabel => switch (format) {
+    MangaFormat.manga => 'Manga',
+    MangaFormat.oneShot => 'One-shot',
+    MangaFormat.novel => 'Novel',
+    MangaFormat.unknown => 'Manga',
+  };
+
+  String get countryLabel => switch (countryCode?.toUpperCase()) {
+    'JP' => 'Japan',
+    'KR' => 'Korea',
+    'CN' => 'China',
+    'TW' => 'Taiwan',
+    final value when value != null && value.isNotEmpty => value,
+    _ => 'Unknown',
+  };
+
+  String get compactIdentityLabel {
+    final parts = <String>[formatLabel];
+    final country = countryCode?.trim();
+    if (country != null && country.isNotEmpty) parts.add(countryLabel);
+    if (startYear != null) parts.add(startYear.toString());
+    return parts.join(' • ');
+  }
+
+  String get volumeLabel => volumeCount > 0 ? '$volumeCount vol' : '— vol';
+
+  String get popularityLabel {
+    final value = popularity;
+    if (value == null || value <= 0) return '—';
+    if (value >= 1000000) return '${(value / 1000000).toStringAsFixed(1)}M';
+    if (value >= 1000) return '${(value / 1000).toStringAsFixed(1)}K';
+    return value.toString();
+  }
+
+  List<String> get displayGenres => genres.take(3).toList(growable: false);
 
   Manga copyWith({String? mangaDexId, int? chapterCount}) => Manga(
-        id: id,
-        anilistId: anilistId,
-        malId: malId,
-        mangaDexId: mangaDexId ?? this.mangaDexId,
-        title: title,
-        aliases: aliases,
-        coverUrl: coverUrl,
-        synopsis: synopsis,
-        status: status,
-        rating: rating,
-        chapterCount: chapterCount ?? this.chapterCount,
-        isAdult: isAdult,
-      );
+    id: id,
+    anilistId: anilistId,
+    malId: malId,
+    mangaDexId: mangaDexId ?? this.mangaDexId,
+    title: title,
+    aliases: aliases,
+    coverUrl: coverUrl,
+    synopsis: synopsis,
+    status: status,
+    rating: rating,
+    chapterCount: chapterCount ?? _metadataChapterCount,
+    isAdult: isAdult,
+    format: format,
+    countryCode: countryCode,
+    startYear: startYear,
+    volumeCount: volumeCount,
+    genres: genres,
+    popularity: popularity,
+  );
 
   Map<String, Object?> toJson() => {
-        'id': id,
-        'anilistId': anilistId,
-        'malId': malId,
-        'mangaDexId': mangaDexId,
-        'title': title,
-        'aliases': aliases,
-        'coverUrl': coverUrl,
-        'synopsis': synopsis,
-        'status': status.name,
-        'rating': rating,
-        'chapterCount': chapterCount,
-        'isAdult': isAdult,
-      };
+    'id': id,
+    'anilistId': anilistId,
+    'malId': malId,
+    'mangaDexId': mangaDexId,
+    'title': title,
+    'aliases': aliases,
+    'coverUrl': coverUrl,
+    'synopsis': synopsis,
+    'status': status.name,
+    'rating': rating,
+    'chapterCount': _metadataChapterCount,
+    'isAdult': isAdult,
+    'format': format.name,
+    'countryCode': countryCode,
+    'startYear': startYear,
+    'volumeCount': volumeCount,
+    'genres': genres,
+    'popularity': popularity,
+  };
 
   factory Manga.fromJson(Map<String, dynamic> json) => Manga(
-        id: json['id'] as String,
-        anilistId: json['anilistId'] as int?,
-        malId: json['malId'] as int?,
-        mangaDexId: json['mangaDexId'] as String?,
-        title: json['title'] as String,
-        aliases: List<String>.from(json['aliases'] as List? ?? const []),
-        coverUrl: json['coverUrl'] as String? ?? '',
-        synopsis: json['synopsis'] as String? ?? '',
-        status: MangaStatus.values.firstWhere(
-          (s) => s.name == json['status'],
-          orElse: () => MangaStatus.unknown,
-        ),
-        rating: (json['rating'] as num?)?.toDouble(),
-        chapterCount: json['chapterCount'] as int? ?? 0,
-        isAdult: json['isAdult'] as bool? ?? false,
-      );
+    id: json['id'] as String,
+    anilistId: json['anilistId'] as int?,
+    malId: json['malId'] as int?,
+    mangaDexId: json['mangaDexId'] as String?,
+    title: json['title'] as String,
+    aliases: List<String>.from(json['aliases'] as List? ?? const []),
+    coverUrl: json['coverUrl'] as String? ?? '',
+    synopsis: json['synopsis'] as String? ?? '',
+    status: MangaStatus.values.firstWhere(
+      (s) => s.name == json['status'],
+      orElse: () => MangaStatus.unknown,
+    ),
+    rating: (json['rating'] as num?)?.toDouble(),
+    chapterCount: json['chapterCount'] as int? ?? 0,
+    isAdult: json['isAdult'] as bool? ?? false,
+    format: MangaFormat.values.firstWhere(
+      (f) => f.name == json['format'],
+      orElse: () => MangaFormat.unknown,
+    ),
+    countryCode: json['countryCode'] as String?,
+    startYear: (json['startYear'] as num?)?.toInt(),
+    volumeCount: (json['volumeCount'] as num?)?.toInt() ?? 0,
+    genres: List<String>.from(json['genres'] as List? ?? const []),
+    popularity: (json['popularity'] as num?)?.toInt(),
+  );
 }

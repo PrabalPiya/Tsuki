@@ -25,26 +25,14 @@ class ChapterNumberParser {
         r'\b(?:chapter|chap|ch\.?)' + separator + number + r'\b',
         caseSensitive: false,
       ),
-      RegExp(
-        r'\bact\.?' + separator + number + r'\b',
-        caseSensitive: false,
-      ),
-      RegExp(
-        r'\bpart' + separator + number + r'\b',
-        caseSensitive: false,
-      ),
-      RegExp(
-        r'\blesson' + separator + number + r'\b',
-        caseSensitive: false,
-      ),
+      RegExp(r'\bact\.?' + separator + number + r'\b', caseSensitive: false),
+      RegExp(r'\bpart' + separator + number + r'\b', caseSensitive: false),
+      RegExp(r'\blesson' + separator + number + r'\b', caseSensitive: false),
       RegExp(
         r'\b(?:episode|ep\.?)' + separator + number + r'\b',
         caseSensitive: false,
       ),
-      RegExp(
-        r'^\s*#\s*' + number + r'\b',
-        caseSensitive: false,
-      ),
+      RegExp(r'^\s*#\s*' + number + r'\b', caseSensitive: false),
     ];
 
     for (final pattern in patterns) {
@@ -55,9 +43,7 @@ class ChapterNumberParser {
     }
 
     if (allowPlainNumber) {
-      final plain = RegExp(
-        r'^\s*(\d+(?:\.\d+)?)\s*$',
-      ).firstMatch(text);
+      final plain = RegExp(r'^\s*(\d+(?:\.\d+)?)\s*$').firstMatch(text);
       final parsed = double.tryParse(plain?.group(1) ?? '');
       if (_valid(parsed)) return parsed;
     }

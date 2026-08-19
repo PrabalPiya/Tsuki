@@ -8,7 +8,7 @@ void main() {
     'discover periods should use the correct AniList ranking types',
     () async {
       final metadata = _FakeMetadata();
-      final provider = AniListRankingProvider(metadata);
+      final provider = AniListRankingProvider(metadata, adultOnly: false);
 
       await provider.rankings(RankingPeriod.trending);
       await provider.rankings(RankingPeriod.topRated);
@@ -23,25 +23,25 @@ class _FakeMetadata extends AniListMetadataProvider {
   final calls = <String>[];
 
   @override
-  Future<List<Manga>> browseTopRated() async {
+  Future<List<Manga>> browseTopRated({bool adultOnly = false}) async {
     calls.add('topRated');
     return const [];
   }
 
   @override
-  Future<List<Manga>> browseTrending() async {
+  Future<List<Manga>> browseTrending({bool adultOnly = false}) async {
     calls.add('trending');
     return const [];
   }
 
   @override
-  Future<List<Manga>> browsePopularThisSeason() async {
+  Future<List<Manga>> browsePopularThisSeason({bool adultOnly = false}) async {
     calls.add('season');
     return const [];
   }
 
   @override
-  Future<List<Manga>> browsePopular() async {
+  Future<List<Manga>> browsePopular({bool adultOnly = false}) async {
     calls.add('popular');
     return const [];
   }

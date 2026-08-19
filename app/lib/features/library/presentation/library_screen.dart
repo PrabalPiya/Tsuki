@@ -20,8 +20,11 @@ final libraryItemsProvider = FutureProvider.autoDispose<List<Manga>>((
 ) async {
   final state = ref.watch(
     userLibraryProvider.select(
-      (value) =>
-          (bookmarks: value.bookmarks, bookmarkedManga: value.bookmarkedManga),
+      (value) => (
+        bookmarks: value.bookmarks,
+        bookmarkedManga: value.bookmarkedManga,
+        adultContent: value.adultContent,
+      ),
     ),
   );
 
@@ -195,14 +198,14 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
      * Adult visibility filter only.
      */
     final items = allItems
-        .where((manga) => libraryState.adultContent || !manga.isAdult)
+        .where((manga) => manga.isAdult == libraryState.adultContent)
         .toList();
 
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 16,
 
-        title: const Text('Library'),
+        title: Text(libraryState.adultContent ? 'Adult Library' : 'Library'),
 
         actions: [
           Padding(
@@ -311,11 +314,15 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
       );
     }
 
-    if (items.isEmpty && allItems.isNotEmpty && !libraryState.adultContent) {
-      return const _LibraryMessage(
+    if (items.isEmpty && allItems.isNotEmpty) {
+      return _LibraryMessage(
         icon: Icons.visibility_off_rounded,
-        title: 'Adult titles hidden',
-        message: 'Your bookmarked adult manga will appear again when Adult Content is enabled.',
+        title: libraryState.adultContent
+            ? 'No adult bookmarks in this mode'
+            : 'Adult bookmarks hidden',
+        message: libraryState.adultContent
+            ? 'Your normal bookmarks remain saved and return when Adult Mode is turned off.'
+            : 'Your adult bookmarks remain saved and return when Adult Mode is turned on.',
       );
     }
 

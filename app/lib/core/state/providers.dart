@@ -11,10 +11,13 @@ import '../storage/firestore_user_store.dart';
 import '../storage/user_store.dart';
 
 import '../../features/discover/data/ranking_provider.dart';
+import '../../features/reader/data/adult_madara_source.dart';
 import '../../features/reader/data/asura_source.dart';
 import '../../features/reader/data/comick_source.dart';
+import '../../features/reader/data/hitomi_source.dart';
 import '../../features/reader/data/mangadex_source.dart';
 import '../../features/reader/data/mangapill_source.dart';
+import '../../features/reader/data/omega_scans_source.dart';
 import '../../features/reader/data/weebcentral_source.dart';
 import '../../features/reader/data/webtoon_xyz_source.dart';
 import '../../features/search/data/anilist_metadata_provider.dart';
@@ -39,157 +42,197 @@ final userStoreProvider = Provider<UserStore>((ref) {
 
 final userLibraryProvider =
     StateNotifierProvider<UserLibraryController, UserLibraryState>((ref) {
-  final session = ref.watch(authProvider);
-  return UserLibraryController(
-    session.uid ?? 'signed-out',
-    ref.watch(userStoreProvider),
-  );
+      final session = ref.watch(authProvider);
+      return UserLibraryController(
+        session.uid ?? 'signed-out',
+        ref.watch(userStoreProvider),
+      );
+    });
+
+/// True means the whole app is in adult-only mode.
+/// False means the whole app is in normal-only mode.
+final adultModeProvider = Provider<bool>((ref) {
+  return ref.watch(userLibraryProvider.select((state) => state.adultContent));
 });
 
 final mangaDexProvider = Provider<MangaDexSource>((ref) => MangaDexSource());
+final ero18xProvider = Provider<AdultMadaraSource>(
+  (ref) => AdultMadaraSource(
+    id: 'ero18x',
+    displayName: 'Ero18x',
+    baseUrl: 'https://ero18x.com',
+  ),
+);
+final toon18Provider = Provider<AdultMadaraSource>(
+  (ref) => AdultMadaraSource(
+    id: 'toon18',
+    displayName: 'Toon18',
+    baseUrl: 'https://toon18.to',
+  ),
+);
 final comicKProvider = Provider<ComicKSource>((ref) => ComicKSource());
+final hitomiProvider = Provider<HitomiSource>((ref) => HitomiSource());
 final mangaPillProvider = Provider<MangaPillSource>((ref) => MangaPillSource());
-final weebCentralProvider =
-    Provider<WeebCentralSource>((ref) => WeebCentralSource());
-final webtoonXyzProvider =
-    Provider<WebtoonXyzSource>((ref) => WebtoonXyzSource());
+final omegaScansProvider = Provider<OmegaScansSource>(
+  (ref) => OmegaScansSource(),
+);
+final weebCentralProvider = Provider<WeebCentralSource>(
+  (ref) => WeebCentralSource(),
+);
+final webtoonXyzProvider = Provider<WebtoonXyzSource>(
+  (ref) => WebtoonXyzSource(),
+);
 final asuraProvider = Provider<AsuraSource>((ref) => AsuraSource());
-final anilistProvider =
-    Provider<AniListMetadataProvider>((ref) => AniListMetadataProvider());
+final anilistProvider = Provider<AniListMetadataProvider>(
+  (ref) => AniListMetadataProvider(),
+);
 
-final catalogProvider = Provider<CatalogRepository>(
-  (ref) => CatalogRepository(
+final catalogProvider = Provider<CatalogRepository>((ref) {
+  return CatalogRepository(
     config: ref.watch(appConfigProvider),
     metadata: ref.watch(anilistProvider),
     mangaDex: ref.watch(mangaDexProvider),
+    ero18x: ref.watch(ero18xProvider),
+    toon18: ref.watch(toon18Provider),
     comicK: ref.watch(comicKProvider),
+    hitomi: ref.watch(hitomiProvider),
     mangaPill: ref.watch(mangaPillProvider),
+    omegaScans: ref.watch(omegaScansProvider),
     weebCentral: ref.watch(weebCentralProvider),
     webtoonXyz: ref.watch(webtoonXyzProvider),
     asura: ref.watch(asuraProvider),
-  ),
-);
+  );
+});
 
 final chapterSummaryUpdatesProvider = StreamProvider<String>(
   (ref) => ref.watch(catalogProvider).chapterUpdates,
 );
 
-/// Reactive per-manga chapter label.
+/// Reactive chapter label for one manga card.
 ///
-/// The old global update stream only told Flutter that *something* changed.
-/// Discover cards could therefore keep their initial metadata value until a
-/// navigation rebuild. This provider owns the lifecycle for one manga: it
-/// emits the immediate cached/metadata label, primes that manga if needed,
-/// then emits again whenever that manga's source index changes.
-final chapterSummaryLabelProvider =
-    StreamProvider.autoDispose.family<String, Manga>((ref, manga) async* {
-  final adultEnabled = ref.watch(
-    userLibraryProvider.select((state) => state.adultContent),
-  );
-  final repository = ref.watch(catalogProvider);
+/// It emits immediately from the warmed local summary/metadata, primes that
+/// manga if needed, then emits again whenever the repository learns a newer
+/// source-backed value. This prevents Discover/Search cards from staying at 0
+/// until the Details route causes an unrelated rebuild.
+final chapterSummaryLabelProvider = StreamProvider.autoDispose
+    .family<String, Manga>((ref, manga) async* {
+      final adultMode = ref.watch(adultModeProvider);
+      final repository = ref.watch(catalogProvider);
 
-  yield manga.chapterDisplayLabel;
+      yield manga.chapterDisplayLabel;
 
-  try {
-    await repository.primeChapterSummary(
-      manga,
-      allowAdult: adultEnabled,
-    );
-  } catch (_) {
-    // Keep the immediate cached/metadata value when every source is offline.
-  }
-
-  yield manga.chapterDisplayLabel;
-
-  await for (final _ in repository.chapterUpdates
-      .where((mangaId) => mangaId == manga.id)) {
-    yield manga.chapterDisplayLabel;
-  }
-});
-
-final searchProvider =
-    StateNotifierProvider.autoDispose<SearchController, SearchState>(
-  (ref) => SearchController(
-    ref.watch(catalogProvider),
-    includeAdult: () => ref.read(userLibraryProvider).adultContent,
-  ),
-);
-
-/// Chapter details are progressive rather than one-shot.
-///
-/// Subscribe to repository updates *before* starting the initial fetch. The
-/// earlier async* implementation subscribed only after the first yield, which
-/// could miss a fast background merge and leave Details stuck on a partial
-/// chapter list.
-final chapterProvider =
-    StreamProvider.autoDispose.family<List<CanonicalChapter>, Manga>(
-  (ref, manga) {
-    final adultEnabled = ref.watch(
-      userLibraryProvider.select((state) => state.adultContent),
-    );
-    final repository = ref.watch(catalogProvider);
-    final controller = StreamController<List<CanonicalChapter>>();
-
-    Future<void> emitLocal() async {
-      final updated = await repository.localChapters(
-        manga,
-        allowAdult: adultEnabled,
-      );
-      if (!controller.isClosed && updated != null) {
-        controller.add(updated);
+      if (manga.isAdult == adultMode) {
+        try {
+          await repository.primeChapterSummary(manga, allowAdult: adultMode);
+        } catch (_) {
+          // Keep the immediate local/metadata value when sources are unavailable.
+        }
       }
-    }
 
-    final subscription = repository.chapterUpdates
-        .where((mangaId) => mangaId == manga.id)
-        .listen((_) => unawaited(emitLocal()));
+      yield manga.chapterDisplayLabel;
 
-    ref.onDispose(() {
-      unawaited(subscription.cancel());
-      unawaited(controller.close());
+      await for (final _ in repository.chapterUpdates.where(
+        (mangaId) => mangaId == manga.id,
+      )) {
+        yield manga.chapterDisplayLabel;
+      }
     });
 
-    unawaited(() async {
-      try {
-        final initial = await repository.chapters(
-          manga,
-          allowAdult: adultEnabled,
-        );
-        if (!controller.isClosed) controller.add(initial);
-      } catch (error, stackTrace) {
-        if (!controller.isClosed) controller.addError(error, stackTrace);
-      }
-    }());
+final searchProvider =
+    StateNotifierProvider.autoDispose<SearchController, SearchState>((ref) {
+      return SearchController(
+        ref.watch(catalogProvider),
+        adultOnly: ref.watch(adultModeProvider),
+      );
+    });
 
-    return controller.stream;
-  },
-);
+/// Progressive chapter list for Details.
+///
+/// The subscription is installed before the first source request so a fast
+/// provider merge cannot be missed between initial load and stream listening.
+final chapterProvider = StreamProvider.autoDispose
+    .family<List<CanonicalChapter>, Manga>((ref, manga) {
+      final adultMode = ref.watch(adultModeProvider);
+      final repository = ref.watch(catalogProvider);
+      final controller = StreamController<List<CanonicalChapter>>();
+
+      Future<void> emitLocal() async {
+        final updated = await repository.localChapters(
+          manga,
+          allowAdult: adultMode,
+        );
+        if (!controller.isClosed && updated != null) {
+          controller.add(updated);
+        }
+      }
+
+      final subscription = repository.chapterUpdates
+          .where((mangaId) => mangaId == manga.id)
+          .listen((_) => unawaited(emitLocal()));
+
+      ref.onDispose(() {
+        unawaited(subscription.cancel());
+        unawaited(controller.close().then<void>((_) {}));
+      });
+
+      unawaited(() async {
+        try {
+          if (manga.isAdult != adultMode) {
+            if (!controller.isClosed) {
+              controller.add(const <CanonicalChapter>[]);
+            }
+            return;
+          }
+
+          final initial = await repository.chapters(
+            manga,
+            allowAdult: adultMode,
+          );
+          if (!controller.isClosed) controller.add(initial);
+        } catch (error, stackTrace) {
+          if (!controller.isClosed) controller.addError(error, stackTrace);
+        }
+      }());
+
+      return controller.stream;
+    });
 
 final rankingServiceProvider = Provider<RankingProvider>((ref) {
   final catalog = ref.watch(catalogProvider);
   final config = ref.watch(appConfigProvider);
-  return config.useDemoData
-      ? DemoRankingProvider(catalog.demoRankings)
-      : AniListRankingProvider(ref.watch(anilistProvider));
+  final adultMode = ref.watch(adultModeProvider);
+
+  if (config.useDemoData) {
+    return DemoRankingProvider(
+      catalog.demoRankings
+          .where((manga) => manga.isAdult == adultMode)
+          .toList(growable: false),
+    );
+  }
+
+  return AniListRankingProvider(
+    ref.watch(anilistProvider),
+    adultOnly: adultMode,
+  );
 });
 
-final AutoDisposeFutureProviderFamily<RankingResult, RankingPeriod>
-    rankingsProvider = FutureProvider.autoDispose.family<RankingResult,
-        RankingPeriod>(
-  (ref, period) async {
-    final result = await ref.watch(rankingServiceProvider).rankings(period);
-    final catalog = ref.watch(catalogProvider);
+final rankingsProvider = FutureProvider.autoDispose
+    .family<RankingResult, RankingPeriod>((ref, period) async {
+      final result = await ref.watch(rankingServiceProvider).rankings(period);
+      final catalog = ref.watch(catalogProvider);
+      final adultMode = ref.watch(adultModeProvider);
 
-    // Prime only the first few cards. This keeps Discover fast and avoids
-    // turning one ranking request into dozens of source lookups.
-    for (final manga in result.items.take(3)) {
-      unawaited(
-        catalog.primeChapterSummary(
-          manga,
-          allowAdult: false,
-        ),
+      final filtered = result.items
+          .where((manga) => manga.isAdult == adultMode)
+          .toList(growable: false);
+
+      for (final manga in filtered.take(4)) {
+        unawaited(catalog.primeChapterSummary(manga, allowAdult: adultMode));
+      }
+
+      return RankingResult(
+        items: filtered,
+        unavailableReason: result.unavailableReason,
+        isPreview: result.isPreview,
       );
-    }
-    return result;
-  },
-);
+    });

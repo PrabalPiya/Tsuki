@@ -49,6 +49,7 @@ class HomeEntry {
     }
     return latestNumbered ?? latestDated;
   }
+
   bool get hasChapters => chapters.isNotEmpty;
 
   CanonicalChapter? get highestReadChapter {
@@ -69,7 +70,9 @@ final _repositoryChapterUpdatesProvider = StreamProvider<String>((ref) {
   return ref.watch(catalogProvider).chapterUpdates;
 });
 
-final _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((ref) async {
+final _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((
+  ref,
+) async {
   ref.watch(_homeRefreshProvider);
   ref.watch(_repositoryChapterUpdatesProvider);
 
@@ -88,11 +91,16 @@ final _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((ref) async
 
   for (final id in state.bookmarks) {
     try {
-      final manga = repository.cached(id) ??
+      final manga =
+          repository.cached(id) ??
           state.bookmarkedManga[id] ??
           await repository.details(id);
       if (manga == null) continue;
       repository.remember(manga);
+
+      // Adult mode is a separate view of the same persisted library. Hidden
+      // mode bookmarks/progress remain saved but are not fetched or rendered.
+      if (manga.isAdult != state.adultContent) continue;
 
       // Home must never block on five websites. Read only the on-device index
       // here and start the live source check separately. When it finishes,
@@ -103,14 +111,7 @@ final _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((ref) async
       );
       entries.add((manga: manga, chapters: local ?? const []));
 
-      unawaited(
-        repository
-            .chapters(
-              manga,
-              allowAdult: state.adultContent,
-            )
-            .catchError((_) => const <CanonicalChapter>[]),
-      );
+      repository.chapters(manga, allowAdult: state.adultContent).ignore();
     } catch (_) {
       // Keep the rest of Home usable when one title/source is unavailable.
     }
@@ -126,7 +127,7 @@ final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
 
   return ref.watch(_homeCatalogProvider).whenData((catalog) {
     final entries = catalog
-        .where((entry) => adultContentEnabled || !entry.manga.isAdult)
+        .where((entry) => entry.manga.isAdult == adultContentEnabled)
         .map((entry) {
           final mangaProgress = progress[entry.manga.id];
           var current = -1;
@@ -178,7 +179,8 @@ final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
               latestNumber = number;
               latestIndex = i;
             }
-            if (latestDatedIndex < 0 || chapter.publishedAt.isAfter(latestDate)) {
+            if (latestDatedIndex < 0 ||
+                chapter.publishedAt.isAfter(latestDate)) {
               latestDate = chapter.publishedAt;
               latestDatedIndex = i;
             }
@@ -186,19 +188,22 @@ final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
           if (latestIndex < 0) latestIndex = latestDatedIndex;
 
           final latestIsCurrent = current == latestIndex;
-          final caught = latestIndex >= 0 &&
+          final caught =
+              latestIndex >= 0 &&
               highest == latestIndex &&
               (!latestIsCurrent ||
                   (mangaProgress?.chapterProgress ?? 0.0) >= 0.95);
 
           final DateTime sort;
           if (caught) {
-            sort = mangaProgress?.updatedAt ??
+            sort =
+                mangaProgress?.updatedAt ??
                 DateTime.fromMillisecondsSinceEpoch(0);
           } else if (latestIndex >= 0) {
             sort = entry.chapters[latestIndex].publishedAt;
           } else {
-            sort = mangaProgress?.updatedAt ??
+            sort =
+                mangaProgress?.updatedAt ??
                 DateTime.fromMillisecondsSinceEpoch(0);
           }
 
@@ -244,9 +249,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           curve: Curves.easeOutCubic,
         )
         .then((_) {
-      if (!mounted) return;
-      setState(() => _isAnimating = false);
-    });
+          if (!mounted) return;
+          setState(() => _isAnimating = false);
+        });
   }
 
   @override
@@ -296,10 +301,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (_, __) => const _Empty('Home is unavailable right now.'),
               data: (entries) {
-                final active =
-                    entries.where((entry) => !entry.caughtUp).toList();
-                final caughtUp =
-                    entries.where((entry) => entry.caughtUp).toList();
+                final active = entries
+                    .where((entry) => !entry.caughtUp)
+                    .toList();
+                final caughtUp = entries
+                    .where((entry) => entry.caughtUp)
+                    .toList();
 
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (!mounted || !_page.hasClients) return;
@@ -574,9 +581,7 @@ class _HomeCard extends StatelessWidget {
                             entry.manga.title,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
+                            style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(height: 1.2),
                           ),
                         ),
@@ -623,7 +628,8 @@ class _HomeCard extends StatelessWidget {
                           onPressed: !entry.hasChapters || entry.caughtUp
                               ? null
                               : () {
-                                  final chapterId = entry.progress?.chapterId ??
+                                  final chapterId =
+                                      entry.progress?.chapterId ??
                                       entry.chapters.first.id;
                                   context.push(
                                     '/reader/${Uri.encodeComponent(entry.manga.id)}?chapter=${Uri.encodeComponent(chapterId)}',
@@ -633,8 +639,8 @@ class _HomeCard extends StatelessWidget {
                             !entry.hasChapters
                                 ? 'Finding chapters…'
                                 : entry.progress == null
-                                    ? 'Start Reading'
-                                    : 'Continue Reading',
+                                ? 'Start Reading'
+                                : 'Continue Reading',
                           ),
                         ),
                       ),

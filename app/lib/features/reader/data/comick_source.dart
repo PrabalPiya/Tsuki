@@ -20,9 +20,9 @@ import 'source_matching.dart';
 /// /api/search and /api/comics/<slug>/chapter-list.
 class ComicKSource implements MangaSource {
   ComicKSource({Dio? client, Dio? mirrorClient})
-      : _client = client ?? createHttpClient(baseUrl: 'https://comick.live'),
-        _mirrorClient =
-            mirrorClient ?? createHttpClient(baseUrl: 'https://comick.art');
+    : _client = client ?? createHttpClient(baseUrl: 'https://comick.live'),
+      _mirrorClient =
+          mirrorClient ?? createHttpClient(baseUrl: 'https://comick.art');
 
   final Dio _client;
   final Dio _mirrorClient;
@@ -35,11 +35,11 @@ class ComicKSource implements MangaSource {
 
   @override
   SourceCapabilities get capabilities => const SourceCapabilities(
-        search: true,
-        chapters: true,
-        pages: true,
-        updates: true,
-      );
+    search: true,
+    chapters: true,
+    pages: true,
+    updates: true,
+  );
 
   @override
   Set<String> get allowedImageHosts => const {};
@@ -59,9 +59,7 @@ class ComicKSource implements MangaSource {
         'order_by': 'created_at',
         'order_direction': 'desc',
       },
-      options: Options(
-        headers: const {'Referer': 'https://comick.live/'},
-      ),
+      options: Options(headers: const {'Referer': 'https://comick.live/'}),
     );
 
     final root = response.data;
@@ -91,15 +89,15 @@ class ComicKSource implements MangaSource {
   }
 
   Future<String?> findConservativeMatch(Manga canonical) async {
-    final canonicalNames = <String>{canonical.title, ...canonical.aliases}
-        .map(SourceMatching.normalize)
-        .where((value) => value.isNotEmpty)
-        .toSet();
+    final canonicalNames = <String>{
+      canonical.title,
+      ...canonical.aliases,
+    }.map(SourceMatching.normalize).where((value) => value.isNotEmpty).toSet();
 
-    final queries = <String>{canonical.title, ...canonical.aliases}
-        .map((value) => value.trim())
-        .where((value) => value.length >= 3)
-        .take(8);
+    final queries = <String>{
+      canonical.title,
+      ...canonical.aliases,
+    }.map((value) => value.trim()).where((value) => value.length >= 3).take(8);
 
     for (final query in queries) {
       try {
@@ -107,8 +105,10 @@ class ComicKSource implements MangaSource {
         if (candidates.isEmpty) continue;
 
         for (final candidate in candidates) {
-          final candidateNames = <String>{candidate.title, ...candidate.aliases}
-              .map(SourceMatching.normalize);
+          final candidateNames = <String>{
+            candidate.title,
+            ...candidate.aliases,
+          }.map(SourceMatching.normalize);
           if (candidateNames.any(canonicalNames.contains)) {
             return candidate.id.replaceFirst('comick:', '');
           }
@@ -172,10 +172,7 @@ class ComicKSource implements MangaSource {
             existing.publishedAt,
             parsed.publishedAt,
           ),
-          sourceCopies: [
-            ...existing.sourceCopies,
-            ...parsed.sourceCopies,
-          ],
+          sourceCopies: [...existing.sourceCopies, ...parsed.sourceCopies],
         );
       }
 
@@ -202,29 +199,21 @@ class ComicKSource implements MangaSource {
   ) async {
     final response = await _get<dynamic>(
       '/api/comics/$slug/chapter-list',
-      queryParameters: {
-        'lang': 'en',
-        'page': page,
-      },
-      options: Options(
-        headers: const {'Referer': 'https://comick.live/'},
-      ),
+      queryParameters: {'lang': 'en', 'page': page},
+      options: Options(headers: const {'Referer': 'https://comick.live/'}),
     );
 
     final root = response.data;
     if (root is! Map) {
-      return (
-        rows: const <Map<String, dynamic>>[],
-        lastPage: page,
-      );
+      return (rows: const <Map<String, dynamic>>[], lastPage: page);
     }
 
     final rawRows = root['data'];
     final rows = rawRows is List
         ? rawRows
-            .whereType<Map>()
-            .map((row) => Map<String, dynamic>.from(row))
-            .toList(growable: false)
+              .whereType<Map>()
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList(growable: false)
         : const <Map<String, dynamic>>[];
 
     final pagination = root['pagination'];
@@ -236,10 +225,7 @@ class ComicKSource implements MangaSource {
     return (rows: rows, lastPage: lastPage);
   }
 
-  CanonicalChapter? _chapterFromRow(
-    String slug,
-    Map<String, dynamic> row,
-  ) {
+  CanonicalChapter? _chapterFromRow(String slug, Map<String, dynamic> row) {
     final language = row['lang']?.toString().trim();
     if (language != null && language.isNotEmpty && language != 'en') {
       return null;
@@ -249,14 +235,14 @@ class ComicKSource implements MangaSource {
     if (chapterRaw.isEmpty) return null;
 
     // `chap` is a structured ComicK chapter field. Plain numbers are safe.
-    final number = double.tryParse(chapterRaw) ??
+    final number =
+        double.tryParse(chapterRaw) ??
         ChapterNumberParser.parseVisibleLabel(
           chapterRaw,
           allowPlainNumber: true,
         );
 
-    if (number != null &&
-        (!number.isFinite || number < 0 || number > 20000)) {
+    if (number != null && (!number.isFinite || number < 0 || number > 20000)) {
       return null;
     }
 
@@ -270,7 +256,8 @@ class ComicKSource implements MangaSource {
     final title = titleRaw.isEmpty
         ? (number == null ? chapterRaw : 'Chapter $key')
         : titleRaw;
-    final published = DateTime.tryParse(row['created_at']?.toString() ?? '') ??
+    final published =
+        DateTime.tryParse(row['created_at']?.toString() ?? '') ??
         DateTime.fromMillisecondsSinceEpoch(0);
 
     final groups = (row['group_name'] as List? ?? const [])
@@ -278,8 +265,7 @@ class ComicKSource implements MangaSource {
         .where((value) => value.trim().isNotEmpty)
         .toList(growable: false);
 
-    final chapterPath =
-        'comic/$slug/$hid-chapter-$chapterRaw-en';
+    final chapterPath = 'comic/$slug/$hid-chapter-$chapterRaw-en';
 
     return CanonicalChapter(
       id: number == null ? 'chapter:special:$key' : 'chapter:number:$key',
@@ -335,11 +321,7 @@ class ComicKSource implements MangaSource {
       throw const SourceFailure('ComicK chapter pages are unavailable.');
     }
 
-    return ChapterPages(
-      chapterId: sourceChapterId,
-      sourceId: id,
-      urls: urls,
-    );
+    return ChapterPages(chapterId: sourceChapterId, sourceId: id, urls: urls);
   }
 
   Future<Response<T>> _get<T>(
@@ -366,10 +348,7 @@ class ComicKSource implements MangaSource {
     final element = document.querySelector(selector);
     if (element == null) return null;
 
-    final candidates = <String>[
-      element.text,
-      element.innerHtml,
-    ];
+    final candidates = <String>[element.text, element.innerHtml];
 
     for (final raw in candidates) {
       final value = raw.trim();
