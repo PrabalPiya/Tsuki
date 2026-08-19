@@ -190,7 +190,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
             const Padding(
               padding: EdgeInsets.only(bottom: 8),
               child: Text(
-                'Preview · live rankings unavailable',
+                'Preview Ãƒâ€šÃ‚Â· live rankings unavailable',
                 style: TextStyle(color: AppColors.muted, fontSize: 12),
               ),
             ),
@@ -426,7 +426,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
             child: OneTimeHint(
               id: 'discover_swipe',
               icon: Icons.swipe_vertical_rounded,
-              text: 'Swipe up for next · down for previous',
+              text: 'Swipe up for next Ãƒâ€šÃ‚Â· down for previous',
             ),
           ),
         ],
@@ -941,7 +941,10 @@ class _DiscoverCard extends ConsumerWidget {
 
     final details = ref.watch(catalogProvider).cached(manga.id);
 
-    final chapterCount = details?.chapterCount ?? manga.chapterCount;
+    final chapterLabel = ref
+            .watch(chapterSummaryLabelProvider(manga))
+            .valueOrNull ??
+        (details ?? manga).chapterDisplayLabel;
 
     final rawSynopsis = (details?.synopsis.isNotEmpty ?? false)
         ? details!.synopsis
@@ -1133,7 +1136,7 @@ class _DiscoverCard extends ConsumerWidget {
                                     child: _InfoChip(
                                       icon: Icons.library_books_rounded,
 
-                                      label: '$chapterCount chp',
+                                      label: '$chapterLabel chp',
                                     ),
                                   ),
                                 ],

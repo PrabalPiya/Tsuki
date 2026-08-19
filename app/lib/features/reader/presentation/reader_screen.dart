@@ -29,7 +29,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   final _loaded = <int, ChapterPages>{};
   final _loading = <int>{};
   final _errors = <int, String>{};
+  final _failedPageSources = <int, Set<String>>{};
   final _pageRatios = <String, double>{};
+
   List<CanonicalChapter> _chapters = const [];
   int _start = 0;
   bool _controls = false;
@@ -50,23 +52,27 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   Future<void> _initialize() async {
     try {
       final repository = ref.read(catalogProvider);
-      final saved = ref
-          .read(userLibraryProvider)
-          .bookmarkedManga[widget.mangaId];
+      final saved =
+          ref.read(userLibraryProvider).bookmarkedManga[widget.mangaId];
       if (saved != null) repository.remember(saved);
-      final manga =
-          repository.cached(widget.mangaId) ??
+
+      final manga = repository.cached(widget.mangaId) ??
           await repository.details(widget.mangaId);
       if (manga == null) {
         _setFatal('Manga unavailable right now.');
         return;
       }
+
       repository.remember(manga);
-      final chapters = await repository.chapters(manga);
+      final chapters = await repository.chapters(
+        manga,
+        allowAdult: ref.read(userLibraryProvider).adultContent,
+      );
       if (chapters.isEmpty) {
         _setFatal('No readable English chapters were found.');
         return;
       }
+
       if (!mounted) return;
       _chapters = chapters;
       _start = chapters.indexWhere((c) => c.id == widget.initialChapterId);
@@ -88,6 +94,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     _loaded.clear();
     _loading.clear();
     _errors.clear();
+    _failedPageSources.clear();
     await _initialize();
   }
 
@@ -98,20 +105,27 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         !_loading.add(index)) {
       return;
     }
+
     _errors.remove(index);
     if (mounted) setState(() {});
+
     try {
       final pages = await ref.read(catalogProvider).pages(_chapters[index]);
       if (pages.urls.isEmpty) {
         throw StateError('Chapter has no readable pages.');
       }
       if (!mounted) return;
+
       setState(() => _loaded[index] = pages);
       if (restore) {
         _restoreSavedPosition(index);
         await _markChapterOpened(index);
       }
-      unawaited(_cacheChapter(pages.urls));
+
+      // Do NOT eagerly download the whole chapter here. CachedNetworkImage
+      // requests pages as ListView builds them and keeps a bounded disk cache.
+      // This prevents 30-80 concurrent image downloads from starving the page
+      // the user is actually trying to read.
     } catch (_) {
       if (mounted) {
         setState(() => _errors[index] = 'Chapter unavailable. Try again.');
@@ -126,6 +140,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     if (_restored) return;
     final saved = ref.read(userLibraryProvider).progress[widget.mangaId];
     if (saved == null || saved.chapterId != _chapters[index].id) return;
+
     _restored = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scroll.hasClients) return;
@@ -143,29 +158,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   double _pageHeight(String url) =>
       MediaQuery.sizeOf(context).width / (_pageRatios[url] ?? .68);
 
-  Future<void> _cacheChapter(List<String> urls) async {
-    var cursor = 0;
-    Future<void> worker() async {
-      while (cursor < urls.length) {
-        final url = urls[cursor++];
-        if (!url.startsWith('https://')) continue;
-        try {
-          await MangaImageCache.instance.downloadFile(url);
-        } catch (_) {
-          // Individual page errors remain retryable in the image widget.
-        }
-      }
-    }
-
-    await Future.wait(List.generate(3, (_) => worker()));
-  }
-
   void _onScroll() {
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 500), _saveProgress);
     if (!_scroll.hasClients || _loaded.isEmpty) return;
+
     final current = _locate(_scroll.offset);
-    if (current.ratio > .72) unawaited(_load(current.index + 1));
+    if (current.ratio > .72) {
+      unawaited(_load(current.index + 1));
+    }
   }
 
   ({int index, int page, double relative, double ratio}) _locate(
@@ -173,6 +174,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   ) {
     var remaining = offset;
     final indexes = _loaded.keys.toList()..sort();
+
     for (final index in indexes) {
       final urls = _loaded[index]!.urls;
       final count = urls.length;
@@ -181,6 +183,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         (sum, url) => sum + _pageHeight(url),
       );
       final height = 72 + pagesHeight;
+
       if (remaining < height) {
         final within = (remaining - 72).clamp(0.0, pagesHeight);
         var page = 0;
@@ -190,6 +193,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           pageStart += _pageHeight(urls[page]);
           page++;
         }
+
         final pageHeight = _pageHeight(urls[page]);
         return (
           index: index,
@@ -198,8 +202,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           ratio: (within / pagesHeight).clamp(0.0, 1.0),
         );
       }
+
       remaining -= height;
     }
+
     final last = indexes.last;
     return (
       index: last,
@@ -212,9 +218,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   Future<void> _saveProgress() async {
     if (!mounted || !_scroll.hasClients || _loaded.isEmpty) return;
     final value = _locate(_scroll.offset);
-    await ref
-        .read(userLibraryProvider.notifier)
-        .saveProgress(
+
+    await ref.read(userLibraryProvider.notifier).saveProgress(
           ReadingProgress(
             mangaId: widget.mangaId,
             chapterId: _chapters[value.index].id,
@@ -229,9 +234,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   Future<void> _markChapterOpened(int index) async {
     final existing = ref.read(userLibraryProvider).progress[widget.mangaId];
     final sameChapter = existing?.chapterId == _chapters[index].id;
-    await ref
-        .read(userLibraryProvider.notifier)
-        .saveProgress(
+
+    await ref.read(userLibraryProvider.notifier).saveProgress(
           ReadingProgress(
             mangaId: widget.mangaId,
             chapterId: _chapters[index].id,
@@ -247,6 +251,29 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         );
   }
 
+  Future<void> _retryChapterWithNextSource(
+    int index,
+    String failedSourceId,
+  ) async {
+    if (index < 0 || index >= _chapters.length) return;
+    final failed = _failedPageSources.putIfAbsent(index, () => <String>{});
+    if (!failed.add(failedSourceId)) return;
+
+    try {
+      final replacement = await ref.read(catalogProvider).pages(
+            _chapters[index],
+            skipSourceIds: failed,
+          );
+      if (!mounted || replacement.urls.isEmpty) return;
+      setState(() {
+        _loaded[index] = replacement;
+        _errors.remove(index);
+      });
+    } catch (_) {
+      // Keep the current page error visible if every source copy failed.
+    }
+  }
+
   void _toggleControls() {
     setState(() => _controls = !_controls);
     _hideTimer?.cancel();
@@ -259,17 +286,18 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
   Future<void> _goToChapter(int index) async {
     if (index < 0 || index >= _chapters.length) return;
+
     _start = index;
     _loaded.clear();
     _loading.clear();
     _errors.clear();
+    _failedPageSources.clear();
     _pageRatios.clear();
     _restored = false;
     if (mounted) setState(() {});
+
     await _load(_start, restore: true);
-    if (_scroll.hasClients) {
-      _scroll.jumpTo(0);
-    }
+    if (_scroll.hasClients) _scroll.jumpTo(0);
   }
 
   @override
@@ -295,17 +323,20 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final progress = library.progress[widget.mangaId];
     final blocks =
         <({int chapter, _BlockType type, String? url, int page, bool read})>[];
+
     if (_chapters.isNotEmpty) {
       final indexes = <int>{
         _start,
         ..._loaded.keys,
         ..._loading,
         ..._errors.keys,
-      }.toList()..sort();
+      }.toList()
+        ..sort();
+
       for (final index in indexes) {
-        final isRead =
-            progress != null &&
+        final isRead = progress != null &&
             progress.openedChapterIds.contains(_chapters[index].id);
+
         blocks.add((
           chapter: index,
           type: _BlockType.header,
@@ -313,6 +344,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           page: 0,
           read: isRead,
         ));
+
         final pages = _loaded[index];
         if (pages != null) {
           for (var page = 0; page < pages.urls.length; page++) {
@@ -324,6 +356,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
               read: isRead,
             ));
           }
+
           if (index == _chapters.length - 1) {
             blocks.add((
               chapter: index,
@@ -374,45 +407,44 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                     final block = blocks[position];
                     final chapter = _chapters[block.chapter];
                     return switch (block.type) {
-                      _BlockType.header => Opacity(
-                        opacity: block.read ? 1 : 1,
-                        child: _ChapterHeader(chapter: chapter),
-                      ),
-                      _BlockType.page => Opacity(
-                        opacity: block.read ? 1 : 1,
-                        child: _ReaderPage(
+                      _BlockType.header => _ChapterHeader(chapter: chapter),
+                      _BlockType.page => _ReaderPage(
                           url: block.url!,
+                          sourceId: _loaded[block.chapter]!.sourceId,
                           page: block.page,
                           onAspectRatio: (ratio) =>
                               _pageRatios[block.url!] = ratio,
-                        ),
-                      ),
-                      _BlockType.loading => const SizedBox(
-                        height: 96,
-                        child: Center(child: CircularProgressIndicator()),
-                      ),
-                      _BlockType.error => _ChapterError(
-                        message: _errors[block.chapter]!,
-                        retry: () => _load(block.chapter),
-                      ),
-                      _BlockType.end => SizedBox(
-                        height: 120,
-                        child: Container(
-                          color: AppColors.background,
-                          child: Center(
-                            child: block.chapter < _chapters.length - 1
-                                ? FilledButton(
-                                    onPressed: () =>
-                                        _goToChapter(block.chapter + 1),
-                                    child: const Text('Next Chapter'),
-                                  )
-                                : const Text(
-                                    "You're all caught up",
-                                    style: TextStyle(color: AppColors.muted),
-                                  ),
+                          onLoadError: () => _retryChapterWithNextSource(
+                            block.chapter,
+                            _loaded[block.chapter]!.sourceId,
                           ),
                         ),
-                      ),
+                      _BlockType.loading => const SizedBox(
+                          height: 96,
+                          child: Center(child: CircularProgressIndicator()),
+                        ),
+                      _BlockType.error => _ChapterError(
+                          message: _errors[block.chapter]!,
+                          retry: () => _load(block.chapter),
+                        ),
+                      _BlockType.end => SizedBox(
+                          height: 120,
+                          child: Container(
+                            color: AppColors.background,
+                            child: Center(
+                              child: block.chapter < _chapters.length - 1
+                                  ? FilledButton(
+                                      onPressed: () =>
+                                          _goToChapter(block.chapter + 1),
+                                      child: const Text('Next Chapter'),
+                                    )
+                                  : const Text(
+                                      "You're all caught up",
+                                      style: TextStyle(color: AppColors.muted),
+                                    ),
+                            ),
+                          ),
+                        ),
                     };
                   },
                 ),
@@ -439,9 +471,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                             ),
                             Expanded(
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                ),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 8),
                                 child: Text(
                                   manga?.title ?? 'Reader',
                                   maxLines: 1,
@@ -471,6 +502,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
 class _ChapterHeader extends StatelessWidget {
   const _ChapterHeader({required this.chapter});
+
   final CanonicalChapter chapter;
 
   @override
@@ -503,55 +535,62 @@ class _ChapterHeader extends StatelessWidget {
 
 class _ReaderFailure extends StatelessWidget {
   const _ReaderFailure({required this.message, required this.retry});
+
   final String message;
   final VoidCallback retry;
 
   @override
   Widget build(BuildContext context) => Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          message,
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: AppColors.text),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.text),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(onPressed: retry, child: const Text('Try again')),
+          ],
         ),
-        const SizedBox(height: 16),
-        FilledButton(onPressed: retry, child: const Text('Try again')),
-      ],
-    ),
-  );
+      );
 }
 
 class _ChapterError extends StatelessWidget {
   const _ChapterError({required this.message, required this.retry});
+
   final String message;
   final VoidCallback retry;
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: 112,
-    child: Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(message, style: const TextStyle(color: AppColors.muted)),
-          TextButton(onPressed: retry, child: const Text('Retry chapter')),
-        ],
-      ),
-    ),
-  );
+        height: 112,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(message, style: const TextStyle(color: AppColors.muted)),
+              TextButton(onPressed: retry, child: const Text('Retry chapter')),
+            ],
+          ),
+        ),
+      );
 }
 
 class _ReaderPage extends StatefulWidget {
   const _ReaderPage({
     required this.url,
+    required this.sourceId,
     required this.page,
     required this.onAspectRatio,
+    required this.onLoadError,
   });
+
   final String url;
+  final String sourceId;
   final int page;
   final ValueChanged<double> onAspectRatio;
+  final VoidCallback onLoadError;
 
   @override
   State<_ReaderPage> createState() => _ReaderPageState();
@@ -560,6 +599,17 @@ class _ReaderPage extends StatefulWidget {
 class _ReaderPageState extends State<_ReaderPage> {
   double _aspectRatio = .68;
   bool _resolving = false;
+  bool _reportedLoadError = false;
+
+  @override
+  void didUpdateWidget(covariant _ReaderPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url || oldWidget.sourceId != widget.sourceId) {
+      _aspectRatio = .68;
+      _resolving = false;
+      _reportedLoadError = false;
+    }
+  }
 
   void _resolveAspect(ImageProvider provider) {
     if (_resolving) return;
@@ -582,10 +632,19 @@ class _ReaderPageState extends State<_ReaderPage> {
     stream.addListener(listener);
   }
 
+  void _reportLoadError() {
+    if (_reportedLoadError) return;
+    _reportedLoadError = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onLoadError();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final height = width / _aspectRatio;
+
     if (widget.url.startsWith('demo://')) {
       return SizedBox(
         height: height,
@@ -611,13 +670,15 @@ class _ReaderPageState extends State<_ReaderPage> {
         ),
       );
     }
-    final decodeWidth = (width * MediaQuery.devicePixelRatioOf(context))
-        .round();
+
+    final decodeWidth =
+        (width * MediaQuery.devicePixelRatioOf(context)).round();
     return SizedBox(
       height: height,
       width: double.infinity,
       child: CachedNetworkImage(
         imageUrl: widget.url,
+        httpHeaders: _sourceImageHeaders(widget.sourceId),
         cacheManager: MangaImageCache.instance,
         memCacheWidth: decodeWidth,
         imageBuilder: (_, provider) {
@@ -627,19 +688,39 @@ class _ReaderPageState extends State<_ReaderPage> {
         fadeInDuration: const Duration(milliseconds: 120),
         placeholder: (_, __) =>
             const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-        errorWidget: (_, __, ___) => const Center(
-          child: Text(
-            'Page unavailable',
-            style: TextStyle(color: AppColors.muted),
-          ),
-        ),
+        errorWidget: (_, __, ___) {
+          _reportLoadError();
+          return const Center(
+            child: Text(
+              'Trying another source…',
+              style: TextStyle(color: AppColors.muted),
+            ),
+          );
+        },
       ),
     );
   }
 }
 
+Map<String, String>? _sourceImageHeaders(String sourceId) {
+  final referer = switch (sourceId) {
+    'weebcentral' => 'https://weebcentral.com/',
+    'asura' => 'https://asurascans.com/',
+    'mangapill' => 'https://mangapill.com/',
+    'comick' => 'https://comick.live/',
+    'mangadex' => 'https://mangadex.org/',
+    _ => null,
+  };
+  if (referer == null) return null;
+  return <String, String>{
+    'Referer': referer,
+    'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+  };
+}
+
 class _ZoomablePage extends StatefulWidget {
   const _ZoomablePage({required this.imageProvider});
+
   final ImageProvider imageProvider;
 
   @override
@@ -658,20 +739,20 @@ class _ZoomablePageState extends State<_ZoomablePage> {
 
   @override
   Widget build(BuildContext context) => Container(
-    color: AppColors.background,
-    child: InteractiveViewer(
-      transformationController: _transform,
-      minScale: 0.5,
-      maxScale: 5,
-      panEnabled: true,
-      clipBehavior: Clip.hardEdge,
-      onInteractionUpdate: (_) {
-        final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
-        if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
-      },
-      child: SizedBox.expand(
-        child: Image(image: widget.imageProvider, fit: BoxFit.fitWidth),
-      ),
-    ),
-  );
+        color: AppColors.background,
+        child: InteractiveViewer(
+          transformationController: _transform,
+          minScale: 0.5,
+          maxScale: 5,
+          panEnabled: true,
+          clipBehavior: Clip.hardEdge,
+          onInteractionUpdate: (_) {
+            final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
+            if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
+          },
+          child: SizedBox.expand(
+            child: Image(image: widget.imageProvider, fit: BoxFit.fitWidth),
+          ),
+        ),
+      );
 }

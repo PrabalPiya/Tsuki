@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -16,6 +18,7 @@ class HomeEntry {
     required this.chapters,
     required this.progress,
     required this.currentIndex,
+    required this.highestReadIndex,
     required this.caughtUp,
     required this.sortTime,
   });
@@ -24,78 +27,92 @@ class HomeEntry {
   final List<CanonicalChapter> chapters;
   final ReadingProgress? progress;
   final int currentIndex;
+  final int highestReadIndex;
   final bool caughtUp;
   final DateTime sortTime;
 
-  int get unreadCount {
-    if (chapters.isEmpty) return 0;
+  CanonicalChapter? get latest {
+    if (chapters.isEmpty) return null;
 
-    return caughtUp
-        ? 0
-        : (chapters.length - currentIndex - 1)
-              .clamp(0, chapters.length)
-              .toInt();
+    CanonicalChapter? latestNumbered;
+    CanonicalChapter? latestDated;
+    for (final chapter in chapters) {
+      final number = chapter.number;
+      if (number != null &&
+          (latestNumbered == null || number > (latestNumbered.number ?? -1))) {
+        latestNumbered = chapter;
+      }
+      if (latestDated == null ||
+          chapter.publishedAt.isAfter(latestDated.publishedAt)) {
+        latestDated = chapter;
+      }
+    }
+    return latestNumbered ?? latestDated;
   }
-
-  CanonicalChapter? get latest => chapters.isEmpty ? null : chapters.last;
-
   bool get hasChapters => chapters.isNotEmpty;
+
+  CanonicalChapter? get highestReadChapter {
+    if (highestReadIndex < 0 || highestReadIndex >= chapters.length) {
+      return null;
+    }
+    return chapters[highestReadIndex];
+  }
 }
 
 typedef _HomeCatalogEntry = ({Manga manga, List<CanonicalChapter> chapters});
 
-final _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((
-  ref,
-) async {
+final _homeRefreshProvider = StreamProvider<int>(
+  (ref) => Stream<int>.periodic(const Duration(minutes: 15), (value) => value),
+);
+
+final _repositoryChapterUpdatesProvider = StreamProvider<String>((ref) {
+  return ref.watch(catalogProvider).chapterUpdates;
+});
+
+final _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((ref) async {
   ref.watch(_homeRefreshProvider);
+  ref.watch(_repositoryChapterUpdatesProvider);
 
   final state = ref.watch(
     userLibraryProvider.select(
-      (value) =>
-          (bookmarks: value.bookmarks, bookmarkedManga: value.bookmarkedManga),
+      (value) => (
+        bookmarks: value.bookmarks,
+        bookmarkedManga: value.bookmarkedManga,
+        adultContent: value.adultContent,
+      ),
     ),
   );
 
   final repository = ref.watch(catalogProvider);
-
   final entries = <_HomeCatalogEntry>[];
 
   for (final id in state.bookmarks) {
     try {
-      final manga =
-          repository.cached(id) ??
+      final manga = repository.cached(id) ??
           state.bookmarkedManga[id] ??
           await repository.details(id);
-
-      if (manga == null) {
-        continue;
-      }
-
+      if (manga == null) continue;
       repository.remember(manga);
 
-      List<CanonicalChapter> chapters = const <CanonicalChapter>[];
+      // Home must never block on five websites. Read only the on-device index
+      // here and start the live source check separately. When it finishes,
+      // CatalogRepository emits chapterUpdates and this provider rebuilds.
+      final local = await repository.localChapters(
+        manga,
+        allowAdult: state.adultContent,
+      );
+      entries.add((manga: manga, chapters: local ?? const []));
 
-      try {
-        chapters = await repository.chapters(manga, refresh: true);
-      } catch (_) {
-        /*
-         * IMPORTANT:
-         *
-         * Chapter failure should NOT remove
-         * the bookmarked manga from Home.
-         *
-         * We keep the manga and show it with
-         * unavailable chapter information.
-         */
-        chapters = const <CanonicalChapter>[];
-      }
-
-      entries.add((manga: manga, chapters: chapters));
+      unawaited(
+        repository
+            .chapters(
+              manga,
+              allowAdult: state.adultContent,
+            )
+            .catchError((_) => const <CanonicalChapter>[]),
+      );
     } catch (_) {
-      /*
-       * Only completely unavailable manga
-       * metadata is skipped.
-       */
+      // Keep the rest of Home usable when one title/source is unavailable.
     }
   }
 
@@ -104,56 +121,84 @@ final _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((
 
 final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
   final libraryState = ref.watch(userLibraryProvider);
-
   final progress = libraryState.progress;
-
-  final bool adultContentEnabled = libraryState.adultContent;
+  final adultContentEnabled = libraryState.adultContent;
 
   return ref.watch(_homeCatalogProvider).whenData((catalog) {
     final entries = catalog
-        /*
-           * Adult visibility only.
-           *
-           * OFF:
-           * adult manga hidden.
-           *
-           * ON:
-           * adult manga visible.
-           *
-           * Bookmark and progress remain stored.
-           */
         .where((entry) => adultContentEnabled || !entry.manga.isAdult)
         .map((entry) {
           final mangaProgress = progress[entry.manga.id];
-
-          int current = -1;
+          var current = -1;
+          var highest = -1;
 
           if (mangaProgress != null && entry.chapters.isNotEmpty) {
             current = entry.chapters.indexWhere(
               (chapter) => chapter.id == mangaProgress.chapterId,
             );
+
+            final opened = mangaProgress.openedChapterIds;
+            double? highestNumber;
+            var highestUnnumbered = -1;
+
+            for (var i = 0; i < entry.chapters.length; i++) {
+              final chapter = entry.chapters[i];
+              if (!opened.contains(chapter.id)) continue;
+
+              final number = chapter.number;
+              if (number != null) {
+                if (highestNumber == null || number > highestNumber) {
+                  highestNumber = number;
+                  highest = i;
+                }
+              } else if (highestUnnumbered < 0) {
+                highestUnnumbered = i;
+              }
+            }
+
+            // A later special/extra must not replace the highest numbered
+            // chapter reached. Only use an unnumbered item if no numbered
+            // chapter has ever been opened.
+            if (highest < 0) highest = highestUnnumbered;
+
+            // Old progress written before openedChapterIds existed is migrated
+            // naturally by treating its current chapter as opened.
+            if (highest < 0 && current >= 0) highest = current;
           }
 
-          final bool caught =
-              entry.chapters.isNotEmpty &&
-              current == entry.chapters.length - 1 &&
-              (mangaProgress?.chapterProgress ?? 0.0) >= 0.95;
+          var latestIndex = -1;
+          double? latestNumber;
+          var latestDatedIndex = -1;
+          var latestDate = DateTime.fromMillisecondsSinceEpoch(0);
+          for (var i = 0; i < entry.chapters.length; i++) {
+            final chapter = entry.chapters[i];
+            final number = chapter.number;
+            if (number != null &&
+                (latestNumber == null || number > latestNumber)) {
+              latestNumber = number;
+              latestIndex = i;
+            }
+            if (latestDatedIndex < 0 || chapter.publishedAt.isAfter(latestDate)) {
+              latestDate = chapter.publishedAt;
+              latestDatedIndex = i;
+            }
+          }
+          if (latestIndex < 0) latestIndex = latestDatedIndex;
 
-          /*
-           * Manga without chapters still need
-           * a stable sorting position.
-           */
+          final latestIsCurrent = current == latestIndex;
+          final caught = latestIndex >= 0 &&
+              highest == latestIndex &&
+              (!latestIsCurrent ||
+                  (mangaProgress?.chapterProgress ?? 0.0) >= 0.95);
+
           final DateTime sort;
-
           if (caught) {
-            sort =
-                mangaProgress?.updatedAt ??
+            sort = mangaProgress?.updatedAt ??
                 DateTime.fromMillisecondsSinceEpoch(0);
-          } else if (entry.chapters.isNotEmpty) {
-            sort = entry.chapters.last.publishedAt;
+          } else if (latestIndex >= 0) {
+            sort = entry.chapters[latestIndex].publishedAt;
           } else {
-            sort =
-                mangaProgress?.updatedAt ??
+            sort = mangaProgress?.updatedAt ??
                 DateTime.fromMillisecondsSinceEpoch(0);
           }
 
@@ -162,6 +207,7 @@ final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
             chapters: entry.chapters,
             progress: mangaProgress,
             currentIndex: current,
+            highestReadIndex: highest,
             caughtUp: caught,
             sortTime: sort,
           );
@@ -169,14 +215,9 @@ final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
         .toList();
 
     entries.sort((a, b) => b.sortTime.compareTo(a.sortTime));
-
     return entries;
   });
 });
-
-final _homeRefreshProvider = StreamProvider<int>(
-  (ref) => Stream<int>.periodic(const Duration(minutes: 15), (value) => value),
-);
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -187,24 +228,15 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   PageController? _pageController;
-
   int _selectedSection = 0;
-
   bool _isAnimating = false;
 
   PageController get _page => _pageController ??= PageController();
 
   void _switchTab(int index) {
-    if (_isAnimating || _selectedSection == index) {
-      return;
-    }
-
-    setState(() {
-      _selectedSection = index;
-    });
-
+    if (_isAnimating || _selectedSection == index) return;
+    setState(() => _selectedSection = index);
     _isAnimating = true;
-
     _page
         .animateToPage(
           index,
@@ -212,12 +244,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           curve: Curves.easeOutCubic,
         )
         .then((_) {
-          if (!mounted) return;
-
-          setState(() {
-            _isAnimating = false;
-          });
-        });
+      if (!mounted) return;
+      setState(() => _isAnimating = false);
+    });
   }
 
   @override
@@ -234,7 +263,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       data: (entries) => entries.where((entry) => !entry.caughtUp).length,
       orElse: () => null,
     );
-
     final caughtUpCount = homeEntries.maybeWhen(
       data: (entries) => entries.where((entry) => entry.caughtUp).length,
       orElse: () => null,
@@ -255,7 +283,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ],
       ),
-
       body: Column(
         children: [
           _HomeTabs(
@@ -264,29 +291,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             selectedIndex: _selectedSection,
             onTabChanged: _switchTab,
           ),
-
           Expanded(
             child: homeEntries.when(
               loading: () => const Center(child: CircularProgressIndicator()),
-
               error: (_, __) => const _Empty('Home is unavailable right now.'),
-
               data: (entries) {
-                final active = entries
-                    .where((entry) => !entry.caughtUp)
-                    .toList();
-
-                final caughtUp = entries
-                    .where((entry) => entry.caughtUp)
-                    .toList();
+                final active =
+                    entries.where((entry) => !entry.caughtUp).toList();
+                final caughtUp =
+                    entries.where((entry) => entry.caughtUp).toList();
 
                 WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (!mounted || !_page.hasClients) {
-                    return;
-                  }
-
+                  if (!mounted || !_page.hasClients) return;
                   final page = _page.page?.round();
-
                   if (page != _selectedSection) {
                     _page.jumpToPage(_selectedSection);
                   }
@@ -294,18 +311,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
                 return PageView(
                   controller: _page,
-
                   onPageChanged: (index) {
                     if (!_isAnimating) {
-                      setState(() {
-                        _selectedSection = index;
-                      });
+                      setState(() => _selectedSection = index);
                     }
                   },
-
                   children: [
                     _EntryList(entries: active),
-
                     _EntryList(entries: caughtUp, caughtUpSection: true),
                   ],
                 );
@@ -332,9 +344,7 @@ class _TsukiTitle extends StatelessWidget {
           height: 58,
           fit: BoxFit.contain,
         ),
-
         const SizedBox(width: 6),
-
         Text(
           'Tsuki',
           style: GoogleFonts.sora(
@@ -384,7 +394,7 @@ class _HomeTabs extends StatelessWidget {
               curve: Curves.easeOutCubic,
               child: FractionallySizedBox(
                 widthFactor: 0.5,
-                heightFactor: 1.0,
+                heightFactor: 1,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     color: AppColors.accent.withValues(alpha: 0.16),
@@ -393,7 +403,6 @@ class _HomeTabs extends StatelessWidget {
                 ),
               ),
             ),
-
             Row(
               children: [
                 Expanded(
@@ -404,7 +413,6 @@ class _HomeTabs extends StatelessWidget {
                     onTap: () => onTabChanged(0),
                   ),
                 ),
-
                 Expanded(
                   child: _HomeTabButton(
                     label: 'Caught Up',
@@ -438,7 +446,6 @@ class _HomeTabButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final countLabel = count == null ? '-' : '$count';
-
     final contentColor = selected ? AppColors.text : AppColors.muted;
 
     return GestureDetector(
@@ -463,9 +470,7 @@ class _HomeTabButton extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-
               const SizedBox(width: 6),
-
               Text(
                 countLabel,
                 style: TextStyle(
@@ -488,7 +493,6 @@ class _EntryList extends StatelessWidget {
   const _EntryList({required this.entries, this.caughtUpSection = false});
 
   final List<HomeEntry> entries;
-
   final bool caughtUpSection;
 
   @override
@@ -517,25 +521,20 @@ class _HomeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final String last;
-
-    if (entry.progress == null) {
-      last = 'Not started';
-    } else if (entry.currentIndex >= 0 &&
-        entry.currentIndex < entry.chapters.length) {
-      last = entry.chapters[entry.currentIndex].numberLabel;
+    final highestRead = entry.highestReadChapter;
+    final String lastRead;
+    if (highestRead != null) {
+      lastRead = highestRead.numberLabel;
+    } else if (entry.progress != null) {
+      lastRead = 'Saved';
     } else {
-      last = 'Saved';
+      lastRead = 'Not started';
     }
 
     const cardRadius = 18.0;
-
     const buttonRadius = 12.0;
-
     const contentHeight = 146.0;
-
     const titleHeight = 40.0;
-
     const buttonHeight = 38.0;
 
     return Card(
@@ -562,9 +561,7 @@ class _HomeCard extends StatelessWidget {
                     borderRadius: 12,
                   ),
                 ),
-
                 const SizedBox(width: 12),
-
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -577,14 +574,14 @@ class _HomeCard extends StatelessWidget {
                             entry.manga.title,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.titleMedium
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
                                 ?.copyWith(height: 1.2),
                           ),
                         ),
                       ),
-
                       const SizedBox(height: 5),
-
                       _ChapterInfoLine(
                         label: 'New chapter',
                         value: entry.latest?.numberLabel ?? '—',
@@ -592,29 +589,23 @@ class _HomeCard extends StatelessWidget {
                             ? AppColors.accent
                             : AppColors.muted,
                       ),
-
                       const SizedBox(height: 2),
-
                       _ChapterInfoLine(
                         label: 'Last read',
-                        value: last,
-                        valueColor: entry.progress == null
+                        value: lastRead,
+                        valueColor: highestRead == null
                             ? AppColors.muted
                             : AppColors.accent,
                       ),
-
                       const SizedBox(height: 2),
-
                       _ChapterInfoLine(
-                        label: 'Unread chapters',
-                        value: entry.hasChapters ? '${entry.unreadCount}' : '—',
-                        valueColor: entry.hasChapters
-                            ? AppColors.text
-                            : AppColors.muted,
+                        label: 'Last upload',
+                        value: _formatUploadDate(entry.latest?.publishedAt),
+                        valueColor: entry.latest == null
+                            ? AppColors.muted
+                            : AppColors.text,
                       ),
-
                       const SizedBox(height: 8),
-
                       SizedBox(
                         height: buttonHeight,
                         width: double.infinity,
@@ -629,29 +620,21 @@ class _HomeCard extends StatelessWidget {
                               borderRadius: BorderRadius.circular(buttonRadius),
                             ),
                           ),
-
-                          /*
-                           * No chapters = keep manga visible,
-                           * but don't open an invalid reader.
-                           */
                           onPressed: !entry.hasChapters || entry.caughtUp
                               ? null
                               : () {
-                                  final chapterId =
-                                      entry.progress?.chapterId ??
+                                  final chapterId = entry.progress?.chapterId ??
                                       entry.chapters.first.id;
-
                                   context.push(
                                     '/reader/${Uri.encodeComponent(entry.manga.id)}?chapter=${Uri.encodeComponent(chapterId)}',
                                   );
                                 },
-
                           child: Text(
                             !entry.hasChapters
-                                ? 'Chapters unavailable'
+                                ? 'Finding chapters…'
                                 : entry.progress == null
-                                ? 'Start Reading'
-                                : 'Continue Reading',
+                                    ? 'Start Reading'
+                                    : 'Continue Reading',
                           ),
                         ),
                       ),
@@ -665,6 +648,26 @@ class _HomeCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String _formatUploadDate(DateTime? value) {
+  if (value == null || value.millisecondsSinceEpoch <= 0) return '—';
+  final date = value.toLocal();
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return '${date.day} ${months[date.month - 1]} ${date.year}';
 }
 
 class _ChapterInfoLine extends StatelessWidget {
@@ -681,7 +684,6 @@ class _ChapterInfoLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = Theme.of(context).textTheme.bodySmall;
-
     return Text.rich(
       TextSpan(
         children: [

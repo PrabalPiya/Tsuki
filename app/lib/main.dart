@@ -6,9 +6,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app.dart';
 import 'core/config/app_config.dart';
 import 'core/state/providers.dart';
+import 'core/storage/chapter_index_cache.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Load the tiny source-verified chapter summaries before the first frame.
+  // Previously-seen manga can therefore show their latest chapter number in
+  // the Details info chip immediately, without waiting for a source request.
+  await ChapterIndexCache.warmGlobalSummaries();
+
   var config = AppConfig.fromEnvironment();
   if (config.isFirebaseConfigured) {
     try {
@@ -23,6 +30,7 @@ Future<void> main() async {
       config = config.withoutFirebase();
     }
   }
+
   runApp(
     ProviderScope(
       overrides: [appConfigProvider.overrideWithValue(config)],

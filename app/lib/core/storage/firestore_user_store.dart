@@ -6,10 +6,12 @@ import 'user_store.dart';
 
 class FirestoreUserStore implements UserStore {
   FirestoreUserStore({FirebaseFirestore? firestore, UserStore? local})
-    : _db = firestore ?? FirebaseFirestore.instance,
-      _local = local ?? const LocalUserStore();
+      : _db = firestore ?? FirebaseFirestore.instance,
+        _local = local ?? const LocalUserStore();
+
   final FirebaseFirestore _db;
   final UserStore _local;
+
   @override
   Future<UserSnapshot> load(String uid) async {
     final local = await _local.load(uid);
@@ -20,9 +22,13 @@ class FirestoreUserStore implements UserStore {
         user.collection('progress').get(),
         user.get(),
       ]);
-      final bookmarks = (results[0] as QuerySnapshot<Map<String, dynamic>>).docs
-          .map((d) => d.id)
-          .toSet();
+
+      final bookmarks =
+          (results[0] as QuerySnapshot<Map<String, dynamic>>)
+              .docs
+              .map((d) => d.id)
+              .toSet();
+
       final progress = <String, ReadingProgress>{};
       for (final doc
           in (results[1] as QuerySnapshot<Map<String, dynamic>>).docs) {
@@ -35,8 +41,10 @@ class FirestoreUserStore implements UserStore {
               : stamp,
         });
       }
-      final settings = (results[2] as DocumentSnapshot<Map<String, dynamic>>)
-          .data();
+
+      final settings =
+          (results[2] as DocumentSnapshot<Map<String, dynamic>>).data();
+
       return UserSnapshot(
         bookmarks: bookmarks,
         bookmarkedManga: {
@@ -44,7 +52,11 @@ class FirestoreUserStore implements UserStore {
             if (local.bookmarkedManga[id] case final manga?) id: manga,
         },
         progress: progress,
-        adultContent: settings?['adultContent'] as bool? ?? false,
+        // A cloud document created before this setting existed may not contain
+        // adultContent. Preserve the already-durable local preference instead
+        // of silently resetting an enabled toggle to false.
+        adultContent:
+            settings?['adultContent'] as bool? ?? local.adultContent,
       );
     } catch (_) {
       return local;
@@ -61,6 +73,7 @@ class FirestoreUserStore implements UserStore {
     final ref = _db.collection('users').doc(uid).collection('bookmarks');
     final current = await ref.get();
     final batch = _db.batch();
+
     for (final doc in current.docs) {
       if (!ids.contains(doc.id)) batch.delete(doc.reference);
     }

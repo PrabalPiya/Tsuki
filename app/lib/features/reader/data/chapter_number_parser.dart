@@ -1,135 +1,77 @@
 class ChapterNumberParser {
   const ChapterNumberParser._();
 
-  /// Parses ONLY explicit human-facing chapter labels.
+  /// Parses only explicit human-facing chapter labels.
   ///
-  /// Supported examples:
+  /// Supported examples include:
+  /// Chapter 12, Chapter: 12, Chapter - 12, Chap 12, Ch. 12,
+  /// Act 15.5, Part 32.5, Lesson 36, Episode 10, Ep. 10, #455 and,
+  /// when [allowPlainNumber] is true, a label containing only `455`.
   ///
-  /// Chapter 12
-  /// Chapter 12.5
-  /// Ch. 12
-  /// Act. 15.5
-  /// Part 32.5
-  /// Lesson 36
-  /// Episode 10
-  /// Ep. 10
-  /// #455
-  /// 455
-  ///
-  /// It intentionally never parses arbitrary numbers
-  /// from URLs, UUIDs, database IDs or timestamps.
+  /// It intentionally never pulls arbitrary numbers from URLs, UUIDs,
+  /// timestamps, database ids, or mixed free-form text.
   static double? parseVisibleLabel(
     String raw, {
     bool allowPlainNumber = false,
   }) {
-    final text = raw
-        .replaceAll(
-          RegExp(r'\s+'),
-          ' ',
-        )
-        .trim();
+    final text = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.isEmpty) return null;
 
-    if (text.isEmpty) {
-      return null;
-    }
+    const number = r'(\d+(?:\.\d+)?)';
+    const separator = r'\s*(?:no\.?\s*)?(?:#|:|-)?\s*';
 
     final patterns = <RegExp>[
       RegExp(
-        r'\bchapter\s*(?:no\.?\s*)?#?\s*(\d+(?:\.\d+)?)\b',
+        r'\b(?:chapter|chap|ch\.?)' + separator + number + r'\b',
         caseSensitive: false,
       ),
       RegExp(
-        r'\bch\.?\s*#?\s*(\d+(?:\.\d+)?)\b',
+        r'\bact\.?' + separator + number + r'\b',
         caseSensitive: false,
       ),
       RegExp(
-        r'\bact\.?\s*#?\s*(\d+(?:\.\d+)?)\b',
+        r'\bpart' + separator + number + r'\b',
         caseSensitive: false,
       ),
       RegExp(
-        r'\bpart\s*#?\s*(\d+(?:\.\d+)?)\b',
+        r'\blesson' + separator + number + r'\b',
         caseSensitive: false,
       ),
       RegExp(
-        r'\blesson\s*#?\s*(\d+(?:\.\d+)?)\b',
+        r'\b(?:episode|ep\.?)' + separator + number + r'\b',
         caseSensitive: false,
       ),
       RegExp(
-        r'\bepisode\s*#?\s*(\d+(?:\.\d+)?)\b',
-        caseSensitive: false,
-      ),
-      RegExp(
-        r'\bep\.?\s*#?\s*(\d+(?:\.\d+)?)\b',
-        caseSensitive: false,
-      ),
-      RegExp(
-        r'^\s*#\s*(\d+(?:\.\d+)?)\b',
+        r'^\s*#\s*' + number + r'\b',
         caseSensitive: false,
       ),
     ];
 
     for (final pattern in patterns) {
-      final match =
-          pattern.firstMatch(text);
-
-      if (match == null) {
-        continue;
-      }
-
-      final number =
-          double.tryParse(
-        match.group(1) ?? '',
-      );
-
-      if (_valid(number)) {
-        return number;
-      }
+      final match = pattern.firstMatch(text);
+      if (match == null) continue;
+      final parsed = double.tryParse(match.group(1) ?? '');
+      if (_valid(parsed)) return parsed;
     }
 
     if (allowPlainNumber) {
-      final plain =
-          RegExp(
+      final plain = RegExp(
         r'^\s*(\d+(?:\.\d+)?)\s*$',
       ).firstMatch(text);
-
-      final number =
-          double.tryParse(
-        plain?.group(1) ?? '',
-      );
-
-      if (_valid(number)) {
-        return number;
-      }
+      final parsed = double.tryParse(plain?.group(1) ?? '');
+      if (_valid(parsed)) return parsed;
     }
 
     return null;
   }
 
-  static bool _valid(
-    double? value,
-  ) {
-    if (value == null ||
-        !value.isFinite ||
-        value < 0) {
-      return false;
-    }
-
-    /*
-     * This is only a corruption guard.
-     *
-     * Do NOT limit against AniList chapterCount.
-     *
-     * Manga can legitimately exceed 1000 chapters.
-     */
+  static bool _valid(double? value) {
+    if (value == null || !value.isFinite || value < 0) return false;
+    // Corruption guard only. Long-running manga can legitimately exceed 1000.
     return value <= 20000;
   }
 
-  static String label(
-    double value,
-  ) {
-    return value ==
-            value.roundToDouble()
-        ? value.toInt().toString()
-        : value.toString();
-  }
+  static String label(double value) => value == value.roundToDouble()
+      ? value.toInt().toString()
+      : value.toString();
 }

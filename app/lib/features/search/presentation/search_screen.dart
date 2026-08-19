@@ -102,6 +102,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     separatorBuilder: (_, __) => const SizedBox(height: 10),
     itemBuilder: (context, index) {
       final manga = items[index];
+      final chapterLabel = ref
+              .watch(chapterSummaryLabelProvider(manga))
+              .valueOrNull ??
+          manga.chapterDisplayLabel;
       return Card(
         child: ListTile(
           leading: SizedBox(
@@ -156,7 +160,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   ),
                   const SizedBox(width: 3),
                   Text(
-                    '${manga.chapterCount} chp',
+                    '$chapterLabel chp',
                     style: const TextStyle(fontSize: 12),
                   ),
                 ],
@@ -181,6 +185,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     itemCount: items.length,
     itemBuilder: (context, index) {
       final manga = items[index];
+      final chapterLabel = ref
+              .watch(chapterSummaryLabelProvider(manga))
+              .valueOrNull ??
+          manga.chapterDisplayLabel;
       return InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: () => context.push('/manga/${Uri.encodeComponent(manga.id)}'),
@@ -244,7 +252,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     ),
                     const SizedBox(width: 3),
                     Text(
-                      '${manga.chapterCount} chp',
+                      '$chapterLabel chp',
                       style: const TextStyle(fontSize: 12),
                     ),
                   ],

@@ -210,12 +210,21 @@ class MangaDexSource implements MangaSource {
     return resource == null ? null : _manga(resource);
   }
 
-  Future<String?> findConservativeMatch(Manga canonical) async {
-    final match = await _findConservativeMatchDetails(canonical);
+  Future<String?> findConservativeMatch(
+    Manga canonical, {
+    bool allowAdult = false,
+  }) async {
+    final match = await _findConservativeMatchDetails(
+      canonical,
+      allowAdult: allowAdult,
+    );
     return match?.id;
   }
 
-  Future<_MangaDexMatch?> _findConservativeMatchDetails(Manga canonical) async {
+  Future<_MangaDexMatch?> _findConservativeMatchDetails(
+    Manga canonical, {
+    bool allowAdult = false,
+  }) async {
     final expected = <String>{
       canonical.title,
       ...canonical.aliases,
@@ -229,6 +238,7 @@ class MangaDexSource implements MangaSource {
         query,
         canonical,
         expected,
+        allowAdult: allowAdult,
       );
       if (match != null) return match;
     }
@@ -238,11 +248,12 @@ class MangaDexSource implements MangaSource {
   Future<_MangaDexMatch?> _findConservativeMatchForQuery(
     String query,
     Manga canonical,
-    Set<String> expected,
-  ) async {
+    Set<String> expected, {
+    required bool allowAdult,
+  }) async {
     for (final resource in await _searchResources(
       query,
-      includeAdult: canonical.isAdult,
+      includeAdult: canonical.isAdult || allowAdult,
     )) {
       final candidate = _manga(resource);
       final attrs = resource['attributes'] as Map<String, dynamic>? ?? const {};

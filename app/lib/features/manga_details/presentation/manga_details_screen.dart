@@ -159,9 +159,10 @@ class _Details extends ConsumerWidget {
         .where((chapter) => chapter.hasDirectlyReadableCopy)
         .toList(growable: false);
 
-    final actualChapterCount = loadedChapters.isNotEmpty
-        ? loadedChapters.length
-        : manga.chapterCount;
+    final chapterCountLabel = ref
+            .watch(chapterSummaryLabelProvider(manga))
+            .valueOrNull ??
+        manga.chapterDisplayLabel;
 
     final startReadingLabel = progress == null
         ? 'Start Reading'
@@ -207,7 +208,7 @@ class _Details extends ConsumerWidget {
           SliverToBoxAdapter(
             child: _MangaHero(
               manga: manga,
-              chapterCount: actualChapterCount,
+              chapterCountLabel: chapterCountLabel,
               bookmarked: bookmarked,
               startReadingLabel: startReadingLabel,
               onStartReading: onStartReading,
@@ -500,7 +501,7 @@ class _ChapterViewportState extends State<_ChapterViewport> {
 class _MangaHero extends StatelessWidget {
   const _MangaHero({
     required this.manga,
-    required this.chapterCount,
+    required this.chapterCountLabel,
     required this.onBack,
     required this.bookmarked,
     required this.onToggleBookmark,
@@ -509,7 +510,7 @@ class _MangaHero extends StatelessWidget {
   });
 
   final Manga manga;
-  final int chapterCount;
+  final String chapterCountLabel;
 
   final VoidCallback onBack;
 
@@ -611,7 +612,7 @@ class _MangaHero extends StatelessWidget {
       text: TextSpan(text: title, style: titleStyle),
       textDirection: TextDirection.ltr,
       maxLines: 2,
-      ellipsis: '…',
+      ellipsis: 'Ã¢â‚¬Â¦',
     )..layout(maxWidth: contentWidth);
 
     final synopsisPainter = TextPainter(
@@ -807,7 +808,7 @@ class _MangaHero extends StatelessWidget {
                     Expanded(
                       child: _InfoChip(
                         icon: Icons.library_books_rounded,
-                        label: '$chapterCount chp',
+                        label: '$chapterCountLabel chp',
                       ),
                     ),
                   ],
