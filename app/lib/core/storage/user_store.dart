@@ -10,12 +10,11 @@ class UserSnapshot {
     required this.bookmarks,
     required this.bookmarkedManga,
     required this.progress,
-    required this.adultContent,
   });
+
   final Set<String> bookmarks;
   final Map<String, Manga> bookmarkedManga;
   final Map<String, ReadingProgress> progress;
-  final bool adultContent;
 }
 
 abstract interface class UserStore {
@@ -26,12 +25,12 @@ abstract interface class UserStore {
     Map<String, Manga> manga,
   );
   Future<void> saveProgress(String uid, ReadingProgress progress);
-  Future<void> saveAdultContent(String uid, bool enabled);
   Future<void> clearSession(String uid);
 }
 
 class LocalUserStore implements UserStore {
   const LocalUserStore();
+
   @override
   Future<UserSnapshot> load(String uid) async {
     final p = await SharedPreferences.getInstance();
@@ -40,15 +39,15 @@ class LocalUserStore implements UserStore {
         p.getStringList('${prefix}bookmarks')?.toSet() ?? <String>{};
     final progress = <String, ReadingProgress>{};
     final bookmarkedManga = <String, Manga>{};
+
     final catalog = p.getString('${prefix}catalog');
     if (catalog != null) {
       try {
         final map = jsonDecode(catalog) as Map<String, dynamic>;
         for (final entry in map.entries) {
           try {
-            bookmarkedManga[entry.key] = Manga.fromJson(
-              entry.value as Map<String, dynamic>,
-            );
+            final manga = Manga.fromJson(entry.value as Map<String, dynamic>);
+            if (!manga.isAdult) bookmarkedManga[entry.key] = manga;
           } catch (_) {
             // Ignore one corrupt legacy entry instead of losing the library.
           }
@@ -57,6 +56,7 @@ class LocalUserStore implements UserStore {
         // Optional metadata can be fetched again from the provider.
       }
     }
+
     final encoded = p.getString('${prefix}progress');
     if (encoded != null) {
       try {
@@ -74,11 +74,21 @@ class LocalUserStore implements UserStore {
         // A corrupt local progress blob should never prevent app startup.
       }
     }
+
+    // Remove the obsolete adult-mode preference if it exists from an old build.
+    await p.remove('${prefix}adult');
+
+    final safeBookmarks = bookmarks
+        .where((id) => bookmarkedManga[id]?.isAdult != true)
+        .toSet();
+
     return UserSnapshot(
-      bookmarks: bookmarks,
-      bookmarkedManga: bookmarkedManga,
+      bookmarks: safeBookmarks,
+      bookmarkedManga: {
+        for (final entry in bookmarkedManga.entries)
+          if (safeBookmarks.contains(entry.key)) entry.key: entry.value,
+      },
       progress: progress,
-      adultContent: p.getBool('${prefix}adult') ?? false,
     );
   }
 
@@ -88,11 +98,18 @@ class LocalUserStore implements UserStore {
     Set<String> ids,
     Map<String, Manga> manga,
   ) async {
+    final safeManga = <String, Manga>{
+      for (final entry in manga.entries)
+        if (!entry.value.isAdult) entry.key: entry.value,
+    };
+    final safeIds = ids.where(safeManga.containsKey).toList(growable: false);
     final p = await SharedPreferences.getInstance();
-    await p.setStringList('user.$uid.bookmarks', ids.toList());
+    await p.setStringList('user.$uid.bookmarks', safeIds);
     await p.setString(
       'user.$uid.catalog',
-      jsonEncode(manga.map((key, value) => MapEntry(key, value.toJson()))),
+      jsonEncode(
+        safeManga.map((key, value) => MapEntry(key, value.toJson())),
+      ),
     );
   }
 
@@ -108,14 +125,6 @@ class LocalUserStore implements UserStore {
     }
     map[value.mangaId] = value.toJson();
     await p.setString(key, jsonEncode(map));
-  }
-
-  @override
-  Future<void> saveAdultContent(String uid, bool enabled) async {
-    await (await SharedPreferences.getInstance()).setBool(
-      'user.$uid.adult',
-      enabled,
-    );
   }
 
   @override

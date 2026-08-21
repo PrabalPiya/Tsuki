@@ -33,7 +33,7 @@ class AniListMetadataProvider
     return browse(
       MangaBrowseRequest(
         query: query,
-        adultOnly: includeAdult,
+        adultOnly: false,
         sort: MangaBrowseSort.relevance,
         perPage: 24,
       ),
@@ -75,7 +75,7 @@ class AniListMetadataProvider
       'page': request.page,
       'perPage': request.perPage.clamp(1, 50),
       'search': query.length >= 2 ? query : null,
-      'isAdult': request.adultOnly,
+      'isAdult': false,
       'status': _statusVariable(request.status),
       'genres': request.genres.isEmpty ? null : request.genres.toList(),
       // AniList uses a strict "greater than" filter.
@@ -101,7 +101,7 @@ class AniListMetadataProvider
     var values = media
         .whereType<Map>()
         .map((raw) => _fromJson(Map<String, dynamic>.from(raw)))
-        .where((manga) => manga.isAdult == request.adultOnly)
+        .where((manga) => !manga.isAdult)
         .toList(growable: false);
 
     // AniList does not expose a stable chapter-count MediaSort in all schema
@@ -167,7 +167,7 @@ class AniListMetadataProvider
         ? ''
         : 'season: $season, seasonYear: $seasonYear,';
     final document =
-        '''query BrowseManga { Page(page: 1, perPage: 24) { media(type: MANGA, isAdult: $adultOnly, $seasonClause sort: $sort) { $fields } } }''';
+        '''query BrowseManga { Page(page: 1, perPage: 24) { media(type: MANGA, isAdult: false, $seasonClause sort: $sort) { $fields } } }''';
 
     final response = await _client.post<Map<String, dynamic>>(
       '',
@@ -183,7 +183,7 @@ class AniListMetadataProvider
     return media
         .whereType<Map>()
         .map((raw) => _fromJson(Map<String, dynamic>.from(raw)))
-        .where((manga) => manga.isAdult == adultOnly)
+        .where((manga) => !manga.isAdult)
         .toList(growable: false);
   }
 

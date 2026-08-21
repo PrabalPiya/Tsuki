@@ -11,17 +11,11 @@ import '../storage/firestore_user_store.dart';
 import '../storage/user_store.dart';
 
 import '../../features/discover/data/ranking_provider.dart';
-import '../../features/reader/data/adult_madara_source.dart';
 import '../../features/reader/data/asura_source.dart';
 import '../../features/reader/data/comick_source.dart';
-import '../../features/reader/data/hitomi_source.dart';
 import '../../features/reader/data/mangadex_source.dart';
 import '../../features/reader/data/mangapill_source.dart';
-import '../../features/reader/data/manhwa18cc_source.dart';
-import '../../features/reader/data/manhwa18net_source.dart';
-import '../../features/reader/data/omega_scans_source.dart';
 import '../../features/reader/data/weebcentral_source.dart';
-import '../../features/reader/data/webtoon_xyz_source.dart';
 import '../../features/search/data/anilist_metadata_provider.dart';
 import '../../features/search/state/search_controller.dart';
 
@@ -51,44 +45,11 @@ final userLibraryProvider =
       );
     });
 
-/// True means the whole app is in adult-only mode.
-/// False means the whole app is in normal-only mode.
-final adultModeProvider = Provider<bool>((ref) {
-  return ref.watch(userLibraryProvider.select((state) => state.adultContent));
-});
-
 final mangaDexProvider = Provider<MangaDexSource>((ref) => MangaDexSource());
-final ero18xProvider = Provider<AdultMadaraSource>(
-  (ref) => AdultMadaraSource(
-    id: 'ero18x',
-    displayName: 'Ero18x',
-    baseUrl: 'https://ero18x.com',
-  ),
-);
-final toon18Provider = Provider<AdultMadaraSource>(
-  (ref) => AdultMadaraSource(
-    id: 'toon18',
-    displayName: 'Toon18',
-    baseUrl: 'https://toon18.to',
-  ),
-);
 final comicKProvider = Provider<ComicKSource>((ref) => ComicKSource());
-final hitomiProvider = Provider<HitomiSource>((ref) => HitomiSource());
 final mangaPillProvider = Provider<MangaPillSource>((ref) => MangaPillSource());
-final manhwa18CcProvider = Provider<Manhwa18CcSource>(
-  (ref) => Manhwa18CcSource(),
-);
-final manhwa18NetProvider = Provider<Manhwa18NetSource>(
-  (ref) => Manhwa18NetSource(),
-);
-final omegaScansProvider = Provider<OmegaScansSource>(
-  (ref) => OmegaScansSource(),
-);
 final weebCentralProvider = Provider<WeebCentralSource>(
   (ref) => WeebCentralSource(),
-);
-final webtoonXyzProvider = Provider<WebtoonXyzSource>(
-  (ref) => WebtoonXyzSource(),
 );
 final asuraProvider = Provider<AsuraSource>((ref) => AsuraSource());
 final anilistProvider = Provider<AniListMetadataProvider>(
@@ -100,16 +61,9 @@ final catalogProvider = Provider<CatalogRepository>((ref) {
     config: ref.watch(appConfigProvider),
     metadata: ref.watch(anilistProvider),
     mangaDex: ref.watch(mangaDexProvider),
-    ero18x: ref.watch(ero18xProvider),
-    toon18: ref.watch(toon18Provider),
     comicK: ref.watch(comicKProvider),
-    hitomi: ref.watch(hitomiProvider),
     mangaPill: ref.watch(mangaPillProvider),
-    manhwa18Cc: ref.watch(manhwa18CcProvider),
-    manhwa18Net: ref.watch(manhwa18NetProvider),
-    omegaScans: ref.watch(omegaScansProvider),
     weebCentral: ref.watch(weebCentralProvider),
-    webtoonXyz: ref.watch(webtoonXyzProvider),
     asura: ref.watch(asuraProvider),
   );
 });
@@ -118,22 +72,15 @@ final chapterSummaryUpdatesProvider = StreamProvider<String>(
   (ref) => ref.watch(catalogProvider).chapterUpdates,
 );
 
-/// Reactive chapter label for one manga card.
-///
-/// It emits immediately from the warmed local summary/metadata, primes that
-/// manga if needed, then emits again whenever the repository learns a newer
-/// source-backed value. This prevents Discover/Search cards from staying at 0
-/// until the Details route causes an unrelated rebuild.
 final chapterSummaryLabelProvider = StreamProvider.autoDispose
     .family<String, Manga>((ref, manga) async* {
-      final adultMode = ref.watch(adultModeProvider);
       final repository = ref.watch(catalogProvider);
 
       yield manga.chapterDisplayLabel;
 
-      if (manga.isAdult == adultMode) {
+      if (!manga.isAdult) {
         try {
-          await repository.primeChapterSummary(manga, allowAdult: adultMode);
+          await repository.primeChapterSummary(manga, allowAdult: false);
         } catch (_) {
           // Keep the immediate local/metadata value when sources are unavailable.
         }
@@ -150,23 +97,21 @@ final chapterSummaryLabelProvider = StreamProvider.autoDispose
 
 final searchProvider =
     StateNotifierProvider.autoDispose<SearchController, SearchState>((ref) {
-      return SearchController(
-        ref.watch(catalogProvider),
-        adultOnly: ref.watch(adultModeProvider),
-      );
+      return SearchController(ref.watch(catalogProvider));
     });
 
-/// Progressive chapter list for Details.
-///
-/// The subscription is installed before the first source request so a fast
-/// provider merge cannot be missed between initial load and stream listening.
 final chapterProvider = StreamProvider.autoDispose
     .family<List<CanonicalChapter>, Manga>((ref, manga) {
-      final adultMode = ref.watch(adultModeProvider);
       final repository = ref.watch(catalogProvider);
       final controller = StreamController<List<CanonicalChapter>>();
 
-      final memory = repository.memoryChapters(manga, allowAdult: adultMode);
+      if (manga.isAdult) {
+        controller.add(const <CanonicalChapter>[]);
+        unawaited(controller.close().then<void>((_) {}));
+        return controller.stream;
+      }
+
+      final memory = repository.memoryChapters(manga, allowAdult: false);
       if (memory != null && memory.isNotEmpty) {
         controller.add(memory);
       }
@@ -174,7 +119,7 @@ final chapterProvider = StreamProvider.autoDispose
       Future<void> emitLocal() async {
         final updated = await repository.localChapters(
           manga,
-          allowAdult: adultMode,
+          allowAdult: false,
         );
         if (!controller.isClosed && updated != null) {
           controller.add(updated);
@@ -192,16 +137,9 @@ final chapterProvider = StreamProvider.autoDispose
 
       unawaited(() async {
         try {
-          if (manga.isAdult != adultMode) {
-            if (!controller.isClosed) {
-              controller.add(const <CanonicalChapter>[]);
-            }
-            return;
-          }
-
           final initial = await repository.chapters(
             manga,
-            allowAdult: adultMode,
+            allowAdult: false,
           );
           if (!controller.isClosed) controller.add(initial);
         } catch (error, stackTrace) {
@@ -215,37 +153,33 @@ final chapterProvider = StreamProvider.autoDispose
 final rankingServiceProvider = Provider<RankingProvider>((ref) {
   final catalog = ref.watch(catalogProvider);
   final config = ref.watch(appConfigProvider);
-  final adultMode = ref.watch(adultModeProvider);
 
   if (config.useDemoData) {
     return DemoRankingProvider(
-      catalog.demoRankings
-          .where((manga) => manga.isAdult == adultMode)
-          .toList(growable: false),
+      catalog.demoRankings.where((manga) => !manga.isAdult).toList(growable: false),
     );
   }
 
-  return AniListRankingProvider(
-    ref.watch(anilistProvider),
-    adultOnly: adultMode,
-  );
+  return AniListRankingProvider(ref.watch(anilistProvider), adultOnly: false);
 });
 
 final rankingsProvider = FutureProvider.autoDispose
     .family<RankingResult, RankingPeriod>((ref, period) async {
       final result = await ref.watch(rankingServiceProvider).rankings(period);
       final catalog = ref.watch(catalogProvider);
-      final adultMode = ref.watch(adultModeProvider);
 
-      final filtered = result.items
-          .where((manga) => manga.isAdult == adultMode)
-          .toList(growable: false);
+      final safe = result.items.where((manga) => !manga.isAdult).toList();
+      final filtered = await catalog.filterReadableManga(
+        safe,
+        targetCount: 18,
+        concurrency: 4,
+      );
 
       for (final manga in filtered.take(2)) {
-        unawaited(catalog.prewarmChapters(manga, allowAdult: adultMode));
+        unawaited(catalog.prewarmChapters(manga, allowAdult: false));
       }
       for (final manga in filtered.skip(2).take(4)) {
-        unawaited(catalog.primeChapterSummary(manga, allowAdult: adultMode));
+        unawaited(catalog.primeChapterSummary(manga, allowAdult: false));
       }
 
       return RankingResult(

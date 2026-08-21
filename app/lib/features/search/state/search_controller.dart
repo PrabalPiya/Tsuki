@@ -6,18 +6,15 @@ import '../../../core/data/catalog_repository.dart';
 import '../../../core/models/manga.dart';
 import '../data/metadata_provider.dart';
 
-/// The deliberately small set of filters exposed by Tsuki's search UI.
 class SearchFilters {
   const SearchFilters({
     this.genre,
     this.status = MangaBrowseStatus.all,
-    this.minimumChapters,
     this.sort = MangaBrowseSort.relevance,
   });
 
   final String? genre;
   final MangaBrowseStatus status;
-  final int? minimumChapters;
   final MangaBrowseSort sort;
 
   bool get hasActive => activeCount > 0;
@@ -25,23 +22,17 @@ class SearchFilters {
   int get activeCount =>
       ((genre == null || genre!.trim().isEmpty) ? 0 : 1) +
       (status == MangaBrowseStatus.all ? 0 : 1) +
-      (minimumChapters == null ? 0 : 1) +
       (sort == MangaBrowseSort.relevance ? 0 : 1);
 
   SearchFilters copyWith({
     String? genre,
     bool clearGenre = false,
     MangaBrowseStatus? status,
-    int? minimumChapters,
-    bool clearMinimumChapters = false,
     MangaBrowseSort? sort,
   }) {
     return SearchFilters(
       genre: clearGenre ? null : genre ?? this.genre,
       status: status ?? this.status,
-      minimumChapters: clearMinimumChapters
-          ? null
-          : minimumChapters ?? this.minimumChapters,
       sort: sort ?? this.sort,
     );
   }
@@ -87,12 +78,9 @@ class SearchState {
 }
 
 class SearchController extends StateNotifier<SearchState> {
-  SearchController(this._repository, {required this.adultOnly})
-    : super(const SearchState());
+  SearchController(this._repository) : super(const SearchState());
 
   final CatalogRepository _repository;
-  final bool adultOnly;
-
   Timer? _timer;
   int _generation = 0;
 
@@ -107,8 +95,6 @@ class SearchController extends StateNotifier<SearchState> {
       return;
     }
 
-    // Text search remains responsive while filter-only browsing waits for the
-    // explicit Apply action from the bottom sheet.
     if (trimmed.length >= 2) {
       _timer = Timer(
         const Duration(milliseconds: 280),
@@ -178,19 +164,17 @@ class SearchController extends StateNotifier<SearchState> {
       final result = await _repository.browse(
         MangaBrowseRequest(
           query: query,
-          adultOnly: adultOnly,
+          adultOnly: false,
           status: filters.status,
           genres: genres,
-          minimumChapters: filters.minimumChapters,
+          minimumChapters: null,
           sort: filters.sort,
         ),
       );
 
       if (generation != _generation) return;
       state = state.copyWith(
-        results: result
-            .where((manga) => manga.isAdult == adultOnly)
-            .toList(growable: false),
+        results: result.where((manga) => !manga.isAdult).toList(growable: false),
         loading: false,
         submitted: submitted,
         clearError: true,

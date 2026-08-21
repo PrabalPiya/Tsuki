@@ -5,7 +5,6 @@ import 'package:tsuki/features/reader/data/mangadex_source.dart';
 import 'package:tsuki/features/search/data/anilist_metadata_provider.dart';
 
 Future<void> main(List<String> args) async {
-  final includeAdult = args.contains('--adult');
   final queries = args.where((arg) => !arg.startsWith('--')).toList();
   final titles = queries.isEmpty
       ? const ['Naruto', 'One Piece', 'Berserk']
@@ -15,13 +14,20 @@ Future<void> main(List<String> args) async {
 
   for (final query in titles) {
     stdout.writeln('');
-    stdout.writeln('=== Search query: $query (adult=$includeAdult) ===');
-    final results = await metadata.search(query, includeAdult: includeAdult);
+    stdout.writeln('=== Search query: $query ===');
+    final results = await metadata.search(query, includeAdult: false);
     if (results.isEmpty) {
-      stdout.writeln('AniList returned no manga.');
+      stdout.writeln('AniList returned no safe manga.');
       continue;
     }
-    final manga = results.first;
+    final manga = results.firstWhere(
+      (value) => !value.isAdult,
+      orElse: () => results.first,
+    );
+    if (manga.isAdult) {
+      stdout.writeln('Only adult-classified results were returned; blocked.');
+      continue;
+    }
     stdout.writeln('Canonical title: ${manga.title}');
     stdout.writeln('AniList ID: ${manga.anilistId}');
     stdout.writeln('AniList aliases: ${manga.aliases.take(8).join(' | ')}');

@@ -20,11 +20,15 @@ class FirestoreUserStore implements UserStore {
       final results = await Future.wait([
         user.collection('bookmarks').get(),
         user.collection('progress').get(),
-        user.get(),
       ]);
 
-      final bookmarks = (results[0] as QuerySnapshot<Map<String, dynamic>>).docs
-          .map((d) => d.id)
+      final remoteBookmarks =
+          (results[0] as QuerySnapshot<Map<String, dynamic>>).docs
+              .map((d) => d.id)
+              .toSet();
+
+      final safeBookmarks = remoteBookmarks
+          .where((id) => local.bookmarkedManga[id]?.isAdult != true)
           .toSet();
 
       final progress = <String, ReadingProgress>{};
@@ -40,20 +44,13 @@ class FirestoreUserStore implements UserStore {
         });
       }
 
-      final settings = (results[2] as DocumentSnapshot<Map<String, dynamic>>)
-          .data();
-
       return UserSnapshot(
-        bookmarks: bookmarks,
+        bookmarks: safeBookmarks,
         bookmarkedManga: {
-          for (final id in bookmarks)
+          for (final id in safeBookmarks)
             if (local.bookmarkedManga[id] case final manga?) id: manga,
         },
         progress: progress,
-        // A cloud document created before this setting existed may not contain
-        // adultContent. Preserve the already-durable local preference instead
-        // of silently resetting an enabled toggle to false.
-        adultContent: settings?['adultContent'] as bool? ?? local.adultContent,
       );
     } catch (_) {
       return local;
@@ -66,15 +63,21 @@ class FirestoreUserStore implements UserStore {
     Set<String> ids,
     Map<String, Manga> manga,
   ) async {
-    await _local.saveBookmarks(uid, ids, manga);
+    final safeManga = <String, Manga>{
+      for (final entry in manga.entries)
+        if (!entry.value.isAdult) entry.key: entry.value,
+    };
+    final safeIds = ids.where(safeManga.containsKey).toSet();
+
+    await _local.saveBookmarks(uid, safeIds, safeManga);
     final ref = _db.collection('users').doc(uid).collection('bookmarks');
     final current = await ref.get();
     final batch = _db.batch();
 
     for (final doc in current.docs) {
-      if (!ids.contains(doc.id)) batch.delete(doc.reference);
+      if (!safeIds.contains(doc.id)) batch.delete(doc.reference);
     }
-    for (final id in ids) {
+    for (final id in safeIds) {
       batch.set(ref.doc(id), {
         'mangaId': id,
         'updatedAt': FieldValue.serverTimestamp(),
@@ -92,14 +95,6 @@ class FirestoreUserStore implements UserStore {
         .collection('progress')
         .doc(value.mangaId)
         .set({...value.toJson(), 'updatedAt': FieldValue.serverTimestamp()});
-  }
-
-  @override
-  Future<void> saveAdultContent(String uid, bool enabled) async {
-    await _local.saveAdultContent(uid, enabled);
-    await _db.collection('users').doc(uid).set({
-      'adultContent': enabled,
-    }, SetOptions(merge: true));
   }
 
   @override

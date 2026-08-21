@@ -10,25 +10,23 @@ class UserLibraryState {
     this.bookmarks = const {},
     this.bookmarkedManga = const {},
     this.progress = const {},
-    this.adultContent = false,
   });
+
   final bool loading;
   final Set<String> bookmarks;
   final Map<String, Manga> bookmarkedManga;
   final Map<String, ReadingProgress> progress;
-  final bool adultContent;
+
   UserLibraryState copyWith({
     bool? loading,
     Set<String>? bookmarks,
     Map<String, Manga>? bookmarkedManga,
     Map<String, ReadingProgress>? progress,
-    bool? adultContent,
   }) => UserLibraryState(
     loading: loading ?? this.loading,
     bookmarks: bookmarks ?? this.bookmarks,
     bookmarkedManga: bookmarkedManga ?? this.bookmarkedManga,
     progress: progress ?? this.progress,
-    adultContent: adultContent ?? this.adultContent,
   );
 }
 
@@ -37,8 +35,10 @@ class UserLibraryController extends StateNotifier<UserLibraryState> {
     : super(const UserLibraryState()) {
     _load();
   }
+
   final String _uid;
   final UserStore _store;
+
   Future<void> _load() async {
     final value = await _store.load(_uid);
     state = UserLibraryState(
@@ -46,11 +46,11 @@ class UserLibraryController extends StateNotifier<UserLibraryState> {
       bookmarks: value.bookmarks,
       bookmarkedManga: value.bookmarkedManga,
       progress: value.progress,
-      adultContent: value.adultContent,
     );
   }
 
   Future<void> toggleBookmark(Manga manga) async {
+    if (manga.isAdult) return;
     final next = {...state.bookmarks};
     final metadata = {...state.bookmarkedManga};
     if (!next.add(manga.id)) {
@@ -68,6 +68,7 @@ class UserLibraryController extends StateNotifier<UserLibraryState> {
   }
 
   Future<void> restoreBookmark(Manga manga) async {
+    if (manga.isAdult) return;
     final next = {...state.bookmarks, manga.id};
     final metadata = {...state.bookmarkedManga, manga.id: manga};
     state = state.copyWith(bookmarks: next, bookmarkedManga: metadata);
@@ -100,15 +101,6 @@ class UserLibraryController extends StateNotifier<UserLibraryState> {
       await _store.saveProgress(_uid, normalized);
     } catch (_) {
       // Keep reading uninterrupted when optional cloud sync is unavailable.
-    }
-  }
-
-  Future<void> setAdultContent(bool value) async {
-    state = state.copyWith(adultContent: value);
-    try {
-      await _store.saveAdultContent(_uid, value);
-    } catch (_) {
-      // The local preference remains authoritative until sync recovers.
     }
   }
 

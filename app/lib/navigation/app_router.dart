@@ -7,7 +7,6 @@ import '../features/library/presentation/library_screen.dart';
 import '../features/manga_details/presentation/manga_details_screen.dart';
 import '../features/reader/presentation/reader_screen.dart';
 import '../features/search/presentation/search_screen.dart';
-import '../features/settings/presentation/settings_screen.dart';
 import 'main_shell.dart';
 
 final routerProvider = Provider<GoRouter>(
@@ -63,7 +62,6 @@ final routerProvider = Provider<GoRouter>(
               : Uri.decodeComponent(state.uri.queryParameters['chapter']!),
         ),
       ),
-      GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
     ],
   ),
 );

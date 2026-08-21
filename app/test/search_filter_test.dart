@@ -26,7 +26,7 @@ class _BrowseMetadata implements MetadataProvider, BrowseMetadataProvider {
     lastRequest = request;
     return const <Manga>[
       Manga(
-        id: 'anilist:1',
+        id: 'demo:filtered',
         title: 'Filtered Manga',
         coverUrl: '',
         synopsis: '',
@@ -40,7 +40,7 @@ class _BrowseMetadata implements MetadataProvider, BrowseMetadataProvider {
 }
 
 void main() {
-  test('filters browse manga without a title query', () async {
+  test('filters expose genre, status and rating sort only', () async {
     final metadata = _BrowseMetadata();
     const config = AppConfig(
       environment: AppEnvironment.development,
@@ -56,13 +56,12 @@ void main() {
       metadata: metadata,
       mangaDex: MangaDexSource(),
     );
-    final controller = SearchController(repository, adultOnly: false);
+    final controller = SearchController(repository);
 
     controller.updateFilters(
       const SearchFilters(
         genre: 'Drama',
         status: MangaBrowseStatus.completed,
-        minimumChapters: 25,
         sort: MangaBrowseSort.rating,
       ),
     );
@@ -71,11 +70,12 @@ void main() {
     final request = metadata.lastRequest;
     expect(request, isNotNull);
     expect(request!.query, isEmpty);
+    expect(request.adultOnly, isFalse);
     expect(request.genres, {'Drama'});
     expect(request.status, MangaBrowseStatus.completed);
-    expect(request.minimumChapters, 25);
+    expect(request.minimumChapters, isNull);
     expect(request.sort, MangaBrowseSort.rating);
-    expect(controller.state.results.single.title, 'Filtered Manga');
+    expect(controller.state.filters.activeCount, 3);
 
     controller.dispose();
   });
@@ -96,7 +96,7 @@ void main() {
       metadata: metadata,
       mangaDex: MangaDexSource(),
     );
-    final controller = SearchController(repository, adultOnly: false);
+    final controller = SearchController(repository);
 
     await controller.applyFilters();
 
