@@ -2,11 +2,26 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    function productionAccess() { return signedIn() && request.auth.token.appAccess == true; }
-    function owns(uid) { return productionAccess() && request.auth.uid == uid; }
+    function owns(uid) { return signedIn() && request.auth.uid == uid; }
+    function validProfile(uid) {
+      return owns(uid)
+        && request.resource.data.keys().hasOnly(['username', 'createdAt'])
+        && request.resource.data.username is string
+        && request.resource.data.username.matches('^[a-z0-9_]{3,20}$')
+        && request.resource.data.createdAt == request.time;
+    }
+    function validUsernameReservation(username) {
+      return signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username == username
+        && request.resource.data.username.matches('^[a-z0-9_]{3,20}$')
+        && request.resource.data.createdAt == request.time;
+    }
     function validBookmark(id) {
-      return request.resource.data.keys().hasOnly(['mangaId', 'updatedAt'])
+      return request.resource.data.keys().hasOnly(['mangaId', 'manga', 'updatedAt'])
         && request.resource.data.mangaId == id
+        && request.resource.data.manga is map
         && request.resource.data.updatedAt == request.time;
     }
     function validProgress() {
@@ -30,20 +45,28 @@ service cloud.firestore {
     }
 
     match /manga/{mangaId} {
-      allow read: if productionAccess();
+      allow read: if signedIn();
       allow write: if false;
       match /chapters/{chapterId} {
-        allow read: if productionAccess();
+        allow read: if signedIn();
         allow write: if false;
       }
     }
     match /rankings/{period} {
-      allow read: if productionAccess();
+      allow read: if signedIn();
       allow write: if false;
+    }
+    match /usernames/{username} {
+      allow read: if signedIn();
+      allow create: if !exists(/databases/$(database)/documents/usernames/$(username))
+        && validUsernameReservation(username);
+      allow update: if resource.data.uid == request.auth.uid
+        && validUsernameReservation(username);
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
     }
     match /users/{uid} {
       allow read, delete: if owns(uid);
-      allow create, update: if false;
+      allow create, update: if validProfile(uid);
       match /bookmarks/{mangaId} {
         allow read, delete: if owns(uid);
         allow create, update: if owns(uid) && validBookmark(mangaId);
