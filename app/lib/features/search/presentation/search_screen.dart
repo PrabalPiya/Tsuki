@@ -9,7 +9,6 @@ import '../../../core/state/providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/cover_art.dart';
 import '../../../shared/widgets/logout_button.dart';
-import '../data/metadata_provider.dart';
 import '../state/search_controller.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
@@ -19,27 +18,9 @@ class SearchScreen extends ConsumerStatefulWidget {
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
 }
 
-class _SearchScreenState extends ConsumerState<SearchScreen>
-    with TickerProviderStateMixin {
+class _SearchScreenState extends ConsumerState<SearchScreen> {
   final _controller = TextEditingController();
   final _focus = FocusNode();
-
-  static const _genres = <String>[
-    'Action',
-    'Adventure',
-    'Comedy',
-    'Drama',
-    'Fantasy',
-    'Horror',
-    'Mystery',
-    'Psychological',
-    'Romance',
-    'Sci-Fi',
-    'Slice of Life',
-    'Sports',
-    'Supernatural',
-    'Thriller',
-  ];
 
   @override
   void initState() {
@@ -56,41 +37,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
     super.dispose();
   }
 
-  Future<void> _openFilters() async {
-    _focus.unfocus();
-    final current = ref.read(searchProvider).filters;
-    final animation = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 360),
-      reverseDuration: const Duration(milliseconds: 240),
-    );
-
-    final selected = await showModalBottomSheet<SearchFilters>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(alpha: .58),
-      isScrollControlled: false,
-      useSafeArea: true,
-      transitionAnimationController: animation,
-      builder: (_) => _FilterSheet(initial: current, genres: _genres),
-    );
-    animation.dispose();
-
-    if (!mounted || selected == null) return;
-    final notifier = ref.read(searchProvider.notifier);
-    notifier.updateFilters(selected);
-    await notifier.applyFilters();
-  }
-
   Future<void> _openManga(Manga manga) async {
-    if (manga.isAdult) return;
-    try {
-      await ref
-          .read(catalogProvider)
-          .prewarmChapters(manga, allowAdult: false);
-    } catch (_) {
-      // Details has its own fallback handling.
-    }
+    if (!manga.isFriendlyContent) return;
+    unawaited(
+      ref.read(catalogProvider).prewarmChapters(manga, allowAdult: false),
+    );
     if (!mounted) return;
     context.push('/manga/${Uri.encodeComponent(manga.id)}');
   }
@@ -99,6 +50,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
   Widget build(BuildContext context) {
     final state = ref.watch(searchProvider);
     final notifier = ref.read(searchProvider.notifier);
+
+    ref.listen<SearchState>(searchProvider, (previous, next) {
+      if (_controller.text == next.query) return;
+
+      _controller.value = TextEditingValue(
+        text: next.query,
+        selection: TextSelection.collapsed(offset: next.query.length),
+      );
+    });
 
     return Scaffold(
       appBar: AppBar(
@@ -127,16 +87,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
               decoration: InputDecoration(
                 hintText: 'Search manga',
                 prefixIcon: const Icon(Icons.search_rounded),
-                suffixIconConstraints: const BoxConstraints(minWidth: 48),
-                suffixIcon: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _FilterButton(
-                      count: state.filters.activeCount,
-                      onPressed: _openFilters,
-                    ),
-                    if (_controller.text.isNotEmpty)
-                      IconButton(
+                suffixIcon: _controller.text.isEmpty
+                    ? null
+                    : IconButton(
                         onPressed: () {
                           _controller.clear();
                           notifier.updateQuery('');
@@ -145,8 +98,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
                         icon: const Icon(Icons.close_rounded),
                         tooltip: 'Clear search',
                       ),
-                  ],
-                ),
               ),
             ),
           ),
@@ -179,7 +130,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
                       ),
                     ),
                   ),
-                  TextButton(onPressed: notifier.submit, child: const Text('Retry')),
+                  TextButton(
+                    onPressed: notifier.submit,
+                    child: const Text('Retry'),
+                  ),
                 ],
               ),
             ),
@@ -204,14 +158,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
         final manga = items[index];
-        unawaited(
-          ref
-              .read(catalogProvider)
-              .prewarmChapters(manga, allowAdult: false),
-        );
-        final chapterLabel =
-            ref.watch(chapterSummaryLabelProvider(manga)).valueOrNull ??
-            manga.chapterDisplayLabel;
+        final chapterLabel = manga.verifiedChapterDisplayLabel;
 
         return Card(
           child: ListTile(
@@ -231,7 +178,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
             ),
             subtitle: Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: _MetaStrip(manga: manga, chapterLabel: chapterLabel),
+              child: _MetaStrip(
+                manga: manga,
+                chapterLabel: chapterLabel,
+                mode: _MetaStripMode.suggestion,
+              ),
             ),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: () => _openManga(manga),
@@ -253,16 +204,14 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
       itemCount: items.length,
       itemBuilder: (context, index) {
         final manga = items[index];
-        if (index < 8) {
+        if (index < 3) {
           unawaited(
             ref
                 .read(catalogProvider)
                 .prewarmChapters(manga, allowAdult: false),
           );
         }
-        final chapterLabel =
-            ref.watch(chapterSummaryLabelProvider(manga)).valueOrNull ??
-            manga.chapterDisplayLabel;
+        final chapterLabel = manga.verifiedChapterDisplayLabel;
 
         return InkWell(
           borderRadius: BorderRadius.circular(18),
@@ -279,7 +228,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
-              _MetaStrip(manga: manga, chapterLabel: chapterLabel),
+              _MetaStrip(
+                manga: manga,
+                chapterLabel: chapterLabel,
+                mode: _MetaStripMode.result,
+              ),
             ],
           ),
         );
@@ -288,16 +241,41 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
   }
 }
 
+enum _MetaStripMode { suggestion, result }
+
 class _MetaStrip extends StatelessWidget {
-  const _MetaStrip({required this.manga, required this.chapterLabel});
+  const _MetaStrip({
+    required this.manga,
+    required this.chapterLabel,
+    required this.mode,
+  });
 
   final Manga manga;
-  final String chapterLabel;
+  final String? chapterLabel;
+  final _MetaStripMode mode;
 
   @override
   Widget build(BuildContext context) {
+    if (mode == _MetaStripMode.result) {
+      return SizedBox(
+        width: double.infinity,
+        height: 61,
+        child: Wrap(
+          spacing: 5,
+          runSpacing: 5,
+          children: [
+            _MetaPill(Icons.star_rounded, manga.ratingLabel),
+            _MetaPill(Icons.bolt_rounded, manga.statusLabel),
+            if (chapterLabel != null)
+              _MetaPill(Icons.library_books_rounded, '$chapterLabel chp'),
+          ],
+        ),
+      );
+    }
+
     return SizedBox(
       width: double.infinity,
+      height: 28,
       child: FittedBox(
         fit: BoxFit.scaleDown,
         alignment: Alignment.centerLeft,
@@ -306,13 +284,10 @@ class _MetaStrip extends StatelessWidget {
             _MetaPill(Icons.star_rounded, manga.ratingLabel),
             const SizedBox(width: 5),
             _MetaPill(Icons.bolt_rounded, manga.statusLabel),
-            const SizedBox(width: 5),
-            _MetaPill(Icons.library_books_rounded, '$chapterLabel chp'),
-            const SizedBox(width: 5),
-            _MetaPill(
-              Icons.category_rounded,
-              manga.genres.isEmpty ? '—' : manga.genres.first,
-            ),
+            if (chapterLabel != null) ...[
+              const SizedBox(width: 5),
+              _MetaPill(Icons.library_books_rounded, '$chapterLabel chp'),
+            ],
           ],
         ),
       ),
@@ -329,8 +304,8 @@ class _MetaPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 26,
-      padding: const EdgeInsets.symmetric(horizontal: 7),
+      height: 28,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
         color: AppColors.raised.withValues(alpha: .72),
         borderRadius: BorderRadius.circular(999),
@@ -339,284 +314,17 @@ class _MetaPill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: AppColors.accent),
-          const SizedBox(width: 3),
+          Icon(icon, size: 13.5, color: AppColors.accent),
+          const SizedBox(width: 4),
           ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 78),
+            constraints: const BoxConstraints(maxWidth: 94),
             child: Text(
               text,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _FilterButton extends StatelessWidget {
-  const _FilterButton({required this.count, required this.onPressed});
-
-  final int count;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        IconButton(
-          onPressed: onPressed,
-          icon: const Icon(Icons.tune_rounded),
-          tooltip: 'Filters',
-        ),
-        if (count > 0)
-          Positioned(
-            top: 2,
-            right: 2,
-            child: Container(
-              width: 17,
-              height: 17,
-              alignment: Alignment.center,
-              decoration: const BoxDecoration(
-                color: AppColors.accent,
-                shape: BoxShape.circle,
-              ),
-              child: Text(
-                '$count',
-                style: const TextStyle(
-                  color: AppColors.background,
-                  fontSize: 9,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _FilterSheet extends StatefulWidget {
-  const _FilterSheet({required this.initial, required this.genres});
-
-  final SearchFilters initial;
-  final List<String> genres;
-
-  @override
-  State<_FilterSheet> createState() => _FilterSheetState();
-}
-
-class _FilterSheetState extends State<_FilterSheet> {
-  late SearchFilters _filters;
-
-  @override
-  void initState() {
-    super.initState();
-    _filters = widget.initial;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bottom = MediaQuery.paddingOf(context).bottom;
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        padding: EdgeInsets.fromLTRB(18, 10, 18, 16 + bottom),
-        decoration: const BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-          border: Border(top: BorderSide(color: AppColors.outline)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 38,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.outline,
-                borderRadius: BorderRadius.circular(999),
-              ),
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Filters',
-                    style: TextStyle(
-                      color: AppColors.text,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => setState(() => _filters = const SearchFilters()),
-                  child: const Text('Reset'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            _FilterValueRow<String>(
-              icon: Icons.category_outlined,
-              label: 'Genre',
-              value: _filters.genre ?? '',
-              display: _filters.genre ?? 'All genres',
-              values: <String>['', ...widget.genres],
-              labelFor: (value) => value.isEmpty ? 'All genres' : value,
-              onChanged: (value) {
-                setState(() {
-                  _filters = value.isEmpty
-                      ? _filters.copyWith(clearGenre: true)
-                      : _filters.copyWith(genre: value);
-                });
-              },
-            ),
-            _FilterValueRow<MangaBrowseStatus>(
-              icon: Icons.bolt_outlined,
-              label: 'Status',
-              value: _filters.status,
-              display: _statusLabel(_filters.status),
-              values: const <MangaBrowseStatus>[
-                MangaBrowseStatus.all,
-                MangaBrowseStatus.ongoing,
-                MangaBrowseStatus.completed,
-                MangaBrowseStatus.hiatus,
-                MangaBrowseStatus.cancelled,
-              ],
-              labelFor: _statusLabel,
-              onChanged: (value) {
-                setState(() => _filters = _filters.copyWith(status: value));
-              },
-            ),
-            _FilterValueRow<MangaBrowseSort>(
-              icon: Icons.star_outline_rounded,
-              label: 'Sort by',
-              value: _filters.sort,
-              display: _sortLabel(_filters.sort),
-              values: const <MangaBrowseSort>[
-                MangaBrowseSort.relevance,
-                MangaBrowseSort.rating,
-              ],
-              labelFor: _sortLabel,
-              onChanged: (value) {
-                setState(() => _filters = _filters.copyWith(sort: value));
-              },
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () => Navigator.of(context).pop(_filters),
-                child: const Text('Apply filters'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  static String _sortLabel(MangaBrowseSort value) => switch (value) {
-    MangaBrowseSort.rating => 'Rating: High to Low',
-    _ => 'Best match',
-  };
-
-  static String _statusLabel(MangaBrowseStatus value) => switch (value) {
-    MangaBrowseStatus.all => 'Any status',
-    MangaBrowseStatus.ongoing => 'Ongoing',
-    MangaBrowseStatus.completed => 'Completed',
-    MangaBrowseStatus.hiatus => 'Hiatus',
-    MangaBrowseStatus.cancelled => 'Cancelled',
-  };
-}
-
-class _FilterValueRow<T> extends StatelessWidget {
-  const _FilterValueRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.display,
-    required this.values,
-    required this.labelFor,
-    required this.onChanged,
-  });
-
-  final IconData icon;
-  final String label;
-  final T value;
-  final String display;
-  final List<T> values;
-  final String Function(T) labelFor;
-  final ValueChanged<T> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 56,
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.only(left: 13, right: 4),
-      decoration: BoxDecoration(
-        color: AppColors.raised.withValues(alpha: .72),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.outline),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: AppColors.muted),
-          const SizedBox(width: 10),
-          Text(
-            label,
-            style: const TextStyle(
-              color: AppColors.text,
-              fontSize: 13,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const Spacer(),
-          PopupMenuButton<T>(
-            initialValue: value,
-            color: AppColors.raised,
-            surfaceTintColor: Colors.transparent,
-            tooltip: label,
-            onSelected: onChanged,
-            itemBuilder: (context) => values
-                .map(
-                  (item) => PopupMenuItem<T>(
-                    value: item,
-                    child: Text(labelFor(item)),
-                  ),
-                )
-                .toList(growable: false),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 150),
-                    child: Text(
-                      display,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.accent,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 5),
-                  const Icon(
-                    Icons.expand_more_rounded,
-                    size: 18,
-                    color: AppColors.muted,
-                  ),
-                ],
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ),
@@ -640,7 +348,7 @@ class _SearchHint extends StatelessWidget {
             Icon(Icons.manage_search_rounded, size: 42, color: AppColors.muted),
             SizedBox(height: 12),
             Text(
-              'Search manga or use Filters to browse.',
+              'Search manga by title.',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppColors.muted),
             ),

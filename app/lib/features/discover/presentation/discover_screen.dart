@@ -13,6 +13,7 @@ import '../../../core/storage/image_cache.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/synopsis_summary.dart';
 import '../../../shared/widgets/one_time_hint.dart';
+import '../../../shared/widgets/logout_button.dart';
 import '../data/ranking_provider.dart';
 
 final discoverResetProvider = StateProvider<int>((ref) => 0);
@@ -27,6 +28,7 @@ class DiscoverScreen extends ConsumerStatefulWidget {
 class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
     with TickerProviderStateMixin {
   final _positions = <int, int>{0: 0, 1: 0, 2: 0};
+  final _rankingCache = <RankingPeriod, RankingResult>{};
 
   static const _swipeDistanceThreshold = .14;
   static const _swipeVelocityThreshold = 700.0;
@@ -43,23 +45,17 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
   static const _nextCardYOffset = 14.0;
 
   int _period = 0;
-
   double _dragY = 0;
-
   bool _dragging = false;
   bool _animating = false;
 
+  PageController? _periodController;
   late final AnimationController _swipeController;
-
   _SwipeAnimation _swipeAnimation = _SwipeAnimation.none;
-
   Offset _animationStartOffset = Offset.zero;
-
   Offset _animationEndOffset = Offset.zero;
-
   double _animationStartRotation = 0.0;
   double _animationEndRotation = 0.0;
-
   double _animationProgress = 0.0;
 
   @override
@@ -76,42 +72,44 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
           );
         });
       });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final period in RankingPeriod.values) {
+        unawaited(ref.read(rankingsProvider(period).future));
+      }
+    });
   }
 
   void _resetDiscover() {
     if (!mounted) return;
 
     _swipeController.stop();
+    final periodController = _periodController;
+    if (periodController != null && periodController.hasClients) {
+      periodController.jumpToPage(0);
+    }
 
     setState(() {
       _positions[0] = 0;
       _positions[1] = 0;
       _positions[2] = 0;
-
       _period = 0;
-
       _dragY = 0;
-
       _dragging = false;
       _animating = false;
-
       _swipeAnimation = _SwipeAnimation.none;
-
       _animationStartOffset = Offset.zero;
-
       _animationEndOffset = Offset.zero;
-
       _animationStartRotation = 0.0;
       _animationEndRotation = 0.0;
-
       _animationProgress = 0.0;
     });
   }
 
   @override
   void dispose() {
+    _periodController?.dispose();
     _swipeController.dispose();
-
     super.dispose();
   }
 
@@ -123,119 +121,148 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
       }
     });
 
-    final adultMode = ref.watch(adultModeProvider);
+    final currentPeriod = RankingPeriod.values[_period];
+    final currentRanking = ref.watch(rankingsProvider(currentPeriod));
+    final currentResolvedRanking = currentRanking.valueOrNull;
 
-    ref.listen<bool>(adultModeProvider, (previous, next) {
-      if (previous != null && previous != next) {
-        _resetDiscover();
-      }
-    });
-    final ranking = ref.watch(rankingsProvider(RankingPeriod.values[_period]));
+    if (currentResolvedRanking != null) {
+      _rankingCache[currentPeriod] = currentResolvedRanking;
+    }
 
-    final items = ranking.valueOrNull?.items ?? const <Manga>[];
-
-    final preview = ranking.valueOrNull?.isPreview ?? false;
-
-    final index = items.isEmpty
-        ? 0
-        : (_positions[_period] ?? 0).clamp(0, items.length - 1);
+    final preview =
+        (currentResolvedRanking ?? _rankingCache[currentPeriod])?.isPreview ??
+        false;
 
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 16,
-
-        title: Text(adultMode ? 'Adult Discover' : 'Discover'),
-
-        actions: [
+        title: const Text('Discover'),
+        actions: const [
           Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: IconButton(
-              onPressed: () {
-                context.push('/settings');
-              },
-              icon: const Icon(Icons.settings_outlined),
-              tooltip: 'Settings',
-            ),
+            padding: EdgeInsets.only(right: 16),
+            child: LogoutButton(),
           ),
         ],
       ),
-
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
             child: _DiscoverPeriodTabs(
               selectedIndex: _period,
-              onChanged: (value) {
-                if (value == _period || _animating) {
-                  return;
-                }
-
-                setState(() {
-                  _period = value;
-
-                  _dragY = 0;
-                  _dragging = false;
-
-                  _swipeAnimation = _SwipeAnimation.none;
-
-                  _animationProgress = 0.0;
-                });
-
-                ref.invalidate(rankingsProvider(RankingPeriod.values[value]));
-
-                /*
-                 * Do NOT show the hint again here.
-                 *
-                 * OneTimeHint remembers that it
-                 * has already been displayed.
-                 */
-              },
+              onChanged: _changePeriod,
             ),
           ),
-
           if (preview)
             const Padding(
               padding: EdgeInsets.only(bottom: 8),
               child: Text(
-                'Preview Ãƒâ€šÃ‚Â· live rankings unavailable',
+                'Preview · live rankings unavailable',
                 style: TextStyle(color: AppColors.muted, fontSize: 12),
               ),
             ),
-
           Expanded(
-            child: ranking.isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : items.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Text(
-                        ranking.valueOrNull?.unavailableReason ??
-                            'Rankings unavailable.',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: AppColors.muted),
-                      ),
-                    ),
-                  )
-                : LayoutBuilder(
-                    builder: (context, constraints) {
-                      return _buildCardStack(
-                        items: items,
-                        index: index,
-                        preview: preview,
-                        width: constraints.maxWidth,
-                        height: constraints.maxHeight,
-                      );
-                    },
-                  ),
+            child: PageView.builder(
+              controller: _pageController,
+              itemCount: RankingPeriod.values.length,
+              physics: const PageScrollPhysics(),
+              onPageChanged: (value) {
+                if (!mounted) return;
+                HapticFeedback.selectionClick();
+                _setPeriod(value);
+              },
+              itemBuilder: (context, periodIndex) {
+                return _buildPeriodPage(periodIndex);
+              },
+            ),
           ),
         ],
       ),
     );
   }
 
+  void _changePeriod(int value) {
+    if (value == _period || _animating) return;
+
+    _setPeriod(value);
+
+    final periodController = _pageController;
+    if (periodController.hasClients) {
+      periodController.animateToPage(
+        value,
+        duration: const Duration(milliseconds: 360),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
+
+  void _setPeriod(int value) {
+    setState(() {
+      _period = value;
+      _dragY = 0;
+      _dragging = false;
+      _swipeAnimation = _SwipeAnimation.none;
+      _animationProgress = 0.0;
+    });
+
+    unawaited(ref.read(rankingsProvider(RankingPeriod.values[value]).future));
+  }
+
+  PageController get _pageController {
+    return _periodController ??= PageController(initialPage: _period);
+  }
+
+  Widget _buildPeriodPage(int periodIndex) {
+    final period = RankingPeriod.values[periodIndex];
+    final ranking = ref.watch(rankingsProvider(period));
+    final resolvedRanking = ranking.valueOrNull;
+
+    if (resolvedRanking != null) {
+      _rankingCache[period] = resolvedRanking;
+    }
+
+    final displayedRanking = resolvedRanking ?? _rankingCache[period];
+    final items = displayedRanking?.items ?? const <Manga>[];
+    final preview = displayedRanking?.isPreview ?? false;
+    final index = items.isEmpty
+        ? 0
+        : (_positions[periodIndex] ?? 0).clamp(0, items.length - 1);
+
+    if (ranking.isLoading && items.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (items.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Text(
+            ranking.valueOrNull?.unavailableReason ??
+                displayedRanking?.unavailableReason ??
+                'Rankings unavailable.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.muted),
+          ),
+        ),
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return _buildCardStack(
+          periodIndex: periodIndex,
+          items: items,
+          index: index,
+          preview: preview,
+          width: constraints.maxWidth,
+          height: constraints.maxHeight,
+        );
+      },
+    );
+  }
+
   Widget _buildCardStack({
+    required int periodIndex,
     required List<Manga> items,
     required int index,
     required bool preview,
@@ -243,7 +270,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
     required double height,
   }) {
     final next = index + 1 < items.length ? items[index + 1] : null;
-
     final previous = index > 0 ? items[index - 1] : null;
 
     final upwardDragProgress = _dragY < 0
@@ -255,7 +281,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
         : 0.0;
 
     Offset currentOffset = Offset.zero;
-
     double currentRotation = 0.0;
 
     if (_dragging && _dragY < 0) {
@@ -263,7 +288,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
         _dragPreviewHorizontal * upwardDragProgress,
         -_dragPreviewVertical * upwardDragProgress,
       );
-
       currentRotation = _dragPreviewRotation * upwardDragProgress;
     } else if (_swipeAnimation == _SwipeAnimation.throwNext ||
         _swipeAnimation == _SwipeAnimation.snapCurrent) {
@@ -285,13 +309,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
     var nextProgress = upwardDragProgress;
 
     if (_swipeAnimation == _SwipeAnimation.throwNext) {
-      /*
-      * Continue the next card from exactly where
-      * the user's drag left it.
-      *
-      * _dragY is intentionally still preserved
-      * until the throw animation finishes.
-      */
       final startProgress = (-_dragY / (height * .42))
           .clamp(0.0, 1.0)
           .toDouble();
@@ -305,9 +322,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
     );
 
     Offset previousOffset = throwOffset;
-
     double previousRotation = _throwRotation;
-
     bool showPrevious = false;
 
     if (previous != null) {
@@ -315,15 +330,12 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
         showPrevious = true;
 
         final reveal = Curves.easeOutCubic.transform(downwardDragProgress);
-
         previousOffset =
             Offset.lerp(throwOffset, Offset.zero, reveal) ?? throwOffset;
-
         previousRotation = _lerpDouble(_throwRotation, 0.0, reveal);
       } else if (_swipeAnimation == _SwipeAnimation.restorePrevious ||
           _swipeAnimation == _SwipeAnimation.dismissPrevious) {
         showPrevious = true;
-
         previousOffset =
             Offset.lerp(
               _animationStartOffset,
@@ -342,93 +354,76 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-
       onVerticalDragStart: _handleDragStart,
-
       onVerticalDragUpdate: (details) {
         _handleDragUpdate(details, index);
       },
-
       onVerticalDragEnd: (details) {
-        _handleDragEnd(details, width, height, items.length);
+        _handleDragEnd(details, periodIndex, width, height, items.length);
       },
-
       child: Stack(
         clipBehavior: Clip.none,
-
         alignment: Alignment.topCenter,
-
         children: [
-          /*
-           * NEXT CARD
-           */
           if (next != null)
-            Transform.translate(
-              offset: Offset(0, _nextCardYOffset * (1.0 - nextProgress)),
-              child: Transform.scale(
-                scale: _lerpDouble(_nextCardScale, 1.0, nextProgress),
-                alignment: Alignment.center,
-                child: SizedBox(
-                  height: height,
-                  child: _DiscoverCard(
-                    manga: next,
-                    rank: index + 2,
-                    period: _period,
-                    inert: true,
-                    preview: preview,
+            KeyedSubtree(
+              key: ValueKey('discover-card-${next.id}'),
+              child: Transform.translate(
+                offset: Offset(0, _nextCardYOffset * (1.0 - nextProgress)),
+                child: Transform.scale(
+                  scale: _lerpDouble(_nextCardScale, 1.0, nextProgress),
+                  alignment: Alignment.center,
+                  child: SizedBox(
+                    height: height,
+                    child: _DiscoverCard(
+                      manga: next,
+                      rank: index + 2,
+                      period: periodIndex,
+                      inert: true,
+                      preview: preview,
+                    ),
                   ),
                 ),
               ),
             ),
-          /*
-           * CURRENT CARD
-           */
-          Transform.translate(
-            offset: currentOffset,
-            child: Transform.rotate(
-              angle: currentRotation,
-              child: SizedBox(
-                height: height,
-                child: _DiscoverCard(
-                  manga: items[index],
-                  rank: index + 1,
-                  period: _period,
-                  preview: preview,
+          KeyedSubtree(
+            key: ValueKey('discover-card-${items[index].id}'),
+            child: Transform.translate(
+              offset: currentOffset,
+              child: Transform.rotate(
+                angle: currentRotation,
+                child: SizedBox(
+                  height: height,
+                  child: _DiscoverCard(
+                    manga: items[index],
+                    rank: index + 1,
+                    period: periodIndex,
+                    preview: preview,
+                  ),
                 ),
               ),
             ),
           ),
-
-          /*
-           * PREVIOUS CARD
-           */
           if (showPrevious && previous != null)
-            Transform.translate(
-              offset: previousOffset,
-              child: Transform.rotate(
-                angle: previousRotation,
-                child: SizedBox(
-                  height: height,
-                  child: _DiscoverCard(
-                    manga: previous,
-                    rank: index,
-                    period: _period,
-                    inert: true,
-                    preview: preview,
+            KeyedSubtree(
+              key: ValueKey('discover-card-${previous.id}'),
+              child: Transform.translate(
+                offset: previousOffset,
+                child: Transform.rotate(
+                  angle: previousRotation,
+                  child: SizedBox(
+                    height: height,
+                    child: _DiscoverCard(
+                      manga: previous,
+                      rank: index,
+                      period: periodIndex,
+                      inert: true,
+                      preview: preview,
+                    ),
                   ),
                 ),
               ),
             ),
-
-          /*
-           * ONE-TIME DISCOVER HINT
-           *
-           * The unique ID is stored using
-           * SharedPreferences by OneTimeHint.
-           *
-           * Once it has appeared once, it will
-           * never appear again for this install.
-           */
           const Positioned(
             bottom: 56,
             child: OneTimeHint(
@@ -443,31 +438,18 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
   }
 
   void _handleDragStart(DragStartDetails details) {
-    if (_animating) {
-      return;
-    }
+    if (_animating) return;
 
-    /*
-     * No hint controller here anymore.
-     *
-     * OneTimeHint owns and persists
-     * its own animation state.
-     */
     setState(() {
       _dragging = true;
-
       _dragY = 0.0;
-
       _swipeAnimation = _SwipeAnimation.none;
-
       _animationProgress = 0.0;
     });
   }
 
   void _handleDragUpdate(DragUpdateDetails details, int index) {
-    if (_animating || !_dragging) {
-      return;
-    }
+    if (_animating || !_dragging) return;
 
     var nextDragY = _dragY + details.delta.dy;
 
@@ -482,18 +464,15 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
 
   Future<void> _handleDragEnd(
     DragEndDetails details,
+    int periodIndex,
     double width,
     double height,
     int length,
   ) async {
-    if (_animating || !_dragging) {
-      return;
-    }
+    if (_animating || !_dragging) return;
 
     final velocity = details.primaryVelocity ?? 0.0;
-
-    final index = _positions[_period] ?? 0;
-
+    final index = _positions[periodIndex] ?? 0;
     final distanceThreshold = height * _swipeDistanceThreshold;
 
     final goNext =
@@ -506,23 +485,23 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
 
     if (goNext) {
       await _commitNext(
+        periodIndex: periodIndex,
         index: index,
         width: width,
         height: height,
         velocity: velocity.abs(),
       );
-
       return;
     }
 
     if (goPrevious) {
       await _commitPrevious(
+        periodIndex: periodIndex,
         index: index,
         width: width,
         height: height,
         velocity: velocity.abs(),
       );
-
       return;
     }
 
@@ -535,6 +514,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
   }
 
   Future<void> _commitNext({
+    required int periodIndex,
     required int index,
     required double width,
     required double height,
@@ -548,7 +528,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
     );
 
     final startRotation = _dragPreviewRotation * dragProgress;
-
     final endOffset = Offset(
       width * _throwHorizontalFactor,
       -height * _throwVerticalFactor,
@@ -574,21 +553,14 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
 
     await _swipeController.forward(from: 0.0);
 
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
     setState(() {
-      _positions[_period] = index + 1;
-
+      _positions[periodIndex] = index + 1;
       _dragY = 0.0;
-
       _dragging = false;
-
       _animating = false;
-
       _swipeAnimation = _SwipeAnimation.none;
-
       _animationProgress = 0.0;
     });
 
@@ -596,6 +568,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
   }
 
   Future<void> _commitPrevious({
+    required int periodIndex,
     required int index,
     required double width,
     required double height,
@@ -607,12 +580,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
     );
 
     final dragProgress = (_dragY / (height * .42)).clamp(0.0, 1.0).toDouble();
-
     final reveal = Curves.easeOutCubic.transform(dragProgress);
-
     final startOffset =
         Offset.lerp(throwOffset, Offset.zero, reveal) ?? throwOffset;
-
     final startRotation = _lerpDouble(_throwRotation, 0.0, reveal);
 
     final duration = _momentumDuration(
@@ -635,21 +605,14 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
 
     await _swipeController.forward(from: 0.0);
 
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
     setState(() {
-      _positions[_period] = index - 1;
-
+      _positions[periodIndex] = index - 1;
       _dragY = 0.0;
-
       _dragging = false;
-
       _animating = false;
-
       _swipeAnimation = _SwipeAnimation.none;
-
       _animationProgress = 0.0;
     });
 
@@ -669,12 +632,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
       );
 
       final dragProgress = (_dragY / (height * .42)).clamp(0.0, 1.0).toDouble();
-
       final reveal = Curves.easeOutCubic.transform(dragProgress);
-
       final startOffset =
           Offset.lerp(throwOffset, Offset.zero, reveal) ?? throwOffset;
-
       final startRotation = _lerpDouble(_throwRotation, 0.0, reveal);
 
       _prepareAnimation(
@@ -718,19 +678,13 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
       await _swipeController.forward(from: 0.0);
     }
 
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
     setState(() {
       _dragY = 0.0;
-
       _dragging = false;
-
       _animating = false;
-
       _swipeAnimation = _SwipeAnimation.none;
-
       _animationProgress = 0.0;
     });
   }
@@ -744,24 +698,16 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
     required Duration duration,
   }) {
     _swipeController.stop();
-
     _swipeController.duration = duration;
 
     setState(() {
       _dragging = false;
-
       _animating = true;
-
       _swipeAnimation = type;
-
       _animationStartOffset = startOffset;
-
       _animationEndOffset = endOffset;
-
       _animationStartRotation = startRotation;
-
       _animationEndRotation = endRotation;
-
       _animationProgress = 0.0;
     });
   }
@@ -803,10 +749,6 @@ enum _SwipeAnimation {
   snapCurrent,
 }
 
-/* ===========================================================
- * DISCOVER PERIOD TABS
- * ========================================================= */
-
 class _DiscoverPeriodTabs extends StatelessWidget {
   const _DiscoverPeriodTabs({
     required this.selectedIndex,
@@ -828,7 +770,6 @@ class _DiscoverPeriodTabs extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final indicatorWidth = constraints.maxWidth / 3.0;
-
           final indicatorLeft = selectedIndex * indicatorWidth;
 
           return Stack(
@@ -847,7 +788,6 @@ class _DiscoverPeriodTabs extends StatelessWidget {
                   ),
                 ),
               ),
-
               Row(
                 children: [
                   Expanded(
@@ -857,7 +797,6 @@ class _DiscoverPeriodTabs extends StatelessWidget {
                       onTap: () => onChanged(0),
                     ),
                   ),
-
                   Expanded(
                     child: _DiscoverTabButton(
                       label: 'Top Rated',
@@ -865,7 +804,6 @@ class _DiscoverPeriodTabs extends StatelessWidget {
                       onTap: () => onChanged(1),
                     ),
                   ),
-
                   Expanded(
                     child: _DiscoverTabButton(
                       label: 'Popular',
@@ -898,31 +836,20 @@ class _DiscoverTabButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-
       behavior: HitTestBehavior.opaque,
-
       child: AnimatedDefaultTextStyle(
         duration: const Duration(milliseconds: 160),
-
         curve: Curves.easeOut,
-
         style: TextStyle(
           color: selected ? AppColors.text : AppColors.muted,
-
           fontSize: 13,
-
           fontWeight: FontWeight.w900,
         ),
-
         child: Center(child: Text(label, maxLines: 1)),
       ),
     );
   }
 }
-
-/* ===========================================================
- * DISCOVER CARD
- * ========================================================= */
 
 class _DiscoverCard extends ConsumerWidget {
   const _DiscoverCard({
@@ -934,132 +861,95 @@ class _DiscoverCard extends ConsumerWidget {
   });
 
   final Manga manga;
-
   final int rank;
   final int period;
-
   final bool inert;
   final bool preview;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final marked = ref.watch(userLibraryProvider).bookmarks.contains(manga.id);
-    final cardAdultMode = ref.watch(adultModeProvider);
     unawaited(
       ref
           .read(catalogProvider)
-          .prewarmChapters(manga, allowAdult: cardAdultMode),
+          .prewarmChapters(manga, allowAdult: false),
     );
 
     final periodLabel = ['Trending', 'Top Rated', 'Popular'][period];
-
     final details = ref.watch(catalogProvider).cached(manga.id);
-
     final chapterLabel =
         ref.watch(chapterSummaryLabelProvider(manga)).valueOrNull ??
-        (details ?? manga).chapterDisplayLabel;
+        (details ?? manga).verifiedChapterDisplayLabel;
 
     final rawSynopsis = (details?.synopsis.isNotEmpty ?? false)
         ? details!.synopsis
         : manga.synopsis;
 
     final synopsis = summarizeSynopsis(rawSynopsis);
+    final genreLabel = (details ?? manga).genreLabel;
 
     return IgnorePointer(
       ignoring: inert,
-
       child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 430),
-
           child: ClipRRect(
             borderRadius: BorderRadius.circular(18),
-
             child: Material(
               color: AppColors.surface,
-
               child: InkWell(
                 onTap: () async {
                   await ref
                       .read(catalogProvider)
-                      .prewarmChapters(manga, allowAdult: cardAdultMode);
+                      .prewarmChapters(manga, allowAdult: false);
                   if (!context.mounted) return;
                   context.push('/manga/${Uri.encodeComponent(manga.id)}');
                 },
-
                 child: Stack(
                   fit: StackFit.expand,
-
                   children: [
-                    /*
-                     * COVER
-                     */
                     Positioned.fill(
                       child: manga.coverUrl.isEmpty
                           ? _CoverFallback(title: manga.title)
                           : CachedNetworkImage(
                               imageUrl: manga.coverUrl,
-
                               cacheManager: MangaImageCache.instance,
-
                               fit: BoxFit.cover,
-
                               placeholder: (_, __) =>
                                   _CoverFallback(title: manga.title),
-
                               errorWidget: (_, __, ___) =>
                                   _CoverFallback(title: manga.title),
                             ),
                     ),
-
-                    /*
-                     * RANK BADGE
-                     */
                     Positioned(
                       top: 14,
-
                       left: 14,
-
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 6,
                         ),
-
                         decoration: BoxDecoration(
                           color: AppColors.glass,
-
                           borderRadius: BorderRadius.circular(999),
-
                           border: Border.all(color: AppColors.outline),
                         ),
-
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
-
                           children: [
                             const Icon(
                               Icons.auto_awesome,
-
                               size: 14,
-
                               color: AppColors.accent,
                             ),
-
                             const SizedBox(width: 6),
-
                             Text(
                               preview ? 'Preview $rank' : '#$rank $periodLabel',
-
                               style: const TextStyle(
                                 color: AppColors.text,
-
                                 fontSize: 11,
-
                                 fontWeight: FontWeight.w800,
-
                                 letterSpacing: .4,
                               ),
                             ),
@@ -1067,135 +957,99 @@ class _DiscoverCard extends ConsumerWidget {
                         ),
                       ),
                     ),
-
-                    /*
-                     * DARK GRADIENT
-                     */
                     Positioned.fill(
                       child: DecoratedBox(
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             begin: Alignment.topCenter,
-
                             end: Alignment.bottomCenter,
-
                             colors: [
                               Colors.transparent,
-
                               Colors.black.withValues(alpha: .62),
-
                               Colors.black.withValues(alpha: .88),
-
                               Colors.black.withValues(alpha: .96),
                             ],
-
                             stops: const [0, .42, .72, 1],
                           ),
                         ),
                       ),
                     ),
-
-                    /*
-                     * CARD CONTENT
-                     */
                     Positioned.fill(
                       child: Align(
                         alignment: Alignment.bottomLeft,
-
                         child: Padding(
                           padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
-
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
-
                             crossAxisAlignment: CrossAxisAlignment.start,
-
                             children: [
                               Text(
                                 manga.title,
-
                                 maxLines: 2,
-
                                 overflow: TextOverflow.ellipsis,
-
                                 style: Theme.of(context).textTheme.headlineSmall
                                     ?.copyWith(fontSize: 22, height: 1.18),
                               ),
-
                               const SizedBox(height: 10),
-
-                              /*
-                               * INFO CHIPS
-                               */
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: _InfoChip(
-                                      icon: Icons.star_rounded,
-                                      label: manga.ratingLabel,
-                                    ),
+                              _InfoChipRow(
+                                chips: [
+                                  _InfoChipData(
+                                    icon: Icons.star_rounded,
+                                    label: manga.ratingLabel,
                                   ),
-                                  const SizedBox(width: 5),
-                                  Expanded(
-                                    child: _InfoChip(
-                                      icon: Icons.bolt_rounded,
-                                      label: manga.statusLabel,
-                                    ),
+                                  _InfoChipData(
+                                    icon: Icons.bolt_rounded,
+                                    label: manga.statusLabel,
                                   ),
-                                  const SizedBox(width: 5),
-                                  Expanded(
-                                    child: _InfoChip(
+                                  if (chapterLabel != null)
+                                    _InfoChipData(
                                       icon: Icons.library_books_rounded,
                                       label: '$chapterLabel chp',
                                     ),
-                                  ),
-                                  const SizedBox(width: 5),
-                                  Expanded(
-                                    child: _InfoChip(
-                                      icon: Icons.category_rounded,
-                                      label: manga.genres.isEmpty
-                                          ? '—'
-                                          : manga.genres.first,
-                                    ),
-                                  ),
                                 ],
                               ),
                               const SizedBox(height: 12),
-
-                              /*
-                               * SYNOPSIS
-                               */
-                              Text(
-                                synopsis,
-
-                                softWrap: true,
-
-                                textAlign: TextAlign.justify,
-
-                                maxLines: 4,
-
+                              Text.rich(
+                                TextSpan(
+                                  children: [
+                                    const TextSpan(
+                                      text: 'Genres: ',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                    TextSpan(text: genreLabel),
+                                  ],
+                                ),
+                                maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
-
-                                style: Theme.of(context).textTheme.bodyMedium
+                                style: Theme.of(context).textTheme.bodySmall
                                     ?.copyWith(
                                       color: Colors.white.withValues(
-                                        alpha: .94,
+                                        alpha: .78,
                                       ),
-
+                                      height: 1.35,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                synopsis,
+                                softWrap: true,
+                                textAlign: TextAlign.justify,
+                                maxLines: 4,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(
+                                      color: Colors.white.withValues(alpha: .94),
                                       height: 1.45,
-
                                       letterSpacing: .02,
                                     ),
                               ),
-
                               const SizedBox(height: 20),
-
-                              /*
-                               * BOOKMARK BUTTON
-                               */
                               _BookmarkButton(
                                 bookmarked: marked,
-
                                 onPressed: () {
                                   ref
                                       .read(userLibraryProvider.notifier)
@@ -1218,10 +1072,6 @@ class _DiscoverCard extends ConsumerWidget {
   }
 }
 
-/* ===========================================================
- * COVER FALLBACK
- * ========================================================= */
-
 class _CoverFallback extends StatelessWidget {
   const _CoverFallback({required this.title});
 
@@ -1233,29 +1083,19 @@ class _CoverFallback extends StatelessWidget {
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
-
           end: Alignment.bottomRight,
-
           colors: [Color(0xFF39325F), Color(0xFF1A1923)],
         ),
       ),
-
       padding: const EdgeInsets.all(14),
-
       alignment: Alignment.bottomLeft,
-
       child: Text(
         title,
-
         maxLines: 3,
-
         overflow: TextOverflow.ellipsis,
-
         style: const TextStyle(
           color: AppColors.text,
-
           fontWeight: FontWeight.w700,
-
           fontSize: 16,
         ),
       ),
@@ -1263,9 +1103,35 @@ class _CoverFallback extends StatelessWidget {
   }
 }
 
-/* ===========================================================
- * INFO CHIP
- * ========================================================= */
+class _InfoChipData {
+  const _InfoChipData({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+}
+
+class _InfoChipRow extends StatelessWidget {
+  const _InfoChipRow({required this.chips});
+
+  final List<_InfoChipData> chips;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        for (var index = 0; index < chips.length; index++) ...[
+          if (index > 0) const SizedBox(width: 6),
+          Expanded(
+            child: _InfoChip(
+              icon: chips[index].icon,
+              label: chips[index].label,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
 
 class _InfoChip extends StatelessWidget {
   const _InfoChip({required this.icon, required this.label});
@@ -1275,36 +1141,33 @@ class _InfoChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final displayLabel = label.trim().isEmpty ? '-' : label.trim();
+
     return Container(
       height: 34,
-
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-
+      padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
         color: AppColors.raised.withValues(alpha: .86),
-
         borderRadius: BorderRadius.circular(999),
-
         border: Border.all(color: AppColors.outline),
       ),
-
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
-
         children: [
-          Icon(icon, size: 14, color: AppColors.accent),
-
+          Icon(icon, size: 13.5, color: AppColors.accent),
           const SizedBox(width: 5),
-
-          Flexible(
-            child: Text(
-              label,
-
-              maxLines: 1,
-
-              overflow: TextOverflow.ellipsis,
-
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.center,
+              child: Text(
+                displayLabel,
+                maxLines: 1,
+                style: const TextStyle(
+                  fontSize: 12.4,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ),
           ),
         ],
@@ -1312,10 +1175,6 @@ class _InfoChip extends StatelessWidget {
     );
   }
 }
-
-/* ===========================================================
- * BOOKMARK BUTTON
- * ========================================================= */
 
 class _BookmarkButton extends StatelessWidget {
   const _BookmarkButton({required this.bookmarked, required this.onPressed});
@@ -1325,51 +1184,40 @@ class _BookmarkButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-
-        child: SizedBox(
-          width: double.infinity,
-
-          height: 50,
-
-          child: IconButton(
-            onPressed: onPressed,
-
-            tooltip: bookmarked ? 'Bookmarked' : 'Bookmark',
-
-            style: IconButton.styleFrom(
-              backgroundColor: bookmarked
-                  ? AppColors.accent.withValues(alpha: .3)
-                  : AppColors.raised.withValues(alpha: .6),
-
-              foregroundColor: bookmarked ? AppColors.accent : AppColors.text,
-
-              side: bookmarked
-                  ? BorderSide(
-                      color: AppColors.accent.withValues(alpha: .65),
-
-                      width: 1.2,
-                    )
-                  : const BorderSide(color: AppColors.outline, width: 1),
-
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+    return RepaintBoundary(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: IconButton(
+              onPressed: onPressed,
+              tooltip: bookmarked ? 'Bookmarked' : 'Bookmark',
+              style: IconButton.styleFrom(
+                backgroundColor: bookmarked
+                    ? AppColors.accent.withValues(alpha: .3)
+                    : AppColors.raised.withValues(alpha: .6),
+                foregroundColor: bookmarked ? AppColors.accent : AppColors.text,
+                side: bookmarked
+                    ? BorderSide(
+                        color: AppColors.accent.withValues(alpha: .65),
+                        width: 1.2,
+                      )
+                    : const BorderSide(color: AppColors.outline, width: 1),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
+              icon: Icon(
+                bookmarked
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                size: 22,
+              ),
+              padding: EdgeInsets.zero,
             ),
-
-            icon: Icon(
-              bookmarked
-                  ? Icons.favorite_rounded
-                  : Icons.favorite_border_rounded,
-
-              size: 22,
-            ),
-
-            padding: EdgeInsets.zero,
           ),
         ),
       ),

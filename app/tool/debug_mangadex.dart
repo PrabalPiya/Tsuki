@@ -15,23 +15,23 @@ Future<void> main(List<String> args) async {
   for (final query in titles) {
     stdout.writeln('');
     stdout.writeln('=== Search query: $query ===');
-    final results = await metadata.search(query, includeAdult: false);
-    if (results.isEmpty) {
-      stdout.writeln('AniList returned no safe manga.');
-      continue;
-    }
-    final manga = results.firstWhere(
-      (value) => !value.isAdult,
-      orElse: () => results.first,
-    );
-    if (manga.isAdult) {
-      stdout.writeln('Only adult-classified results were returned; blocked.');
-      continue;
-    }
-    stdout.writeln('Canonical title: ${manga.title}');
-    stdout.writeln('AniList ID: ${manga.anilistId}');
-    stdout.writeln('AniList aliases: ${manga.aliases.take(8).join(' | ')}');
     try {
+      final results = await metadata.search(query);
+      if (results.isEmpty) {
+        stdout.writeln('AniList returned no safe manga.');
+        continue;
+      }
+      final manga = results.firstWhere(
+        (value) => value.isFriendlyContent,
+        orElse: () => results.first,
+      );
+      if (!manga.isFriendlyContent) {
+        stdout.writeln('Only blocked results were returned.');
+        continue;
+      }
+      stdout.writeln('Canonical title: ${manga.title}');
+      stdout.writeln('AniList ID: ${manga.anilistId}');
+      stdout.writeln('AniList aliases: ${manga.aliases.take(8).join(' | ')}');
       final diagnostic = await mangaDex.debugMangaDexFeed(manga);
       stdout.writeln(diagnostic);
     } on DioException catch (error) {

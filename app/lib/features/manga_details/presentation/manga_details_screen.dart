@@ -15,52 +15,24 @@ import '../../../shared/synopsis_summary.dart';
 
 const double _detailRadius = 18.0;
 const double _detailPadding = 28.0;
-
-/* -----------------------------------------------------------
- * Chapter layout
- * --------------------------------------------------------- */
-
 const double _chapterTileHeight = 60.0;
-const double _chapterGap = 10.0;
+const double _chapterSeparatorHeight = 10.0;
 const int _maxVisibleChapters = 4;
-
 const double _fourChapterViewportHeight =
     (_chapterTileHeight * _maxVisibleChapters) +
-    (_chapterGap * (_maxVisibleChapters - 1));
-
-/* -----------------------------------------------------------
- * Hero layout
- * --------------------------------------------------------- */
-
+    (_chapterSeparatorHeight * (_maxVisibleChapters - 1));
 const double _heroAspectRatio = 0.62;
-
 const double _heroToChapterSpacing = 24.0;
 const double _heroContentTopFactor = 0.46;
-
 const double _heroTitleToInfoSpacing = 12.0;
 const double _heroInfoToSynopsisSpacing = 17.0;
+const double _heroGenreToSynopsisSpacing = 9.0;
 const double _heroSynopsisToActionsSpacing = 20.0;
-
-/* -----------------------------------------------------------
- * Chapter section
- * --------------------------------------------------------- */
-
 const double _chapterSectionOffset = -1.0;
-
 const double _chapterTitleToListSpacing = 16.0;
 const double _chapterBottomVisualSpacing = 22.0;
-
-/* -----------------------------------------------------------
- * 3D cover preview
- * --------------------------------------------------------- */
-
 const double _maxCoverRotation = 0.70;
-
 const Duration _coverReturnDuration = Duration(milliseconds: 300);
-
-/* ===========================================================
- * MANGA DETAILS SCREEN
- * ========================================================= */
 
 class MangaDetailsScreen extends ConsumerWidget {
   const MangaDetailsScreen({super.key, required this.mangaId});
@@ -71,15 +43,13 @@ class MangaDetailsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final repository = ref.watch(catalogProvider);
     final library = ref.watch(userLibraryProvider);
-
     final saved = library.bookmarkedManga[mangaId];
 
-    if (saved != null) {
+    if (saved != null && saved.isFriendlyContent) {
       repository.remember(saved);
     }
 
     final cached = repository.cached(mangaId);
-
     if (cached != null) {
       return _Details(manga: cached);
     }
@@ -99,9 +69,7 @@ class MangaDetailsScreen extends ConsumerWidget {
               icon: Icons.error_outline_rounded,
               message: 'Unable to load manga details.',
               onRetry: () {
-                if (context.canPop()) {
-                  context.pop();
-                }
+                if (context.canPop()) context.pop();
               },
               retryLabel: 'Go Back',
             ),
@@ -109,16 +77,13 @@ class MangaDetailsScreen extends ConsumerWidget {
         }
 
         final manga = snapshot.data;
-
-        if (manga == null) {
+        if (manga == null || !manga.isFriendlyContent) {
           return Scaffold(
             body: _ModernMessage(
               icon: Icons.menu_book_outlined,
               message: 'Manga unavailable right now.',
               onRetry: () {
-                if (context.canPop()) {
-                  context.pop();
-                }
+                if (context.canPop()) context.pop();
               },
               retryLabel: 'Go Back',
             ),
@@ -126,16 +91,11 @@ class MangaDetailsScreen extends ConsumerWidget {
         }
 
         repository.remember(manga);
-
         return _Details(manga: manga);
       },
     );
   }
 }
-
-/* ===========================================================
- * DETAILS
- * ========================================================= */
 
 class _Details extends ConsumerWidget {
   const _Details({required this.manga});
@@ -146,11 +106,11 @@ class _Details extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final library = ref.watch(userLibraryProvider);
 
-    if (manga.isAdult != library.adultContent) {
+    if (!manga.isFriendlyContent) {
       return Scaffold(
         body: _ModernMessage(
           icon: Icons.visibility_off_rounded,
-          message: 'This title is hidden in the current content mode.',
+          message: "This title isn't available in Tsuki.",
           retryLabel: 'Go Back',
           onRetry: () {
             if (context.canPop()) context.pop();
@@ -160,32 +120,21 @@ class _Details extends ConsumerWidget {
     }
 
     final chaptersAsync = ref.watch(chapterProvider(manga));
-
     final bookmarked = library.bookmarks.contains(manga.id);
-
     final progress = library.progress[manga.id];
-
     final loadedChapters =
         chaptersAsync.valueOrNull ?? const <CanonicalChapter>[];
-
     final readableChapters = loadedChapters
         .where((chapter) => chapter.hasDirectlyReadableCopy)
         .toList(growable: false);
-
-    final chapterCountLabel =
-        ref.watch(chapterSummaryLabelProvider(manga)).valueOrNull ??
-        manga.chapterDisplayLabel;
-
-    final startReadingLabel = progress == null
-        ? 'Start Reading'
-        : 'Continue Reading';
+    final chapterCountLabel = _chapterCountLabelFor(readableChapters);
+    final startReadingLabel =
+        progress == null ? 'Start Reading' : 'Continue Reading';
 
     VoidCallback? onStartReading;
-
     if (readableChapters.isNotEmpty) {
       onStartReading = () {
         CanonicalChapter selected = readableChapters.first;
-
         final currentId = progress?.chapterId;
 
         if (currentId != null && currentId.isNotEmpty) {
@@ -205,9 +154,7 @@ class _Details extends ConsumerWidget {
     }
 
     final systemBottom = MediaQuery.paddingOf(context).bottom;
-
     final bottomSpacing = systemBottom + _chapterBottomVisualSpacing;
-
     final chapterSectionScrollable =
         loadedChapters.length > _maxVisibleChapters;
 
@@ -215,8 +162,6 @@ class _Details extends ConsumerWidget {
       body: CustomScrollView(
         physics: const ClampingScrollPhysics(),
         slivers: [
-          /* HERO */
-
           SliverToBoxAdapter(
             child: _MangaHero(
               manga: manga,
@@ -236,8 +181,6 @@ class _Details extends ConsumerWidget {
               },
             ),
           ),
-
-          /* CHAPTER HEADING */
           SliverToBoxAdapter(
             child: Transform.translate(
               offset: const Offset(0, _chapterSectionOffset),
@@ -255,7 +198,6 @@ class _Details extends ConsumerWidget {
                             ),
                       ),
                     ),
-
                     if (chapterSectionScrollable)
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -293,18 +235,14 @@ class _Details extends ConsumerWidget {
               ),
             ),
           ),
-
           SliverToBoxAdapter(
             child: Transform.translate(
               offset: const Offset(0, _chapterSectionOffset),
               child: const SizedBox(height: _chapterTitleToListSpacing),
             ),
           ),
-
-          /* CHAPTER CONTENT */
           chaptersAsync.when(
             loading: () => const SliverToBoxAdapter(child: SizedBox(height: 1)),
-
             error: (error, stackTrace) {
               return SliverToBoxAdapter(
                 child: Transform.translate(
@@ -325,9 +263,12 @@ class _Details extends ConsumerWidget {
                 ),
               );
             },
-
             data: (items) {
-              if (items.isEmpty) {
+              final readable = items
+                  .where((chapter) => chapter.hasDirectlyReadableCopy)
+                  .toList(growable: false);
+
+              if (readable.isEmpty) {
                 return SliverToBoxAdapter(
                   child: Transform.translate(
                     offset: const Offset(0, _chapterSectionOffset),
@@ -337,9 +278,8 @@ class _Details extends ConsumerWidget {
                       ),
                       child: _ModernMessage(
                         icon: Icons.menu_book_outlined,
-                        message: library.adultContent
-                            ? 'No directly readable adult chapters were found from the supported public sources for this title.'
-                            : 'No English chapters available from the configured sources.',
+                        message:
+                            'No readable English chapters are available for this title.',
                         retryLabel: 'Refresh',
                         onRetry: () {
                           ref.invalidate(chapterProvider(manga));
@@ -355,24 +295,34 @@ class _Details extends ConsumerWidget {
                   offset: const Offset(0, _chapterSectionOffset),
                   child: _ChapterViewport(
                     manga: manga,
-                    chapters: items,
+                    chapters: readable,
                     progress: progress,
                   ),
                 ),
               );
             },
           ),
-
           SliverToBoxAdapter(child: SizedBox(height: bottomSpacing)),
         ],
       ),
     );
   }
-}
 
-/* ===========================================================
- * CHAPTER VIEWPORT
- * ========================================================= */
+  String? _chapterCountLabelFor(List<CanonicalChapter> chapters) {
+    if (chapters.isEmpty) return null;
+    CanonicalChapter latest = chapters.first;
+    for (final chapter in chapters.skip(1)) {
+      final latestNumber = latest.number;
+      final chapterNumber = chapter.number;
+      if (latestNumber != null && chapterNumber != null) {
+        if (chapterNumber > latestNumber) latest = chapter;
+      } else if (chapter.publishedAt.isAfter(latest.publishedAt)) {
+        latest = chapter;
+      }
+    }
+    return latest.numberLabel;
+  }
+}
 
 class _ChapterViewport extends StatefulWidget {
   const _ChapterViewport({
@@ -382,9 +332,7 @@ class _ChapterViewport extends StatefulWidget {
   });
 
   final Manga manga;
-
   final List<CanonicalChapter> chapters;
-
   final ReadingProgress? progress;
 
   @override
@@ -397,34 +345,26 @@ class _ChapterViewportState extends State<_ChapterViewport> {
   @override
   void initState() {
     super.initState();
-
     _controller = ScrollController();
   }
 
   @override
   void dispose() {
     _controller.dispose();
-
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final reversed = widget.chapters.reversed.toList(growable: false);
-
     final visibleCount = reversed.length < _maxVisibleChapters
         ? reversed.length
         : _maxVisibleChapters;
 
-    final double viewportHeight;
-
-    if (visibleCount == _maxVisibleChapters) {
-      viewportHeight = _fourChapterViewportHeight;
-    } else {
-      viewportHeight =
-          (_chapterTileHeight * visibleCount) +
-          (_chapterGap * (visibleCount - 1));
-    }
+    final double viewportHeight = visibleCount == _maxVisibleChapters
+        ? _fourChapterViewportHeight
+        : (_chapterTileHeight * visibleCount) +
+              (_chapterSeparatorHeight * (visibleCount - 1));
 
     final canScroll = reversed.length > _maxVisibleChapters;
 
@@ -449,16 +389,17 @@ class _ChapterViewportState extends State<_ChapterViewport> {
                   ? const ClampingScrollPhysics()
                   : const NeverScrollableScrollPhysics(),
               itemCount: reversed.length,
-
               separatorBuilder: (context, index) {
-                return const SizedBox(height: _chapterGap);
+                return const SizedBox(
+                  height: _chapterSeparatorHeight,
+                  child: Center(
+                    child: Divider(height: 1, color: AppColors.outline),
+                  ),
+                );
               },
-
               itemBuilder: (context, index) {
                 final chapter = reversed[index];
-
                 final readable = chapter.hasDirectlyReadableCopy;
-
                 final state = _chapterState(chapter, widget.progress);
 
                 return SizedBox(
@@ -486,21 +427,11 @@ class _ChapterViewportState extends State<_ChapterViewport> {
   }
 
   String _chapterState(CanonicalChapter chapter, ReadingProgress? progress) {
-    if (progress == null) {
-      return 'NEW';
-    }
-
-    if (!progress.openedChapterIds.contains(chapter.id)) {
-      return 'NEW';
-    }
-
+    if (progress == null) return 'NEW';
+    if (!progress.openedChapterIds.contains(chapter.id)) return 'NEW';
     return 'READ';
   }
 }
-
-/* ===========================================================
- * HERO
- * ========================================================= */
 
 class _MangaHero extends StatelessWidget {
   const _MangaHero({
@@ -514,20 +445,15 @@ class _MangaHero extends StatelessWidget {
   });
 
   final Manga manga;
-  final String chapterCountLabel;
-
+  final String? chapterCountLabel;
   final VoidCallback onBack;
-
   final bool bookmarked;
   final VoidCallback onToggleBookmark;
-
   final VoidCallback? onStartReading;
   final String startReadingLabel;
 
   void _showCoverPreview(BuildContext context) {
-    if (manga.coverUrl.trim().isEmpty) {
-      return;
-    }
+    if (manga.coverUrl.trim().isEmpty) return;
 
     showGeneralDialog<void>(
       context: context,
@@ -535,18 +461,10 @@ class _MangaHero extends StatelessWidget {
       barrierColor: Colors.transparent,
       barrierLabel: 'Cover preview',
       transitionDuration: const Duration(milliseconds: 220),
-
       pageBuilder: (dialogContext, animation, secondaryAnimation) {
         return _CoverPreviewOverlay(manga: manga);
       },
-
       transitionBuilder: (context, animation, secondaryAnimation, child) {
-        /*
-       * IMPORTANT:
-       * Do not scale the fullscreen overlay here.
-       *
-       * Just return it normally.
-       */
         return child;
       },
     );
@@ -556,36 +474,22 @@ class _MangaHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final coverUrl = manga.coverUrl.trim();
 
-    final Widget cover;
-
-    if (coverUrl.isEmpty) {
-      cover = _HeroFallback(title: manga.title);
-    } else {
-      cover = CachedNetworkImage(
-        imageUrl: coverUrl,
-        cacheManager: MangaImageCache.instance,
-        fit: BoxFit.cover,
-
-        placeholder: (_, __) {
-          return _HeroFallback(title: manga.title);
-        },
-
-        errorWidget: (_, __, ___) {
-          return _HeroFallback(title: manga.title);
-        },
-      );
-    }
+    final Widget cover = coverUrl.isEmpty
+        ? _HeroFallback(title: manga.title)
+        : CachedNetworkImage(
+            imageUrl: coverUrl,
+            cacheManager: MangaImageCache.instance,
+            fit: BoxFit.cover,
+            placeholder: (_, __) => _HeroFallback(title: manga.title),
+            errorWidget: (_, __, ___) => _HeroFallback(title: manga.title),
+          );
 
     final width = MediaQuery.sizeOf(context).width;
-
     final baseHeroHeight = width / _heroAspectRatio;
-
     final synopsis = summarizeSynopsis(manga.synopsis);
-
+    final genreLabel = manga.genreLabel;
     final title = manga.title.trim().isEmpty ? 'Untitled' : manga.title.trim();
-
     final pageBackground = Theme.of(context).scaffoldBackgroundColor;
-
     final contentWidth = width - (_detailPadding * 2);
 
     final titleStyle = Theme.of(context).textTheme.headlineLarge?.copyWith(
@@ -606,12 +510,12 @@ class _MangaHero extends StatelessWidget {
       letterSpacing: 0.02,
     );
 
-    /*
-     * Measure only the content that is actually visible.
-     *
-     * No fake blank title line.
-     * No fake blank synopsis lines.
-     */
+    final genreStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: Colors.white.withValues(alpha: 0.78),
+      height: 1.35,
+      fontWeight: FontWeight.w700,
+    );
+
     final titlePainter = TextPainter(
       text: TextSpan(text: title, style: titleStyle),
       textDirection: TextDirection.ltr,
@@ -626,35 +530,24 @@ class _MangaHero extends StatelessWidget {
       maxLines: 10,
     )..layout(maxWidth: contentWidth);
 
-    /*
-     * Title always starts at the same visual position.
-     */
-    final contentTop = baseHeroHeight * _heroContentTopFactor;
+    final genrePainter = TextPainter(
+      text: TextSpan(text: 'Genres: $genreLabel', style: genreStyle),
+      textDirection: TextDirection.ltr,
+      maxLines: 2,
+      ellipsis: '...',
+    )..layout(maxWidth: contentWidth);
 
-    /*
-     * Natural content flow:
-     *
-     * Title actual height
-     * + exact gap
-     * + info chips
-     * + exact gap
-     * + synopsis actual height
-     * + exact gap
-     * + buttons
-     */
+    final contentTop = baseHeroHeight * _heroContentTopFactor;
     final contentHeight =
         titlePainter.height +
         _heroTitleToInfoSpacing +
         34 +
         _heroInfoToSynopsisSpacing +
+        genrePainter.height +
+        _heroGenreToSynopsisSpacing +
         synopsisPainter.height +
         _heroSynopsisToActionsSpacing +
         50;
-
-    /*
-     * Hero finishes exactly after the action buttons
-     * plus the exact Bookmark/Read -> Chapters spacing.
-     */
     final layoutHeight = contentTop + contentHeight + _heroToChapterSpacing;
 
     return SizedBox(
@@ -662,11 +555,7 @@ class _MangaHero extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.hardEdge,
         children: [
-          /* COVER */
-
           Positioned.fill(child: cover),
-
-          /* MAIN DARKNESS */
           const Positioned.fill(
             child: IgnorePointer(
               child: DecoratedBox(
@@ -688,8 +577,6 @@ class _MangaHero extends StatelessWidget {
               ),
             ),
           ),
-
-          /* SECOND DARKNESS */
           Positioned(
             left: 0,
             right: 0,
@@ -714,8 +601,6 @@ class _MangaHero extends StatelessWidget {
               ),
             ),
           ),
-
-          /* BOTTOM FADE INTO PAGE BACKGROUND */
           Positioned(
             left: 0,
             right: 0,
@@ -739,20 +624,14 @@ class _MangaHero extends StatelessWidget {
               ),
             ),
           ),
-
-          /* COVER TAP SURFACE */
           if (coverUrl.isNotEmpty)
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
-                onTap: () {
-                  _showCoverPreview(context);
-                },
+                onTap: () => _showCoverPreview(context),
                 child: const SizedBox.expand(),
               ),
             ),
-
-          /* BACK BUTTON */
           Positioned(
             top: MediaQuery.paddingOf(context).top - 2,
             left: 20,
@@ -766,8 +645,6 @@ class _MangaHero extends StatelessWidget {
               tooltip: 'Back',
             ),
           ),
-
-          /* NATURAL HERO CONTENT FLOW */
           Positioned(
             left: _detailPadding,
             right: _detailPadding,
@@ -776,8 +653,6 @@ class _MangaHero extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                /* TITLE */
-
                 Text(
                   title,
                   softWrap: true,
@@ -785,10 +660,7 @@ class _MangaHero extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: titleStyle,
                 ),
-
                 const SizedBox(height: _heroTitleToInfoSpacing),
-
-                /* INFO */
                 Row(
                   children: [
                     Expanded(
@@ -804,25 +676,36 @@ class _MangaHero extends StatelessWidget {
                         label: manga.statusLabel,
                       ),
                     ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: _InfoChip(
-                        icon: Icons.library_books_rounded,
-                        label: '$chapterCountLabel chp',
+                    if (chapterCountLabel != null) ...[
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: _InfoChip(
+                          icon: Icons.library_books_rounded,
+                          label: '$chapterCountLabel chp',
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: _InfoChip(
-                        icon: Icons.category_rounded,
-                        label: manga.genres.isEmpty ? '—' : manga.genres.first,
-                      ),
-                    ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: _heroInfoToSynopsisSpacing),
-
-                /* SYNOPSIS */
+                Text.rich(
+                  TextSpan(
+                    children: [
+                      const TextSpan(
+                        text: 'Genres: ',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      TextSpan(text: genreLabel),
+                    ],
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: genreStyle,
+                ),
+                const SizedBox(height: _heroGenreToSynopsisSpacing),
                 Text(
                   synopsis,
                   textAlign: TextAlign.justify,
@@ -830,10 +713,7 @@ class _MangaHero extends StatelessWidget {
                   overflow: TextOverflow.clip,
                   style: synopsisStyle,
                 ),
-
                 const SizedBox(height: _heroSynopsisToActionsSpacing),
-
-                /* ACTIONS */
                 Row(
                   children: [
                     Expanded(
@@ -842,9 +722,7 @@ class _MangaHero extends StatelessWidget {
                         onPressed: onToggleBookmark,
                       ),
                     ),
-
                     const SizedBox(width: 16),
-
                     Expanded(
                       child: _ReadActionCard(
                         label: startReadingLabel,
@@ -862,10 +740,6 @@ class _MangaHero extends StatelessWidget {
   }
 }
 
-/* ===========================================================
- * COVER PREVIEW OVERLAY
- * ========================================================= */
-
 class _CoverPreviewOverlay extends StatelessWidget {
   const _CoverPreviewOverlay({required this.manga});
 
@@ -878,34 +752,16 @@ class _CoverPreviewOverlay extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          /*
-           * FULLSCREEN BLUR.
-           *
-           * This never scales, so you will no longer
-           * see the blurred rectangle growing outward
-           * from the edges.
-           */
           Positioned.fill(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-
-              onTap: () {
-                Navigator.of(context).pop();
-              },
-
+              onTap: () => Navigator.of(context).pop(),
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
                 child: ColoredBox(color: Colors.black.withValues(alpha: 0.72)),
               ),
             ),
           ),
-
-          /*
-           * 3D COVER.
-           *
-           * Kept completely separate from the
-           * fullscreen blur.
-           */
           SafeArea(
             child: Center(
               child: _CoverEntranceAnimation(
@@ -913,31 +769,19 @@ class _CoverPreviewOverlay extends StatelessWidget {
               ),
             ),
           ),
-
-          /*
-           * CLOSE BUTTON
-           */
           Positioned(
             top: MediaQuery.paddingOf(context).top + 14,
             right: 18,
             child: IconButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-
+              onPressed: () => Navigator.of(context).pop(),
               style: IconButton.styleFrom(
                 backgroundColor: Colors.black.withValues(alpha: 0.45),
                 foregroundColor: Colors.white,
                 side: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
               ),
-
               icon: const Icon(Icons.close_rounded),
             ),
           ),
-
-          /*
-           * DRAG HINT
-           */
           Positioned(
             left: 0,
             right: 0,
@@ -951,9 +795,7 @@ class _CoverPreviewOverlay extends StatelessWidget {
                     size: 18,
                     color: Colors.white.withValues(alpha: 0.65),
                   ),
-
                   const SizedBox(width: 8),
-
                   Text(
                     'Drag to rotate',
                     style: TextStyle(
@@ -985,9 +827,7 @@ class _CoverEntranceAnimation extends StatefulWidget {
 class _CoverEntranceAnimationState extends State<_CoverEntranceAnimation>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
-
   late final Animation<double> _scale;
-
   late final Animation<double> _opacity;
 
   @override
@@ -1005,16 +845,13 @@ class _CoverEntranceAnimationState extends State<_CoverEntranceAnimation>
     );
 
     _scale = Tween<double>(begin: 0.94, end: 1.0).animate(curved);
-
     _opacity = Tween<double>(begin: 0, end: 1).animate(curved);
-
     _controller.forward();
   }
 
   @override
   void dispose() {
     _controller.dispose();
-
     super.dispose();
   }
 
@@ -1026,10 +863,6 @@ class _CoverEntranceAnimationState extends State<_CoverEntranceAnimation>
     );
   }
 }
-
-/* ===========================================================
- * ROTATING 3D COVER CARD
- * ========================================================= */
 
 class _RotatingCoverCard extends StatefulWidget {
   const _RotatingCoverCard({required this.manga});
@@ -1043,9 +876,7 @@ class _RotatingCoverCard extends StatefulWidget {
 class _RotatingCoverCardState extends State<_RotatingCoverCard>
     with SingleTickerProviderStateMixin {
   double _rotationY = 0;
-
   late final AnimationController _animationController;
-
   Animation<double>? _returnAnimation;
 
   @override
@@ -1059,10 +890,7 @@ class _RotatingCoverCardState extends State<_RotatingCoverCard>
 
     _animationController.addListener(() {
       final animation = _returnAnimation;
-
-      if (animation == null) {
-        return;
-      }
+      if (animation == null) return;
 
       setState(() {
         _rotationY = animation.value;
@@ -1073,7 +901,6 @@ class _RotatingCoverCardState extends State<_RotatingCoverCard>
   @override
   void dispose() {
     _animationController.dispose();
-
     super.dispose();
   }
 
@@ -1083,7 +910,6 @@ class _RotatingCoverCardState extends State<_RotatingCoverCard>
 
   void _dragUpdate(DragUpdateDetails details) {
     final delta = details.delta.dx / 230;
-
     setState(() {
       _rotationY = (_rotationY + delta).clamp(
         -_maxCoverRotation,
@@ -1105,40 +931,28 @@ class _RotatingCoverCardState extends State<_RotatingCoverCard>
   @override
   Widget build(BuildContext context) {
     final screen = MediaQuery.sizeOf(context);
-
-    final double cardWidth = screen.width * 0.76 > 360
-        ? 360
-        : screen.width * 0.76;
-
+    final double cardWidth =
+        screen.width * 0.76 > 360 ? 360 : screen.width * 0.76;
     final cardHeight = cardWidth * 1.50;
-
-    final rotationPercent = (_rotationY / _maxCoverRotation).clamp(-1.0, 1.0);
-
+    final rotationPercent =
+        (_rotationY / _maxCoverRotation).clamp(-1.0, 1.0);
     final tiltStrength = rotationPercent.abs();
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-
       onHorizontalDragStart: _dragStart,
-
       onHorizontalDragUpdate: _dragUpdate,
-
       onHorizontalDragEnd: _dragEnd,
-
       child: Transform(
         alignment: Alignment.center,
-
         transform: Matrix4.identity()
           ..setEntry(3, 2, 0.0015)
           ..rotateY(_rotationY),
-
         child: Container(
           width: cardWidth,
           height: cardHeight,
-
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(22),
-
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.72),
@@ -1146,7 +960,6 @@ class _RotatingCoverCardState extends State<_RotatingCoverCard>
                 spreadRadius: 6,
                 offset: Offset(-rotationPercent * 25, 24),
               ),
-
               BoxShadow(
                 color: Colors.white.withValues(alpha: 0.06),
                 blurRadius: 18,
@@ -1154,32 +967,20 @@ class _RotatingCoverCardState extends State<_RotatingCoverCard>
               ),
             ],
           ),
-
           child: ClipRRect(
             borderRadius: BorderRadius.circular(22),
-
             child: Stack(
               fit: StackFit.expand,
               children: [
-                /* COVER IMAGE */
-
                 CachedNetworkImage(
                   imageUrl: widget.manga.coverUrl,
-
                   cacheManager: MangaImageCache.instance,
-
                   fit: BoxFit.cover,
-
-                  placeholder: (context, url) {
-                    return _HeroFallback(title: widget.manga.title);
-                  },
-
-                  errorWidget: (context, url, error) {
-                    return _HeroFallback(title: widget.manga.title);
-                  },
+                  placeholder: (context, url) =>
+                      _HeroFallback(title: widget.manga.title),
+                  errorWidget: (context, url, error) =>
+                      _HeroFallback(title: widget.manga.title),
                 ),
-
-                /* DARK SIDE */
                 IgnorePointer(
                   child: DecoratedBox(
                     decoration: BoxDecoration(
@@ -1187,69 +988,25 @@ class _RotatingCoverCardState extends State<_RotatingCoverCard>
                         begin: rotationPercent > 0
                             ? Alignment.centerRight
                             : Alignment.centerLeft,
-
                         end: rotationPercent > 0
                             ? Alignment.centerLeft
                             : Alignment.centerRight,
-
                         colors: [
-                          Colors.black.withValues(alpha: tiltStrength * 0.38),
-
+                          Colors.black.withValues(alpha: tiltStrength * 0.30),
                           Colors.transparent,
-
-                          Colors.transparent,
+                          Colors.white.withValues(alpha: tiltStrength * 0.08),
                         ],
-
-                        stops: const [0, 0.42, 1],
+                        stops: const [0, 0.58, 1],
                       ),
                     ),
                   ),
                 ),
-
-                /* MOVING LIGHT / CARD SHINE */
-                IgnorePointer(
-                  child: Opacity(
-                    opacity: 0.12 + tiltStrength * 0.25,
-
-                    child: Transform.translate(
-                      offset: Offset(-rotationPercent * 90, 0),
-
-                      child: const DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment(-1, -0.7),
-
-                            end: Alignment(1, 0.7),
-
-                            colors: [
-                              Colors.transparent,
-
-                              Color(0x18FFFFFF),
-
-                              Color(0xA8FFFFFF),
-
-                              Color(0x14FFFFFF),
-
-                              Colors.transparent,
-                            ],
-
-                            stops: [0.10, 0.34, 0.50, 0.67, 0.90],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-
-                /* CARD EDGE */
                 IgnorePointer(
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(22),
-
                       border: Border.all(
                         color: Colors.white.withValues(alpha: 0.20),
-
                         width: 1.2,
                       ),
                     ),
@@ -1263,10 +1020,6 @@ class _RotatingCoverCardState extends State<_RotatingCoverCard>
     );
   }
 }
-
-/* ===========================================================
- * HERO FALLBACK
- * ========================================================= */
 
 class _HeroFallback extends StatelessWidget {
   const _HeroFallback({required this.title});
@@ -1302,10 +1055,6 @@ class _HeroFallback extends StatelessWidget {
     );
   }
 }
-
-/* ===========================================================
- * BOOKMARK BUTTON
- * ========================================================= */
 
 class _BookmarkButton extends StatelessWidget {
   const _BookmarkButton({required this.bookmarked, required this.onPressed});
@@ -1350,10 +1099,6 @@ class _BookmarkButton extends StatelessWidget {
   }
 }
 
-/* ===========================================================
- * READ BUTTON
- * ========================================================= */
-
 class _ReadActionCard extends StatelessWidget {
   const _ReadActionCard({required this.label, required this.onPressed});
 
@@ -1378,10 +1123,6 @@ class _ReadActionCard extends StatelessWidget {
   }
 }
 
-/* ===========================================================
- * INFO CHIP
- * ========================================================= */
-
 class _InfoChip extends StatelessWidget {
   const _InfoChip({required this.icon, required this.label});
 
@@ -1394,7 +1135,7 @@ class _InfoChip extends StatelessWidget {
 
     return Container(
       height: 34,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
         color: AppColors.raised.withValues(alpha: 0.86),
         borderRadius: BorderRadius.circular(999),
@@ -1403,16 +1144,20 @@ class _InfoChip extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 14, color: AppColors.accent),
-
+          Icon(icon, size: 12.5, color: AppColors.accent),
           const SizedBox(width: 5),
-
-          Flexible(
-            child: Text(
-              displayLabel,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.center,
+              child: Text(
+                displayLabel,
+                maxLines: 1,
+                style: const TextStyle(
+                  fontSize: 12.4,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ),
           ),
         ],
@@ -1420,10 +1165,6 @@ class _InfoChip extends StatelessWidget {
     );
   }
 }
-
-/* ===========================================================
- * CHAPTER TILE
- * ========================================================= */
 
 class _ChapterTile extends StatelessWidget {
   const _ChapterTile({
@@ -1441,15 +1182,9 @@ class _ChapterTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final read = state == 'READ';
-
-    late final Color accent;
-
-    if (state == 'NEW') {
-      accent = AppColors.accent;
-    } else {
-      accent = AppColors.muted.withValues(alpha: 0.9);
-    }
-
+    final accent = state == 'NEW'
+        ? AppColors.accent
+        : AppColors.muted.withValues(alpha: 0.9);
     final chapterTitle = chapter.title.trim();
 
     return Opacity(
@@ -1458,15 +1193,10 @@ class _ChapterTile extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: readable ? onTap : null,
-          borderRadius: BorderRadius.circular(_detailRadius),
+          borderRadius: BorderRadius.circular(10),
           child: Ink(
             height: _chapterTileHeight,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(_detailRadius),
-              border: Border.all(color: AppColors.outline),
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Row(
               children: [
                 Expanded(
@@ -1481,7 +1211,6 @@ class _ChapterTile extends StatelessWidget {
                             fontWeight: FontWeight.w800,
                           ),
                         ),
-
                         if (chapterTitle.isNotEmpty &&
                             !chapterTitle.toLowerCase().startsWith('chapter '))
                           TextSpan(
@@ -1499,9 +1228,7 @@ class _ChapterTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-
                 const SizedBox(width: 14),
-
                 Text(
                   state,
                   maxLines: 1,
@@ -1519,10 +1246,6 @@ class _ChapterTile extends StatelessWidget {
     );
   }
 }
-
-/* ===========================================================
- * MESSAGE
- * ========================================================= */
 
 class _ModernMessage extends StatelessWidget {
   const _ModernMessage({
@@ -1546,19 +1269,15 @@ class _ModernMessage extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, size: 34, color: AppColors.muted),
-
             const SizedBox(height: 12),
-
             Text(
               message,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium
                   ?.copyWith(color: AppColors.muted, height: 1.4),
             ),
-
             if (onRetry != null) ...[
               const SizedBox(height: 18),
-
               OutlinedButton.icon(
                 onPressed: onRetry,
                 icon: const Icon(Icons.refresh_rounded),

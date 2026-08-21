@@ -172,27 +172,19 @@ class MangaDexSource implements MangaSource {
   @override
   Future<List<Manga>> search(String query) => _search(query);
 
-  Future<List<Manga>> _search(String query, {bool includeAdult = false}) async {
-    final resources = await _searchResources(query, includeAdult: includeAdult);
+  Future<List<Manga>> _search(String query) async {
+    final resources = await _searchResources(query);
     return resources.map(_manga).toList();
   }
 
-  Future<List<Map<String, dynamic>>> _searchResources(
-    String query, {
-    bool includeAdult = false,
-  }) async {
-    final ratings = [
-      'safe',
-      'suggestive',
-      if (includeAdult) ...['erotica', 'pornographic'],
-    ];
+  Future<List<Map<String, dynamic>>> _searchResources(String query) async {
     final response = await _client.get<Map<String, dynamic>>(
       '/manga',
       queryParameters: {
         'title': query,
         'limit': 20,
         'availableTranslatedLanguage[]': 'en',
-        'contentRating[]': ratings,
+        'contentRating[]': const ['safe'],
         'includes[]': 'cover_art',
         'order[relevance]': 'desc',
       },
@@ -216,15 +208,13 @@ class MangaDexSource implements MangaSource {
   }) async {
     final match = await _findConservativeMatchDetails(
       canonical,
-      allowAdult: allowAdult,
     );
     return match?.id;
   }
 
   Future<_MangaDexMatch?> _findConservativeMatchDetails(
-    Manga canonical, {
-    bool allowAdult = false,
-  }) async {
+    Manga canonical,
+  ) async {
     final expected = <String>{
       canonical.title,
       ...canonical.aliases,
@@ -238,7 +228,6 @@ class MangaDexSource implements MangaSource {
         query,
         canonical,
         expected,
-        allowAdult: allowAdult,
       );
       if (match != null) return match;
     }
@@ -248,13 +237,9 @@ class MangaDexSource implements MangaSource {
   Future<_MangaDexMatch?> _findConservativeMatchForQuery(
     String query,
     Manga canonical,
-    Set<String> expected, {
-    required bool allowAdult,
-  }) async {
-    for (final resource in await _searchResources(
-      query,
-      includeAdult: canonical.isAdult || allowAdult,
-    )) {
+    Set<String> expected,
+  ) async {
+    for (final resource in await _searchResources(query)) {
       final candidate = _manga(resource);
       final attrs = resource['attributes'] as Map<String, dynamic>? ?? const {};
       final contentRating = attrs['contentRating'] as String?;
@@ -410,7 +395,7 @@ class MangaDexSource implements MangaSource {
         // No tokens or user-identifying data are included.
         // ignore: avoid_print
         print(
-          '[MangaDex] mangaId=$sourceMangaId adultEnabled=source-record '
+          '[MangaDex] mangaId=$sourceMangaId '
           'requestedLanguage=en includeExternalUrl=$includeExternalUrl '
           'feedPage=$page offset=$offset '
           'received=${batch.length} total=${total ?? 'unknown'}',

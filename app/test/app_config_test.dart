@@ -20,6 +20,7 @@ void main() {
       firebaseApiKey: '',
       firebaseMessagingSenderId: '',
       backendBaseUrl: '',
+      remoteCatalogUrl: '',
     );
     expect(config.useDemoData, isFalse);
     expect(config.isFirebaseConfigured, isFalse);

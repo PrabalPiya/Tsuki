@@ -47,7 +47,7 @@ class LocalUserStore implements UserStore {
         for (final entry in map.entries) {
           try {
             final manga = Manga.fromJson(entry.value as Map<String, dynamic>);
-            if (!manga.isAdult) bookmarkedManga[entry.key] = manga;
+            if (manga.isFriendlyContent) bookmarkedManga[entry.key] = manga;
           } catch (_) {
             // Ignore one corrupt legacy entry instead of losing the library.
           }
@@ -79,7 +79,7 @@ class LocalUserStore implements UserStore {
     await p.remove('${prefix}adult');
 
     final safeBookmarks = bookmarks
-        .where((id) => bookmarkedManga[id]?.isAdult != true)
+        .where((id) => bookmarkedManga[id]?.isFriendlyContent == true)
         .toSet();
 
     return UserSnapshot(
@@ -98,11 +98,17 @@ class LocalUserStore implements UserStore {
     Set<String> ids,
     Map<String, Manga> manga,
   ) async {
+    final blockedIds = manga.entries
+        .where((entry) => !entry.value.isFriendlyContent)
+        .map((entry) => entry.key)
+        .toSet();
     final safeManga = <String, Manga>{
       for (final entry in manga.entries)
-        if (!entry.value.isAdult) entry.key: entry.value,
+        if (entry.value.isFriendlyContent) entry.key: entry.value,
     };
-    final safeIds = ids.where(safeManga.containsKey).toList(growable: false);
+    final safeIds = ids
+        .where((id) => !blockedIds.contains(id))
+        .toList(growable: false);
     final p = await SharedPreferences.getInstance();
     await p.setStringList('user.$uid.bookmarks', safeIds);
     await p.setString(

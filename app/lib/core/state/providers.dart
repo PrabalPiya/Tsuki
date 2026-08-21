@@ -8,6 +8,7 @@ import '../data/catalog_repository.dart';
 import '../models/chapter.dart';
 import '../models/manga.dart';
 import '../storage/firestore_user_store.dart';
+import '../storage/manga_metadata_cache.dart';
 import '../storage/user_store.dart';
 
 import '../../features/discover/data/ranking_provider.dart';
@@ -36,13 +37,37 @@ final userStoreProvider = Provider<UserStore>((ref) {
       : const LocalUserStore();
 });
 
+final mangaMetadataCacheProvider = Provider<MangaMetadataCache>((ref) {
+  final cache = MangaMetadataCache(
+    remoteCatalogUrl: ref.watch(appConfigProvider).remoteCatalogUrl,
+  );
+  unawaited(
+    cache.importBundledCatalog().then((_) => cache.refreshRemoteCatalog()),
+  );
+  return cache;
+});
+
 final userLibraryProvider =
     StateNotifierProvider<UserLibraryController, UserLibraryState>((ref) {
       final session = ref.watch(authProvider);
-      return UserLibraryController(
+      final controller = UserLibraryController(
         session.uid ?? 'signed-out',
         ref.watch(userStoreProvider),
       );
+
+      final subscription = controller.stream.listen((next) {
+        if (next.bookmarkedManga.isEmpty) return;
+        unawaited(
+          ref
+              .read(mangaMetadataCacheProvider)
+              .mergeManga(next.bookmarkedManga.values.toList(growable: false)),
+        );
+      });
+      ref.onDispose(() {
+        unawaited(subscription.cancel());
+      });
+
+      return controller;
     });
 
 final mangaDexProvider = Provider<MangaDexSource>((ref) => MangaDexSource());
@@ -73,12 +98,12 @@ final chapterSummaryUpdatesProvider = StreamProvider<String>(
 );
 
 final chapterSummaryLabelProvider = StreamProvider.autoDispose
-    .family<String, Manga>((ref, manga) async* {
+    .family<String?, Manga>((ref, manga) async* {
       final repository = ref.watch(catalogProvider);
 
-      yield manga.chapterDisplayLabel;
+      yield manga.verifiedChapterDisplayLabel;
 
-      if (!manga.isAdult) {
+      if (repository.isFriendly(manga)) {
         try {
           await repository.primeChapterSummary(manga, allowAdult: false);
         } catch (_) {
@@ -86,18 +111,21 @@ final chapterSummaryLabelProvider = StreamProvider.autoDispose
         }
       }
 
-      yield manga.chapterDisplayLabel;
+      yield manga.verifiedChapterDisplayLabel;
 
       await for (final _ in repository.chapterUpdates.where(
         (mangaId) => mangaId == manga.id,
       )) {
-        yield manga.chapterDisplayLabel;
+        yield manga.verifiedChapterDisplayLabel;
       }
     });
 
 final searchProvider =
     StateNotifierProvider.autoDispose<SearchController, SearchState>((ref) {
-      return SearchController(ref.watch(catalogProvider));
+      return SearchController(
+        ref.watch(catalogProvider),
+        ref.watch(mangaMetadataCacheProvider),
+      );
     });
 
 final chapterProvider = StreamProvider.autoDispose
@@ -105,7 +133,7 @@ final chapterProvider = StreamProvider.autoDispose
       final repository = ref.watch(catalogProvider);
       final controller = StreamController<List<CanonicalChapter>>();
 
-      if (manga.isAdult) {
+      if (!repository.isFriendly(manga)) {
         controller.add(const <CanonicalChapter>[]);
         unawaited(controller.close().then<void>((_) {}));
         return controller.stream;
@@ -156,35 +184,97 @@ final rankingServiceProvider = Provider<RankingProvider>((ref) {
 
   if (config.useDemoData) {
     return DemoRankingProvider(
-      catalog.demoRankings.where((manga) => !manga.isAdult).toList(growable: false),
+      catalog.demoRankings.where(catalog.isFriendly).toList(growable: false),
     );
   }
 
-  return AniListRankingProvider(ref.watch(anilistProvider), adultOnly: false);
+  return AniListRankingProvider(ref.watch(anilistProvider));
 });
 
 final rankingsProvider = FutureProvider.autoDispose
     .family<RankingResult, RankingPeriod>((ref, period) async {
-      final result = await ref.watch(rankingServiceProvider).rankings(period);
+      ref.keepAlive();
+
       final catalog = ref.watch(catalogProvider);
+      final cache = ref.watch(mangaMetadataCacheProvider);
+      final cached = await cache.loadRanking(period);
 
-      final safe = result.items.where((manga) => !manga.isAdult).toList();
-      final filtered = await catalog.filterReadableManga(
-        safe,
-        targetCount: 18,
-        concurrency: 4,
-      );
+      if (cached != null && cached.items.isNotEmpty) {
+        for (final manga in cached.items) {
+          catalog.remember(manga);
+        }
 
-      for (final manga in filtered.take(2)) {
-        unawaited(catalog.prewarmChapters(manga, allowAdult: false));
+        unawaited(() async {
+          final fresh = await _loadRanking(ref, period);
+          if (fresh.items.isNotEmpty) {
+            await cache.saveRanking(period, fresh);
+          }
+        }());
+
+        return cached;
       }
-      for (final manga in filtered.skip(2).take(4)) {
-        unawaited(catalog.primeChapterSummary(manga, allowAdult: false));
+
+      final preview = await cache.loadCatalogPreview();
+      if (preview.isNotEmpty) {
+        for (final manga in preview) {
+          catalog.remember(manga);
+        }
+
+        unawaited(() async {
+          final fresh = await _loadRanking(ref, period);
+          if (fresh.items.isNotEmpty) {
+            await cache.saveRanking(period, fresh);
+          }
+        }());
+
+        return RankingResult(
+          items: preview,
+          unavailableReason: null,
+          isPreview: true,
+        );
       }
 
-      return RankingResult(
-        items: filtered,
-        unavailableReason: result.unavailableReason,
-        isPreview: result.isPreview,
-      );
+      final result = await _loadRanking(ref, period);
+      if (result.items.isNotEmpty) {
+        await cache.saveRanking(period, result);
+      }
+      return result;
     });
+
+Future<RankingResult> _loadRanking(Ref ref, RankingPeriod period) async {
+  final catalog = ref.read(catalogProvider);
+  final RankingResult result;
+
+  try {
+    result = await ref.read(rankingServiceProvider).rankings(period);
+  } catch (_) {
+    return const RankingResult(
+      items: [],
+      unavailableReason:
+          'Live rankings are unavailable right now. Try again later.',
+    );
+  }
+
+  final filtered = await catalog.filterReadableManga(
+    result.items,
+    targetCount: 18,
+    concurrency: 6,
+  );
+
+  for (final manga in filtered) {
+    catalog.remember(manga);
+  }
+
+  for (final manga in filtered.take(2)) {
+    unawaited(catalog.prewarmChapters(manga, allowAdult: false));
+  }
+  for (final manga in filtered.skip(2).take(4)) {
+    unawaited(catalog.primeChapterSummary(manga, allowAdult: false));
+  }
+
+  return RankingResult(
+    items: filtered,
+    unavailableReason: result.unavailableReason,
+    isPreview: result.isPreview,
+  );
+}

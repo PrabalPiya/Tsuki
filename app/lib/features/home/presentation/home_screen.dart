@@ -11,6 +11,7 @@ import '../../../core/models/reading_progress.dart';
 import '../../../core/state/providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/cover_art.dart';
+import '../../../shared/widgets/logout_button.dart';
 
 class HomeEntry {
   const HomeEntry({
@@ -81,7 +82,6 @@ final _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((
       (value) => (
         bookmarks: value.bookmarks,
         bookmarkedManga: value.bookmarkedManga,
-        adultContent: value.adultContent,
       ),
     ),
   );
@@ -91,27 +91,22 @@ final _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((
 
   for (final id in state.bookmarks) {
     try {
-      final manga =
-          repository.cached(id) ??
-          state.bookmarkedManga[id] ??
-          await repository.details(id);
+      final manga = repository.cached(id) ?? state.bookmarkedManga[id];
       if (manga == null) continue;
       repository.remember(manga);
 
-      // Adult mode is a separate view of the same persisted library. Hidden
-      // mode bookmarks/progress remain saved but are not fetched or rendered.
-      if (manga.isAdult != state.adultContent) continue;
+      if (!manga.isFriendlyContent) continue;
 
       // Home must never block on five websites. Read only the on-device index
       // here and start the live source check separately. When it finishes,
       // CatalogRepository emits chapterUpdates and this provider rebuilds.
       final local = await repository.localChapters(
         manga,
-        allowAdult: state.adultContent,
+        allowAdult: false,
       );
       entries.add((manga: manga, chapters: local ?? const []));
 
-      repository.chapters(manga, allowAdult: state.adultContent).ignore();
+      repository.chapters(manga, allowAdult: false).ignore();
     } catch (_) {
       // Keep the rest of Home usable when one title/source is unavailable.
     }
@@ -123,11 +118,10 @@ final _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((
 final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
   final libraryState = ref.watch(userLibraryProvider);
   final progress = libraryState.progress;
-  final adultContentEnabled = libraryState.adultContent;
 
   return ref.watch(_homeCatalogProvider).whenData((catalog) {
     final entries = catalog
-        .where((entry) => entry.manga.isAdult == adultContentEnabled)
+        .where((entry) => entry.manga.isFriendlyContent)
         .map((entry) {
           final mangaProgress = progress[entry.manga.id];
           var current = -1;
@@ -157,13 +151,7 @@ final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
               }
             }
 
-            // A later special/extra must not replace the highest numbered
-            // chapter reached. Only use an unnumbered item if no numbered
-            // chapter has ever been opened.
             if (highest < 0) highest = highestUnnumbered;
-
-            // Old progress written before openedChapterIds existed is migrated
-            // naturally by treating its current chapter as opened.
             if (highest < 0 && current >= 0) highest = current;
           }
 
@@ -277,14 +265,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       appBar: AppBar(
         titleSpacing: 16,
         title: const _TsukiTitle(),
-        actions: [
+        actions: const [
           Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: IconButton(
-              onPressed: () => context.push('/settings'),
-              icon: const Icon(Icons.settings_outlined),
-              tooltip: 'Settings',
-            ),
+            padding: EdgeInsets.only(right: 16),
+            child: LogoutButton(),
           ),
         ],
       ),

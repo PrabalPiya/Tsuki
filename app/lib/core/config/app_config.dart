@@ -11,6 +11,7 @@ class AppConfig {
     required this.firebaseApiKey,
     required this.firebaseMessagingSenderId,
     required this.backendBaseUrl,
+    required this.remoteCatalogUrl,
     this.googleOAuthServerClientId = '',
   });
   factory AppConfig.fromEnvironment() {
@@ -40,6 +41,7 @@ class AppConfig {
           defaultValue: '348316155116-nm7eobqepr5t9bfeoc5pn8i9nk7cqjmt.apps.googleusercontent.com',
         ),
         backend = String.fromEnvironment('BACKEND_BASE_URL'),
+        remoteCatalog = String.fromEnvironment('REMOTE_CATALOG_URL'),
         demo = bool.fromEnvironment('USE_DEMO_DATA', defaultValue: false);
     return AppConfig(
       environment: environment,
@@ -49,6 +51,7 @@ class AppConfig {
       firebaseApiKey: key,
       firebaseMessagingSenderId: sender,
       backendBaseUrl: backend,
+      remoteCatalogUrl: remoteCatalog,
       googleOAuthServerClientId: googleClient,
     );
   }
@@ -58,7 +61,8 @@ class AppConfig {
       firebaseAppId,
       firebaseApiKey,
       firebaseMessagingSenderId,
-      backendBaseUrl;
+      backendBaseUrl,
+      remoteCatalogUrl;
   final String googleOAuthServerClientId;
   bool get isFirebaseConfigured =>
       firebaseProjectId.isNotEmpty &&
@@ -75,6 +79,7 @@ class AppConfig {
     firebaseApiKey: '',
     firebaseMessagingSenderId: '',
     backendBaseUrl: '',
+    remoteCatalogUrl: remoteCatalogUrl,
     googleOAuthServerClientId: '',
   );
   FirebaseOptions get firebaseOptions => FirebaseOptions(

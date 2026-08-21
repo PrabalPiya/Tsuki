@@ -16,10 +16,7 @@ class _Metadata implements MetadataProvider {
   @override
   Future<Manga?> getById(String id) async => null;
   @override
-  Future<List<Manga>> search(
-    String query, {
-    required bool includeAdult,
-  }) async => const [
+  Future<List<Manga>> search(String query) async => const [
     Manga(
       id: 'anilist:1',
       anilistId: 1,
@@ -46,6 +43,7 @@ void main() {
         firebaseApiKey: '',
         firebaseMessagingSenderId: '',
         backendBaseUrl: '',
+        remoteCatalogUrl: '',
       );
       final catalog = CatalogRepository(
         config: config,

@@ -111,13 +111,55 @@ class Manga {
   final List<String> genres;
   final int? popularity;
 
+  static final RegExp _unsafeContentPattern = RegExp(
+    r'(^|[^a-z0-9])(?:18\s*(?:\+|plus)|r\s*18|adult|ahegao|doujin|doujinshi|erotic|erotica|hentai|incest|lewd|milf|naked|netorare|ntr|nude|nudity|porn|pornographic|pornography|rape|rapist|sex|sexual|smut|uncensored)(?=$|[^a-z0-9])',
+  );
+
+  static const Set<String> _unsafeGenreKeys = {
+    'adult',
+    'doujinshi',
+    'erotica',
+    'hentai',
+    'pornographic',
+    'pornography',
+    'smut',
+  };
+
+  bool get isFriendlyContent {
+    if (isAdult) return false;
+
+    for (final genre in genres) {
+      final key = _contentSafetyKey(genre);
+      if (_unsafeGenreKeys.contains(key)) return false;
+      if (_unsafeContentPattern.hasMatch(key)) return false;
+    }
+
+    final searchableText = <String>[
+      title,
+      ...aliases,
+      synopsis,
+    ].map(_contentSafetyKey).where((value) => value.isNotEmpty).join(' ');
+
+    return !_unsafeContentPattern.hasMatch(searchableText);
+  }
+
+  static bool isFriendlySearchText(String value) {
+    final key = _contentSafetyKey(value);
+    return key.isNotEmpty && !_unsafeContentPattern.hasMatch(key);
+  }
+
   int get chapterCount =>
       MangaChapterRegistry.countFor(id) ?? _metadataChapterCount;
 
   int get metadataChapterCount => _metadataChapterCount;
 
+  bool get hasChapterMetadata => _metadataChapterCount > 0;
+
   bool get hasVerifiedChapterSummary =>
       MangaChapterRegistry.displayLabelFor(id) != null;
+
+  String? get verifiedChapterDisplayLabel =>
+      MangaChapterRegistry.displayLabelFor(id);
 
   String get chapterDisplayLabel {
     final verified = MangaChapterRegistry.displayLabelFor(id);
@@ -174,7 +216,37 @@ class Manga {
     return value.toString();
   }
 
-  List<String> get displayGenres => genres.take(3).toList(growable: false);
+  List<String> get displayGenres => _cleanGenres.take(3).toList(growable: false);
+
+  String get genreLabel {
+    final values = _cleanGenres;
+    return values.isEmpty ? 'Unknown' : values.join(', ');
+  }
+
+  String get primaryGenreLabel {
+    final values = _cleanGenres;
+    return values.isEmpty ? 'Unknown' : values.first;
+  }
+
+  List<String> get _cleanGenres {
+    final seen = <String>{};
+    final values = <String>[];
+    for (final raw in genres) {
+      final value = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (value.isEmpty) continue;
+      final key = value.toLowerCase();
+      if (!seen.add(key)) continue;
+      values.add(value);
+    }
+    return values;
+  }
+
+  static String _contentSafetyKey(String value) => value
+      .toLowerCase()
+      .replaceAll('&', ' and ')
+      .replaceAll(RegExp(r'[^a-z0-9+]+'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
 
   Manga copyWith({String? mangaDexId, int? chapterCount}) => Manga(
     id: id,

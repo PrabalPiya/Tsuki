@@ -11,6 +11,25 @@ import '../../../core/state/providers.dart';
 import '../../../core/storage/image_cache.dart';
 import '../../../core/theme/app_theme.dart';
 
+const double _fallbackPageAspectRatio = .68;
+const double _minimumReaderScale = 1.0;
+const double _maximumReaderScale = 6.0;
+const double _landscapePageAspectRatio = 1.05;
+const double _landscapePageHeightFraction = .62;
+
+double _readerPageDisplayHeight({
+  required double width,
+  required double viewportHeight,
+  required double aspectRatio,
+}) {
+  final naturalHeight = width / aspectRatio;
+  if (aspectRatio <= _landscapePageAspectRatio) return naturalHeight;
+
+  return (viewportHeight * _landscapePageHeightFraction)
+      .clamp(naturalHeight, width)
+      .toDouble();
+}
+
 class ReaderScreen extends ConsumerStatefulWidget {
   const ReaderScreen({super.key, required this.mangaId, this.initialChapterId});
 
@@ -21,7 +40,7 @@ class ReaderScreen extends ConsumerStatefulWidget {
   ConsumerState<ReaderScreen> createState() => _ReaderScreenState();
 }
 
-enum _BlockType { header, page, loading, error, end }
+enum _BlockType { header, page, loading, error, navigation }
 
 class _ReaderScreenState extends ConsumerState<ReaderScreen>
     with WidgetsBindingObserver {
@@ -31,6 +50,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   final _errors = <int, String>{};
   final _failedPageSources = <int, Set<String>>{};
   final _pageRatios = <String, double>{};
+  final _zoomTransform = TransformationController();
 
   List<CanonicalChapter> _chapters = const [];
   int _start = 0;
@@ -55,32 +75,41 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       final saved = ref
           .read(userLibraryProvider)
           .bookmarkedManga[widget.mangaId];
-      if (saved != null) repository.remember(saved);
+
+      if (saved != null && saved.isFriendlyContent) {
+        repository.remember(saved);
+      }
 
       final manga =
           repository.cached(widget.mangaId) ??
           await repository.details(widget.mangaId);
+
       if (manga == null) {
         _setFatal('Manga unavailable right now.');
         return;
       }
 
-      repository.remember(manga);
-      final adultMode = ref.read(userLibraryProvider).adultContent;
-      if (manga.isAdult != adultMode) {
-        _setFatal('This title is hidden in the current content mode.');
+      if (!manga.isFriendlyContent) {
+        _setFatal("This title isn't available in Tsuki.");
         return;
       }
 
-      final chapters = await repository.chapters(manga, allowAdult: adultMode);
-      if (chapters.isEmpty) {
+      repository.remember(manga);
+
+      final chapters = await repository.chapters(manga, allowAdult: false);
+      final readable = chapters
+          .where((chapter) => chapter.hasDirectlyReadableCopy)
+          .toList(growable: false);
+
+      if (readable.isEmpty) {
         _setFatal('No readable English chapters were found.');
         return;
       }
 
       if (!mounted) return;
-      _chapters = chapters;
-      _start = chapters.indexWhere((c) => c.id == widget.initialChapterId);
+
+      _chapters = readable;
+      _start = readable.indexWhere((c) => c.id == widget.initialChapterId);
       if (_start < 0) _start = 0;
       setState(() {});
       await _load(_start, restore: true);
@@ -122,15 +151,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       if (!mounted) return;
 
       setState(() => _loaded[index] = pages);
+
       if (restore) {
         _restoreSavedPosition(index);
         await _markChapterOpened(index);
       }
-
-      // Do NOT eagerly download the whole chapter here. CachedNetworkImage
-      // requests pages as ListView builds them and keeps a bounded disk cache.
-      // This prevents 30-80 concurrent image downloads from starving the page
-      // the user is actually trying to read.
     } catch (_) {
       if (mounted) {
         setState(() => _errors[index] = 'Chapter unavailable. Try again.');
@@ -149,29 +174,31 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     _restored = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scroll.hasClients) return;
+
       final urls = _loaded[index]!.urls;
+      if (urls.isEmpty) return;
+
       final page = saved.pageIndex.clamp(0, urls.length - 1);
       var offset = 72.0;
       for (var i = 0; i < page; i++) {
         offset += _pageHeight(urls[i]);
       }
       offset += _pageHeight(urls[page]) * saved.relativeOffset;
+
       _scroll.jumpTo(offset.clamp(0, _scroll.position.maxScrollExtent));
     });
   }
 
   double _pageHeight(String url) =>
-      MediaQuery.sizeOf(context).width / (_pageRatios[url] ?? .68);
+      _readerPageDisplayHeight(
+        width: MediaQuery.sizeOf(context).width,
+        viewportHeight: MediaQuery.sizeOf(context).height,
+        aspectRatio: _pageRatios[url] ?? _fallbackPageAspectRatio,
+      );
 
   void _onScroll() {
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 500), _saveProgress);
-    if (!_scroll.hasClients || _loaded.isEmpty) return;
-
-    final current = _locate(_scroll.offset);
-    if (current.ratio > .72) {
-      unawaited(_load(current.index + 1));
-    }
   }
 
   ({int index, int page, double relative, double ratio}) _locate(
@@ -193,6 +220,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         final within = (remaining - 72).clamp(0.0, pagesHeight);
         var page = 0;
         var pageStart = 0.0;
+
         while (page < count - 1 &&
             pageStart + _pageHeight(urls[page]) <= within) {
           pageStart += _pageHeight(urls[page]);
@@ -204,7 +232,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           index: index,
           page: page,
           relative: ((within - pageStart) / pageHeight).clamp(0.0, 1.0),
-          ratio: (within / pagesHeight).clamp(0.0, 1.0),
+          ratio: pagesHeight <= 0
+              ? 0
+              : (within / pagesHeight).clamp(0.0, 1.0),
         );
       }
 
@@ -222,6 +252,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
   Future<void> _saveProgress() async {
     if (!mounted || !_scroll.hasClients || _loaded.isEmpty) return;
+
     final value = _locate(_scroll.offset);
 
     await ref
@@ -265,6 +296,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     String failedSourceId,
   ) async {
     if (index < 0 || index >= _chapters.length) return;
+
     final failed = _failedPageSources.putIfAbsent(index, () => <String>{});
     if (!failed.add(failedSourceId)) return;
 
@@ -272,19 +304,22 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       final replacement = await ref
           .read(catalogProvider)
           .pages(_chapters[index], skipSourceIds: failed);
+
       if (!mounted || replacement.urls.isEmpty) return;
+
       setState(() {
         _loaded[index] = replacement;
         _errors.remove(index);
       });
     } catch (_) {
-      // Keep the current page error visible if every source copy failed.
+      // Keep the current page error visible if every safe source copy failed.
     }
   }
 
   void _toggleControls() {
     setState(() => _controls = !_controls);
     _hideTimer?.cancel();
+
     if (_controls) {
       _hideTimer = Timer(const Duration(seconds: 3), () {
         if (mounted) setState(() => _controls = false);
@@ -295,6 +330,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   Future<void> _goToChapter(int index) async {
     if (index < 0 || index >= _chapters.length) return;
 
+    await _saveProgress();
     _start = index;
     _loaded.clear();
     _loading.clear();
@@ -302,15 +338,19 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     _failedPageSources.clear();
     _pageRatios.clear();
     _restored = false;
+    _zoomTransform.value = Matrix4.identity();
+
     if (mounted) setState(() {});
+    if (_scroll.hasClients) _scroll.jumpTo(0);
 
     await _load(_start, restore: true);
-    if (_scroll.hasClients) _scroll.jumpTo(0);
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) unawaited(_saveProgress());
+    if (state != AppLifecycleState.resumed) {
+      unawaited(_saveProgress());
+    }
   }
 
   @override
@@ -321,6 +361,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     _saveTimer?.cancel();
     _hideTimer?.cancel();
     _scroll.dispose();
+    _zoomTransform.dispose();
     super.dispose();
   }
 
@@ -329,16 +370,17 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final manga = ref.watch(catalogProvider).cached(widget.mangaId);
     final library = ref.watch(userLibraryProvider);
     final progress = library.progress[widget.mangaId];
+    final currentChapter = _start >= 0 && _start < _chapters.length
+        ? _chapters[_start]
+        : null;
+
     final blocks =
         <({int chapter, _BlockType type, String? url, int page, bool read})>[];
 
     if (_chapters.isNotEmpty) {
-      final indexes = <int>{
-        _start,
-        ..._loaded.keys,
-        ..._loading,
-        ..._errors.keys,
-      }.toList()..sort();
+      final indexes = <int>[_start]
+          .where((index) => index >= 0 && index < _chapters.length)
+          .toList(growable: false);
 
       for (final index in indexes) {
         final isRead =
@@ -365,15 +407,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
             ));
           }
 
-          if (index == _chapters.length - 1) {
-            blocks.add((
-              chapter: index,
-              type: _BlockType.end,
-              url: null,
-              page: 0,
-              read: isRead,
-            ));
-          }
+          blocks.add((
+            chapter: index,
+            type: _BlockType.navigation,
+            url: null,
+            page: 0,
+            read: isRead,
+          ));
         } else if (_errors.containsKey(index)) {
           blocks.add((
             chapter: index,
@@ -408,53 +448,53 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
               else if (blocks.isEmpty)
                 const Center(child: CircularProgressIndicator())
               else
-                ListView.builder(
-                  controller: _scroll,
-                  itemCount: blocks.length,
-                  itemBuilder: (context, position) {
-                    final block = blocks[position];
-                    final chapter = _chapters[block.chapter];
-                    return switch (block.type) {
-                      _BlockType.header => _ChapterHeader(chapter: chapter),
-                      _BlockType.page => _ReaderPage(
-                        url: block.url!,
-                        sourceId: _loaded[block.chapter]!.sourceId,
-                        page: block.page,
-                        onAspectRatio: (ratio) =>
-                            _pageRatios[block.url!] = ratio,
-                        onLoadError: () => _retryChapterWithNextSource(
-                          block.chapter,
-                          _loaded[block.chapter]!.sourceId,
-                        ),
-                      ),
-                      _BlockType.loading => const SizedBox(
-                        height: 96,
-                        child: Center(child: CircularProgressIndicator()),
-                      ),
-                      _BlockType.error => _ChapterError(
-                        message: _errors[block.chapter]!,
-                        retry: () => _load(block.chapter),
-                      ),
-                      _BlockType.end => SizedBox(
-                        height: 120,
-                        child: Container(
-                          color: AppColors.background,
-                          child: Center(
-                            child: block.chapter < _chapters.length - 1
-                                ? FilledButton(
-                                    onPressed: () =>
-                                        _goToChapter(block.chapter + 1),
-                                    child: const Text('Next Chapter'),
-                                  )
-                                : const Text(
-                                    "You're all caught up",
-                                    style: TextStyle(color: AppColors.muted),
-                                  ),
+                InteractiveViewer(
+                  transformationController: _zoomTransform,
+                  minScale: _minimumReaderScale,
+                  maxScale: _maximumReaderScale,
+                  boundaryMargin: EdgeInsets.zero,
+                  panEnabled: true,
+                  scaleEnabled: true,
+                  clipBehavior: Clip.hardEdge,
+                  child: ListView.builder(
+                    controller: _scroll,
+                    itemCount: blocks.length,
+                    itemBuilder: (context, position) {
+                      final block = blocks[position];
+                      final chapter = _chapters[block.chapter];
+
+                      return switch (block.type) {
+                        _BlockType.header => _ChapterHeader(chapter: chapter),
+                        _BlockType.page => _ReaderPage(
+                          url: block.url!,
+                          sourceId: _loaded[block.chapter]!.sourceId,
+                          page: block.page,
+                          onAspectRatio: (ratio) =>
+                              _pageRatios[block.url!] = ratio,
+                          onLoadError: () => _retryChapterWithNextSource(
+                            block.chapter,
+                            _loaded[block.chapter]!.sourceId,
                           ),
                         ),
-                      ),
-                    };
-                  },
+                        _BlockType.loading => const SizedBox(
+                          height: 96,
+                          child: Center(child: CircularProgressIndicator()),
+                        ),
+                        _BlockType.error => _ChapterError(
+                          message: _errors[block.chapter]!,
+                          retry: () => _load(block.chapter),
+                        ),
+                        _BlockType.navigation => _ChapterNavigation(
+                          onPrevious: block.chapter > 0
+                              ? () => unawaited(_goToChapter(block.chapter - 1))
+                              : null,
+                          onNext: block.chapter + 1 < _chapters.length
+                              ? () => unawaited(_goToChapter(block.chapter + 1))
+                              : null,
+                        ),
+                      };
+                    },
+                  ),
                 ),
               IgnorePointer(
                 ignoring: !_controls,
@@ -482,15 +522,32 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 8,
                                 ),
-                                child: Text(
-                                  manga?.title ?? 'Reader',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: AppColors.text,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 16,
-                                  ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      manga?.title ?? 'Reader',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: AppColors.text,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                    if (currentChapter != null)
+                                      Text(
+                                        'Chapter ${currentChapter.numberLabel}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: AppColors.muted,
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -517,6 +574,7 @@ class _ChapterHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final credit = chapter.sourceCopies.firstOrNull?.attribution;
+
     return SizedBox(
       height: 72,
       child: Center(
@@ -533,7 +591,10 @@ class _ChapterHeader extends StatelessWidget {
             if (credit != null)
               Text(
                 credit,
-                style: const TextStyle(color: AppColors.muted, fontSize: 11),
+                style: const TextStyle(
+                  color: AppColors.muted,
+                  fontSize: 11,
+                ),
               ),
           ],
         ),
@@ -550,17 +611,20 @@ class _ReaderFailure extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          message,
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: AppColors.text),
-        ),
-        const SizedBox(height: 16),
-        FilledButton(onPressed: retry, child: const Text('Try again')),
-      ],
+    child: Padding(
+      padding: const EdgeInsets.all(28),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.text),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(onPressed: retry, child: const Text('Try again')),
+        ],
+      ),
     ),
   );
 }
@@ -580,6 +644,48 @@ class _ChapterError extends StatelessWidget {
         children: [
           Text(message, style: const TextStyle(color: AppColors.muted)),
           TextButton(onPressed: retry, child: const Text('Retry chapter')),
+        ],
+      ),
+    ),
+  );
+}
+
+class _ChapterNavigation extends StatelessWidget {
+  const _ChapterNavigation({
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    top: false,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(16, 28, 16, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onPrevious,
+                  icon: const Icon(Icons.arrow_back),
+                  label: const Text('Previous'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: onNext,
+                  icon: const Icon(Icons.arrow_forward),
+                  label: const Text('Next'),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     ),
@@ -606,15 +712,18 @@ class _ReaderPage extends StatefulWidget {
 }
 
 class _ReaderPageState extends State<_ReaderPage> {
-  double _aspectRatio = .68;
+  double _aspectRatio = _fallbackPageAspectRatio;
+  bool _hasResolvedAspect = false;
   bool _resolving = false;
   bool _reportedLoadError = false;
 
   @override
   void didUpdateWidget(covariant _ReaderPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+
     if (oldWidget.url != widget.url || oldWidget.sourceId != widget.sourceId) {
-      _aspectRatio = .68;
+      _aspectRatio = _fallbackPageAspectRatio;
+      _hasResolvedAspect = false;
       _resolving = false;
       _reportedLoadError = false;
     }
@@ -623,20 +732,25 @@ class _ReaderPageState extends State<_ReaderPage> {
   void _resolveAspect(ImageProvider provider) {
     if (_resolving) return;
     _resolving = true;
+
     final stream = provider.resolve(createLocalImageConfiguration(context));
     late ImageStreamListener listener;
+
     listener = ImageStreamListener(
       (info, _) {
         stream.removeListener(listener);
         final raw = info.image.width / info.image.height;
+
         if (!mounted || !raw.isFinite || raw <= 0) return;
 
-        // Keep pathological metadata from producing a zero-height or enormous
-        // reader item while preserving real double-page spreads.
-        final ratio = raw.clamp(.18, 5.0).toDouble();
+        final ratio = raw.toDouble();
         widget.onAspectRatio(ratio);
-        if ((_aspectRatio - ratio).abs() > .001) {
-          setState(() => _aspectRatio = ratio);
+
+        if (!_hasResolvedAspect || (_aspectRatio - ratio).abs() > .001) {
+          setState(() {
+            _aspectRatio = ratio;
+            _hasResolvedAspect = true;
+          });
         }
       },
       onError: (_, __) {
@@ -644,12 +758,14 @@ class _ReaderPageState extends State<_ReaderPage> {
         _resolving = false;
       },
     );
+
     stream.addListener(listener);
   }
 
   void _reportLoadError() {
     if (_reportedLoadError) return;
     _reportedLoadError = true;
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.onLoadError();
     });
@@ -662,7 +778,12 @@ class _ReaderPageState extends State<_ReaderPage> {
         final viewportWidth = constraints.maxWidth.isFinite
             ? constraints.maxWidth
             : MediaQuery.sizeOf(context).width;
-        final height = viewportWidth / _aspectRatio;
+        final viewportHeight = MediaQuery.sizeOf(context).height;
+        final height = _readerPageDisplayHeight(
+          width: viewportWidth,
+          viewportHeight: viewportHeight,
+          aspectRatio: _aspectRatio,
+        );
 
         if (widget.url.startsWith('demo://')) {
           return SizedBox(
@@ -694,7 +815,7 @@ class _ReaderPageState extends State<_ReaderPage> {
         }
 
         final decodeWidth =
-            (viewportWidth * MediaQuery.devicePixelRatioOf(context)).round();
+            (viewportWidth * MediaQuery.devicePixelRatioOf(context)).ceil();
 
         return AnimatedSize(
           duration: const Duration(milliseconds: 180),
@@ -710,12 +831,34 @@ class _ReaderPageState extends State<_ReaderPage> {
               memCacheWidth: decodeWidth,
               imageBuilder: (_, provider) {
                 _resolveAspect(provider);
-                return _ZoomablePage(imageProvider: provider);
+                if (!_hasResolvedAspect) {
+                  return const ColoredBox(
+                    color: AppColors.background,
+                    child: Center(
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  );
+                }
+
+                return ColoredBox(
+                  color: AppColors.background,
+                  child: Image(
+                    image: provider,
+                    width: viewportWidth,
+                    height: height,
+                    fit: BoxFit.contain,
+                    alignment: Alignment.center,
+                    filterQuality: FilterQuality.high,
+                    gaplessPlayback: true,
+                  ),
+                );
               },
               fadeInDuration: const Duration(milliseconds: 100),
               placeholder: (_, __) => const ColoredBox(
                 color: AppColors.background,
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                child: Center(
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
               ),
               errorWidget: (_, __, ___) {
                 _reportLoadError();
@@ -723,7 +866,7 @@ class _ReaderPageState extends State<_ReaderPage> {
                   color: AppColors.background,
                   child: Center(
                     child: Text(
-                      'Trying another source…',
+                      'Trying another source...',
                       style: TextStyle(color: AppColors.muted),
                     ),
                   ),
@@ -744,62 +887,13 @@ Map<String, String>? _sourceImageHeaders(String sourceId) {
     'mangapill' => 'https://mangapill.com/',
     'comick' => 'https://comick.live/',
     'mangadex' => 'https://mangadex.org/',
-    'omegascans' => 'https://omegascans.org/',
-    'manhwa18cc' => 'https://manhwa18.cc/',
-    'manhwa18net' => 'https://manhwa18.net/',
-    'ero18x' => 'https://ero18x.com/',
-    'toon18' => 'https://toon18.to/',
-    'webtoonxyz' => 'https://www.webtoon.xyz/',
-    'hitomi' => 'https://hitomi.la/',
     _ => null,
   };
+
   if (referer == null) return null;
+
   return <String, String>{
     'Referer': referer,
     'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
   };
-}
-
-class _ZoomablePage extends StatefulWidget {
-  const _ZoomablePage({required this.imageProvider});
-
-  final ImageProvider imageProvider;
-
-  @override
-  State<_ZoomablePage> createState() => _ZoomablePageState();
-}
-
-class _ZoomablePageState extends State<_ZoomablePage> {
-  final _transform = TransformationController();
-  bool _zoomed = false;
-
-  @override
-  void dispose() {
-    _transform.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => ColoredBox(
-    color: AppColors.background,
-    child: InteractiveViewer(
-      transformationController: _transform,
-      minScale: 1,
-      maxScale: 5,
-      panEnabled: true,
-      clipBehavior: Clip.none,
-      onInteractionUpdate: (_) {
-        final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
-        if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
-      },
-      child: SizedBox.expand(
-        child: Image(
-          image: widget.imageProvider,
-          fit: BoxFit.contain,
-          alignment: Alignment.center,
-          filterQuality: FilterQuality.medium,
-        ),
-      ),
-    ),
-  );
 }

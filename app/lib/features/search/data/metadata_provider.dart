@@ -14,13 +14,12 @@ enum MangaBrowseSort {
 
 /// Minimal browse request used by Tsuki Search.
 ///
-/// Keep this intentionally small so the filter UI and metadata backend stay in
-/// lockstep: genre, sort, status, and minimum chapters are the only exposed
-/// filters. A blank [query] is valid when at least one filter/sort is active.
+/// Keep this intentionally small so browse features and the metadata backend
+/// stay in lockstep. Only safe-for-general-audiences catalogue requests are
+/// supported.
 class MangaBrowseRequest {
   const MangaBrowseRequest({
     this.query = '',
-    required this.adultOnly,
     this.status = MangaBrowseStatus.all,
     this.genres = const <String>{},
     this.minimumChapters,
@@ -30,7 +29,6 @@ class MangaBrowseRequest {
   });
 
   final String query;
-  final bool adultOnly;
   final MangaBrowseStatus status;
   final Set<String> genres;
   final int? minimumChapters;
@@ -38,7 +36,7 @@ class MangaBrowseRequest {
   final int page;
   final int perPage;
 
-  bool get hasFilters =>
+  bool get hasBrowseOptions =>
       status != MangaBrowseStatus.all ||
       genres.isNotEmpty ||
       minimumChapters != null ||
@@ -47,11 +45,11 @@ class MangaBrowseRequest {
 
 abstract interface class MetadataProvider {
   String get id;
-  Future<List<Manga>> search(String query, {required bool includeAdult});
+  Future<List<Manga>> search(String query);
   Future<Manga?> getById(String id);
 }
 
-/// Optional richer metadata capability used by filter-only browsing.
+/// Optional richer metadata capability used by catalogue browsing.
 ///
 /// Kept separate from [MetadataProvider] so lightweight test/demo providers do
 /// not need to implement catalogue browsing.

@@ -28,7 +28,7 @@ class FirestoreUserStore implements UserStore {
               .toSet();
 
       final safeBookmarks = remoteBookmarks
-          .where((id) => local.bookmarkedManga[id]?.isAdult != true)
+          .where((id) => local.bookmarkedManga[id]?.isFriendlyContent == true)
           .toSet();
 
       final progress = <String, ReadingProgress>{};
@@ -63,11 +63,15 @@ class FirestoreUserStore implements UserStore {
     Set<String> ids,
     Map<String, Manga> manga,
   ) async {
+    final blockedIds = manga.entries
+        .where((entry) => !entry.value.isFriendlyContent)
+        .map((entry) => entry.key)
+        .toSet();
     final safeManga = <String, Manga>{
       for (final entry in manga.entries)
-        if (!entry.value.isAdult) entry.key: entry.value,
+        if (entry.value.isFriendlyContent) entry.key: entry.value,
     };
-    final safeIds = ids.where(safeManga.containsKey).toSet();
+    final safeIds = ids.where((id) => !blockedIds.contains(id)).toSet();
 
     await _local.saveBookmarks(uid, safeIds, safeManga);
     final ref = _db.collection('users').doc(uid).collection('bookmarks');

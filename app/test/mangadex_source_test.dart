@@ -159,7 +159,7 @@ void main() {
     },
   );
 
-  test('adult matching search includes all MangaDex content ratings', () async {
+  test('matching search only requests safe MangaDex content ratings', () async {
     final adapter = _FakeAdapter(
       (_) => {
         'result': 'ok',
@@ -168,14 +168,14 @@ void main() {
         'total': 1,
         'data': [
           {
-            'id': 'adult-id',
+            'id': 'safe-id',
             'type': 'manga',
             'attributes': {
-              'title': {'en': 'Adult Match'},
+              'title': {'en': 'Safe Match'},
               'altTitles': const [],
               'description': {'en': 'Description'},
               'status': 'ongoing',
-              'contentRating': 'pornographic',
+              'contentRating': 'safe',
               'links': const {},
             },
             'relationships': const [],
@@ -188,22 +188,16 @@ void main() {
     await source.findConservativeMatch(
       const Manga(
         id: 'anilist:1',
-        title: 'Adult Match',
-        aliases: ['Adult Match'],
+        title: 'Safe Match',
+        aliases: ['Safe Match'],
         coverUrl: '',
         synopsis: '',
         status: MangaStatus.ongoing,
         chapterCount: 0,
-        isAdult: true,
       ),
     );
 
-    expect(adapter.requests.single.query['contentRating[]'], [
-      'safe',
-      'suggestive',
-      'erotica',
-      'pornographic',
-    ]);
+    expect(adapter.requests.single.query['contentRating[]'], ['safe']);
   });
 
   test(

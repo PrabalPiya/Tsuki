@@ -8,7 +8,7 @@ import 'metadata_provider.dart';
 ///
 /// Search/browse intentionally uses a small, stable subset of AniList's manga
 /// browse API. Keeping the request surface narrow makes Search reliable while
-/// still supporting the four filters Tsuki exposes: genre, sort, status and
+/// still supporting internal browse options for genre, sort, status, and
 /// minimum chapters.
 class AniListMetadataProvider
     implements MetadataProvider, BrowseMetadataProvider {
@@ -29,11 +29,10 @@ class AniListMetadataProvider
     genres isAdult''';
 
   @override
-  Future<List<Manga>> search(String query, {required bool includeAdult}) {
+  Future<List<Manga>> search(String query) {
     return browse(
       MangaBrowseRequest(
         query: query,
-        adultOnly: false,
         sort: MangaBrowseSort.relevance,
         perPage: 24,
       ),
@@ -42,26 +41,57 @@ class AniListMetadataProvider
 
   @override
   Future<List<Manga>> browse(MangaBrowseRequest request) async {
-    const document = r'''query BrowseManga(
-      $page: Int!,
-      $perPage: Int!,
-      $search: String,
-      $isAdult: Boolean!,
-      $status: MediaStatus,
-      $genres: [String],
-      $minChapters: Int,
-      $sort: [MediaSort]!
-    ) {
-      Page(page: $page, perPage: $perPage) {
-        media(
-          type: MANGA,
-          search: $search,
-          isAdult: $isAdult,
-          status: $status,
-          genre_in: $genres,
-          chapters_greater: $minChapters,
-          sort: $sort
-        ) {
+    final query = request.query.trim();
+    final variables = <String, Object?>{
+      'page': request.page,
+      'perPage': request.perPage.clamp(1, 50),
+      'isAdult': false,
+      'sort': _serverSort(request.sort, hasSearch: query.length >= 2),
+    };
+    final declarations = <String>[
+      r'$page: Int!',
+      r'$perPage: Int!',
+      r'$isAdult: Boolean!',
+      r'$sort: [MediaSort]!',
+    ];
+    final arguments = <String>[
+      'type: MANGA',
+      'isAdult: \$isAdult',
+      'sort: \$sort',
+    ];
+
+    if (query.length >= 2) {
+      variables['search'] = query;
+      declarations.add(r'$search: String');
+      arguments.add('search: \$search');
+    }
+
+    final status = _statusVariable(request.status);
+    if (status != null) {
+      variables['status'] = status;
+      declarations.add(r'$status: MediaStatus');
+      arguments.add('status: \$status');
+    }
+
+    if (request.genres.isNotEmpty) {
+      variables['genres'] = request.genres.toList();
+      declarations.add(r'$genres: [String]');
+      arguments.add('genre_in: \$genres');
+    }
+
+    if (request.minimumChapters != null) {
+      variables['minChapters'] = (request.minimumChapters! - 1).clamp(
+        0,
+        20000,
+      );
+      declarations.add(r'$minChapters: Int');
+      arguments.add('chapters_greater: \$minChapters');
+    }
+
+    final document =
+        '''query BrowseManga(${declarations.join(', ')}) {
+      Page(page: \$page, perPage: \$perPage) {
+        media(${arguments.join(', ')}) {
           id idMal title { romaji english native } synonyms
           description(asHtml: false) status format countryOfOrigin
           startDate { year } averageScore popularity
@@ -69,21 +99,6 @@ class AniListMetadataProvider
         }
       }
     }''';
-
-    final query = request.query.trim();
-    final variables = <String, Object?>{
-      'page': request.page,
-      'perPage': request.perPage.clamp(1, 50),
-      'search': query.length >= 2 ? query : null,
-      'isAdult': false,
-      'status': _statusVariable(request.status),
-      'genres': request.genres.isEmpty ? null : request.genres.toList(),
-      // AniList uses a strict "greater than" filter.
-      'minChapters': request.minimumChapters == null
-          ? null
-          : (request.minimumChapters! - 1).clamp(0, 20000),
-      'sort': _serverSort(request.sort, hasSearch: query.length >= 2),
-    };
 
     final response = await _client.post<Map<String, dynamic>>(
       '',
@@ -101,7 +116,7 @@ class AniListMetadataProvider
     var values = media
         .whereType<Map>()
         .map((raw) => _fromJson(Map<String, dynamic>.from(raw)))
-        .where((manga) => !manga.isAdult)
+        .where((manga) => manga.isFriendlyContent)
         .toList(growable: false);
 
     // AniList does not expose a stable chapter-count MediaSort in all schema
@@ -137,29 +152,25 @@ class AniListMetadataProvider
     final data = response.data?['data'];
     if (data is! Map) return null;
     final media = data['Media'];
-    return media is Map ? _fromJson(Map<String, dynamic>.from(media)) : null;
+    if (media is! Map) return null;
+    final manga = _fromJson(Map<String, dynamic>.from(media));
+    return manga.isFriendlyContent ? manga : null;
   }
 
-  Future<List<Manga>> browseTrending({bool adultOnly = false}) =>
-      _browseRanking('TRENDING_DESC', adultOnly: adultOnly);
+  Future<List<Manga>> browseTrending() => _browseRanking('TRENDING_DESC');
 
-  Future<List<Manga>> browsePopular({bool adultOnly = false}) =>
-      _browseRanking('POPULARITY_DESC', adultOnly: adultOnly);
+  Future<List<Manga>> browsePopular() => _browseRanking('POPULARITY_DESC');
 
-  Future<List<Manga>> browsePopularThisSeason({bool adultOnly = false}) =>
-      _browseRanking(
-        'POPULARITY_DESC',
-        adultOnly: adultOnly,
-        season: _currentSeason(),
-        seasonYear: DateTime.now().year,
-      );
+  Future<List<Manga>> browsePopularThisSeason() => _browseRanking(
+    'POPULARITY_DESC',
+    season: _currentSeason(),
+    seasonYear: DateTime.now().year,
+  );
 
-  Future<List<Manga>> browseTopRated({bool adultOnly = false}) =>
-      _browseRanking('SCORE_DESC', adultOnly: adultOnly);
+  Future<List<Manga>> browseTopRated() => _browseRanking('SCORE_DESC');
 
   Future<List<Manga>> _browseRanking(
     String sort, {
-    required bool adultOnly,
     String? season,
     int? seasonYear,
   }) async {
@@ -183,7 +194,7 @@ class AniListMetadataProvider
     return media
         .whereType<Map>()
         .map((raw) => _fromJson(Map<String, dynamic>.from(raw)))
-        .where((manga) => !manga.isAdult)
+        .where((manga) => manga.isFriendlyContent)
         .toList(growable: false);
   }
 

@@ -59,6 +59,7 @@ class CatalogRepository {
   static const _primaryTimeout = Duration(seconds: 14);
   static const _fallbackTimeout = Duration(seconds: 22);
   static const _firstChapterDeadline = Duration(seconds: 6);
+  static const _sourceSearchTimeout = Duration(seconds: 7);
   static const _quickRefreshAge = Duration(minutes: 10);
   static const _deepRefreshAge = Duration(hours: 6);
 
@@ -67,17 +68,21 @@ class CatalogRepository {
   List<Manga> get demoRankings =>
       _config.useDemoData ? demoCatalog : const <Manga>[];
 
+  bool isFriendly(Manga manga) => manga.isFriendlyContent;
+
+  bool isFriendlySearchQuery(String query) => Manga.isFriendlySearchText(query);
+
   Manga? cached(String id) {
     final value = _cache[id];
-    return value == null || value.isAdult ? null : value;
+    return value == null || !isFriendly(value) ? null : value;
   }
 
   void remember(Manga manga) {
-    if (!manga.isAdult) _cache[manga.id] = manga;
+    if (isFriendly(manga)) _cache[manga.id] = manga;
   }
 
   Future<bool> hasReadableChapters(Manga manga) async {
-    if (manga.isAdult) return false;
+    if (!isFriendly(manga)) return false;
     if (_config.useDemoData) return manga.metadataChapterCount > 0;
 
     final summary = MangaChapterRegistry.summaryFor(manga.id);
@@ -108,7 +113,7 @@ class CatalogRepository {
     int targetCount = 24,
     int concurrency = 4,
   }) async {
-    final safe = items.where((manga) => !manga.isAdult).toList(growable: false);
+    final safe = items.where(isFriendly).toList(growable: false);
     if (_config.useDemoData) {
       return safe
           .where((manga) => manga.metadataChapterCount > 0)
@@ -130,38 +135,137 @@ class CatalogRepository {
     }
     return accepted;
   }
-  Future<List<Manga>> search(String query, {required bool includeAdult}) async {
-    if (query.trim().length < 2) return const [];
+
+  Future<List<Manga>> search(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.length < 2 || !isFriendlySearchQuery(trimmed)) {
+      return const [];
+    }
 
     try {
-      final values = await _metadata.search(
-        query.trim(),
-        includeAdult: false,
-      );
-      for (final value in values) {
+      final values = await _metadata.search(trimmed);
+      final safe = _dedupe(values).where(isFriendly).toList(growable: false);
+      for (final value in safe) {
         _cache[value.id] = value;
       }
-      final safe = _dedupe(values)
-          .where((manga) => !manga.isAdult)
-          .toList(growable: false);
-      final result = await filterReadableManga(safe);
+      final readable = await filterReadableManga(
+        safe,
+        targetCount: 24,
+        concurrency: 6,
+      );
+      final ranked = _rankSearchResults(query, readable);
       if (!_config.useDemoData) {
-        for (final manga in result.take(3)) {
+        for (final manga in ranked.take(1)) {
           unawaited(prewarmChapters(manga, allowAdult: false));
         }
-        for (final manga in result.skip(3).take(5)) {
-          unawaited(primeChapterSummary(manga, allowAdult: false));
-        }
       }
-      return result;
+      return ranked;
     } catch (_) {
-      if (!_config.useDemoData) rethrow;
+      if (!_config.useDemoData) {
+        final fallback = await _sourceSearch(trimmed);
+        if (fallback.isNotEmpty) return fallback;
+        rethrow;
+      }
+
       final normalized = query.toLowerCase();
-      return demoCatalog
-          .where((manga) => manga.title.toLowerCase().contains(normalized))
-          .toList();
+      return _rankSearchResults(
+        query,
+        demoCatalog
+          .where(
+            (manga) =>
+                isFriendly(manga) &&
+                manga.title.toLowerCase().contains(normalized),
+          )
+          .toList(),
+      );
     }
   }
+
+  Future<List<Manga>> _sourceSearch(String query) async {
+    if (!isFriendlySearchQuery(query)) return const <Manga>[];
+
+    Future<List<Manga>> run(Future<List<Manga>> Function() search) async {
+      try {
+        return await search().timeout(
+          _sourceSearchTimeout,
+          onTimeout: () => const <Manga>[],
+        );
+      } catch (_) {
+        return const <Manga>[];
+      }
+    }
+
+    final groups = await Future.wait([
+      run(() => _mangaDex.search(query)),
+      run(() => _comicK.search(query)),
+      run(() => _mangaPill.search(query)),
+      run(() => _weebCentral.search(query)),
+      run(() => _asura.search(query)),
+    ]);
+
+    final values = _dedupe(groups.expand((group) => group).toList())
+        .where(isFriendly)
+        .toList(growable: false);
+    for (final value in values) {
+      _cache[value.id] = value;
+    }
+    final readable = values
+        .where((manga) => manga.hasVerifiedChapterSummary || manga.hasChapterMetadata)
+        .toList(growable: false);
+    return _rankSearchResults(query, readable);
+  }
+
+  List<Manga> _rankSearchResults(String query, List<Manga> values) {
+    final needle = _searchKey(query);
+    if (needle.isEmpty || values.length < 2) return values;
+
+    double score(Manga manga) {
+      final names = <String>[
+        manga.title,
+        ...manga.aliases,
+      ].map(_searchKey).where((value) => value.isNotEmpty).toList();
+      if (names.isEmpty) return 0;
+
+      var best = 0.0;
+      for (final name in names) {
+        final value = name == needle
+            ? 1000.0
+            : name.startsWith(needle)
+            ? 760.0 - (name.length - needle.length).clamp(0, 120).toDouble()
+            : name.contains(needle)
+            ? 520.0 - name.indexOf(needle).clamp(0, 120).toDouble()
+            : needle.contains(name)
+            ? 260.0
+            : 0.0;
+        if (value > best) best = value;
+      }
+
+      final popularity =
+          (manga.popularity ?? 0).clamp(0, 250000).toDouble() / 2500.0;
+      final rating = (manga.rating ?? 0) * 4;
+      final chapterSignal = manga.metadataChapterCount > 0 ? 8.0 : 0.0;
+      return best + popularity + rating + chapterSignal;
+    }
+
+    final ranked = [...values];
+    ranked.sort((a, b) {
+      final byScore = score(b).compareTo(score(a));
+      if (byScore != 0) return byScore;
+
+      final byPopularity = (b.popularity ?? 0).compareTo(a.popularity ?? 0);
+      if (byPopularity != 0) return byPopularity;
+
+      return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+    });
+    return ranked;
+  }
+
+  String _searchKey(String value) => value
+      .toLowerCase()
+      .replaceAll('&', ' and ')
+      .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
 
   Future<List<Manga>> browse(MangaBrowseRequest request) async {
     try {
@@ -171,21 +275,16 @@ class CatalogRepository {
         final browseProvider = provider as BrowseMetadataProvider;
         values = await browseProvider.browse(request);
       } else if (request.query.trim().length >= 2) {
-        values = await provider.search(
-          request.query.trim(),
-          includeAdult: request.adultOnly,
-        );
+        values = await provider.search(request.query.trim());
       } else {
         values = const <Manga>[];
       }
 
-      for (final value in values) {
+      final safe = _dedupe(values).where(isFriendly).toList(growable: false);
+      for (final value in safe) {
         _cache[value.id] = value;
       }
 
-      final safe = _dedupe(values)
-          .where((manga) => !manga.isAdult)
-          .toList(growable: false);
       final result = await filterReadableManga(safe);
       if (!_config.useDemoData) {
         for (final manga in result.take(3)) {
@@ -199,17 +298,17 @@ class CatalogRepository {
     } catch (_) {
       if (!_config.useDemoData) rethrow;
       return demoCatalog
-          .where((manga) => !manga.isAdult)
+          .where(isFriendly)
           .toList(growable: false);
     }
   }
 
   Future<Manga?> details(String id) async {
     final value = _cache[id];
-    if (value != null) return value.isAdult ? null : value;
+    if (value != null) return isFriendly(value) ? value : null;
 
     final loaded = await _metadata.getById(id);
-    if (loaded == null || loaded.isAdult) return null;
+    if (loaded == null || !isFriendly(loaded)) return null;
     _cache[id] = loaded;
     return loaded;
   }
@@ -220,7 +319,7 @@ class CatalogRepository {
     Manga manga, {
     bool allowAdult = false,
   }) {
-    if (manga.isAdult) return const <CanonicalChapter>[];
+    if (!isFriendly(manga)) return const <CanonicalChapter>[];
     final value = _chapterCache[_chapterCacheKey(manga, allowAdult)];
     return value == null || value.isEmpty ? null : value;
   }
@@ -228,7 +327,7 @@ class CatalogRepository {
   /// Starts/finishes a chapter index before navigating to Details. Multiple
   /// cards asking for the same manga share the same in-flight request.
   Future<void> prewarmChapters(Manga manga, {bool allowAdult = false}) async {
-    if (_config.useDemoData || manga.isAdult) return;
+    if (_config.useDemoData || !isFriendly(manga)) return;
     try {
       await chapters(manga, allowAdult: false);
     } catch (_) {
@@ -242,7 +341,7 @@ class CatalogRepository {
     Manga manga, {
     bool allowAdult = false,
   }) async {
-    if (manga.isAdult) return const [];
+    if (!isFriendly(manga)) return const [];
     final cacheKey = _chapterCacheKey(manga, allowAdult);
 
     final memory = _chapterCache[cacheKey];
@@ -265,7 +364,7 @@ class CatalogRepository {
     bool refresh = false,
     bool allowAdult = false,
   }) async {
-    if (manga.isAdult) return const [];
+    if (!isFriendly(manga)) return const [];
 
     if (manga.id.startsWith('demo:')) {
       final values = demoChapters(manga);
@@ -309,7 +408,9 @@ class CatalogRepository {
     Manga manga, {
     required bool allowAdult,
   }) {
-    if (manga.isAdult) return const <Future<List<CanonicalChapter>> Function()>[];
+    if (!isFriendly(manga)) {
+      return const <Future<List<CanonicalChapter>> Function()>[];
+    }
     return <Future<List<CanonicalChapter>> Function()>[
       () => _loadWeebCentral(manga, allowAdult: false),
       () => _loadComicK(manga),
@@ -419,7 +520,7 @@ class CatalogRepository {
     Manga manga, {
     bool allowAdult = false,
   }) async {
-    if (_config.useDemoData || manga.isAdult) return;
+    if (_config.useDemoData || !isFriendly(manga)) return;
     final existingSummary = MangaChapterRegistry.summaryFor(manga.id);
     if (existingSummary?.latestNumber != null) return;
 
@@ -462,7 +563,7 @@ class CatalogRepository {
     bool allowAdult = false,
     bool force = false,
   }) async {
-    if (manga.isAdult) return const [];
+    if (!isFriendly(manga)) return const [];
 
     final cacheKey = _chapterCacheKey(manga, allowAdult);
     final active = _refreshing[cacheKey];
@@ -702,7 +803,7 @@ class CatalogRepository {
     String sourceName, {
     required bool allowAdult,
   }) {
-    if (manga.isAdult) return Future.value(const <CanonicalChapter>[]);
+    if (!isFriendly(manga)) return Future.value(const <CanonicalChapter>[]);
     return switch (sourceName) {
       'weebcentral' => _loadWeebCentral(manga, allowAdult: false),
       'comick' => _loadComicK(manga),

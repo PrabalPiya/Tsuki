@@ -41,6 +41,7 @@ flutter:
     - assets/branding/tsuki_splash.png
     - assets/branding/tsuki_app_icon.jpg
     - assets/branding/tsuki_logo_transparent.png
+    - assets/catalog/catalog.json
 
 flutter_launcher_icons:
   android: true

@@ -4,39 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/data/catalog_repository.dart';
 import '../../../core/models/manga.dart';
-import '../data/metadata_provider.dart';
-
-class SearchFilters {
-  const SearchFilters({
-    this.genre,
-    this.status = MangaBrowseStatus.all,
-    this.sort = MangaBrowseSort.relevance,
-  });
-
-  final String? genre;
-  final MangaBrowseStatus status;
-  final MangaBrowseSort sort;
-
-  bool get hasActive => activeCount > 0;
-
-  int get activeCount =>
-      ((genre == null || genre!.trim().isEmpty) ? 0 : 1) +
-      (status == MangaBrowseStatus.all ? 0 : 1) +
-      (sort == MangaBrowseSort.relevance ? 0 : 1);
-
-  SearchFilters copyWith({
-    String? genre,
-    bool clearGenre = false,
-    MangaBrowseStatus? status,
-    MangaBrowseSort? sort,
-  }) {
-    return SearchFilters(
-      genre: clearGenre ? null : genre ?? this.genre,
-      status: status ?? this.status,
-      sort: sort ?? this.sort,
-    );
-  }
-}
+import '../../../core/storage/manga_metadata_cache.dart';
 
 class SearchState {
   const SearchState({
@@ -44,7 +12,6 @@ class SearchState {
     this.results = const <Manga>[],
     this.loading = false,
     this.submitted = false,
-    this.filters = const SearchFilters(),
     this.error,
   });
 
@@ -52,17 +19,15 @@ class SearchState {
   final List<Manga> results;
   final bool loading;
   final bool submitted;
-  final SearchFilters filters;
   final String? error;
 
-  bool get hasBrowseRequest => query.trim().length >= 2 || filters.hasActive;
+  bool get hasBrowseRequest => query.trim().length >= 2;
 
   SearchState copyWith({
     String? query,
     List<Manga>? results,
     bool? loading,
     bool? submitted,
-    SearchFilters? filters,
     String? error,
     bool clearError = false,
   }) {
@@ -71,18 +36,24 @@ class SearchState {
       results: results ?? this.results,
       loading: loading ?? this.loading,
       submitted: submitted ?? this.submitted,
-      filters: filters ?? this.filters,
       error: clearError ? null : error ?? this.error,
     );
   }
 }
 
 class SearchController extends StateNotifier<SearchState> {
-  SearchController(this._repository) : super(const SearchState());
+  SearchController(this._repository, this._cache) : super(const SearchState());
 
   final CatalogRepository _repository;
+  final MangaMetadataCache _cache;
   Timer? _timer;
   int _generation = 0;
+
+  void reset() {
+    _timer?.cancel();
+    _generation++;
+    state = const SearchState();
+  }
 
   void updateQuery(String value) {
     state = state.copyWith(query: value, submitted: false, clearError: true);
@@ -90,14 +61,15 @@ class SearchController extends StateNotifier<SearchState> {
     final generation = ++_generation;
     final trimmed = value.trim();
 
-    if (trimmed.length < 2 && !state.filters.hasActive) {
+    if (trimmed.length < 2 || !_repository.isFriendlySearchQuery(trimmed)) {
       state = state.copyWith(results: const <Manga>[], loading: false);
       return;
     }
 
     if (trimmed.length >= 2) {
+      unawaited(_showCached(value, generation, submitted: false));
       _timer = Timer(
-        const Duration(milliseconds: 280),
+        const Duration(milliseconds: 120),
         () => _run(value, generation, submitted: false),
       );
     }
@@ -107,41 +79,12 @@ class SearchController extends StateNotifier<SearchState> {
     _timer?.cancel();
     final query = value ?? state.query;
     final generation = ++_generation;
-    if (query.trim().length < 2 && !state.filters.hasActive) return;
-    await _run(query, generation, submitted: true);
-  }
-
-  void updateFilters(SearchFilters filters) {
-    state = state.copyWith(filters: filters, clearError: true);
-  }
-
-  Future<void> applyFilters() async {
-    _timer?.cancel();
-    final generation = ++_generation;
-    if (state.query.trim().length < 2 && !state.filters.hasActive) {
-      state = state.copyWith(
-        results: const <Manga>[],
-        loading: false,
-        submitted: false,
-      );
+    final trimmed = query.trim();
+    if (trimmed.length < 2 || !_repository.isFriendlySearchQuery(trimmed)) {
+      state = state.copyWith(results: const <Manga>[], loading: false);
       return;
     }
-    await _run(state.query, generation, submitted: true);
-  }
-
-  Future<void> clearFilters() async {
-    state = state.copyWith(filters: const SearchFilters(), clearError: true);
-    _timer?.cancel();
-    final generation = ++_generation;
-    if (state.query.trim().length >= 2) {
-      await _run(state.query, generation, submitted: false);
-    } else {
-      state = state.copyWith(
-        results: const <Manga>[],
-        loading: false,
-        submitted: false,
-      );
-    }
+    await _run(query, generation, submitted: true);
   }
 
   Future<void> _run(
@@ -155,37 +98,64 @@ class SearchController extends StateNotifier<SearchState> {
       clearError: true,
     );
 
-    try {
-      final filters = state.filters;
-      final genres = filters.genre == null || filters.genre!.trim().isEmpty
-          ? const <String>{}
-          : <String>{filters.genre!.trim()};
+    await _showCached(query, generation, submitted: submitted);
 
-      final result = await _repository.browse(
-        MangaBrowseRequest(
-          query: query,
-          adultOnly: false,
-          status: filters.status,
-          genres: genres,
-          minimumChapters: null,
-          sort: filters.sort,
-        ),
-      );
+    try {
+      final result = await _repository.search(query);
 
       if (generation != _generation) return;
+      final safe = result.where(_repository.isFriendly).toList(growable: false);
+      unawaited(_cache.saveSearch(query, safe));
       state = state.copyWith(
-        results: result.where((manga) => !manga.isAdult).toList(growable: false),
+        results: safe,
         loading: false,
         submitted: submitted,
         clearError: true,
       );
     } catch (_) {
       if (generation == _generation) {
+        if (state.results.isNotEmpty) {
+          state = state.copyWith(loading: false, clearError: true);
+          return;
+        }
+
         state = state.copyWith(
           loading: false,
           error: 'Could not reach the manga catalogue. Try again.',
         );
       }
+    }
+  }
+
+  Future<void> _showCached(
+    String query,
+    int generation, {
+    required bool submitted,
+  }) async {
+    final indexed = await _cache.searchIndex(query);
+    if (indexed.isNotEmpty && generation == _generation) {
+      for (final manga in indexed) {
+        _repository.remember(manga);
+      }
+      state = state.copyWith(
+        results: indexed.where(_repository.isFriendly).toList(growable: false),
+        loading: true,
+        submitted: submitted,
+        clearError: true,
+      );
+    }
+
+    final cached = await _cache.loadSearch(query);
+    if (cached != null && cached.isNotEmpty && generation == _generation) {
+      for (final manga in cached) {
+        _repository.remember(manga);
+      }
+      state = state.copyWith(
+        results: cached.where(_repository.isFriendly).toList(growable: false),
+        loading: true,
+        submitted: submitted,
+        clearError: true,
+      );
     }
   }
 

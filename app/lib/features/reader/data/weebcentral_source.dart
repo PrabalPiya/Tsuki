@@ -36,9 +36,9 @@ class WeebCentralSource implements MangaSource {
   Set<String> get allowedImageHosts => const {};
 
   @override
-  Future<List<Manga>> search(String query) => _search(query, adultMode: 'Any');
+  Future<List<Manga>> search(String query) => _search(query);
 
-  Future<List<Manga>> _search(String query, {required String adultMode}) async {
+  Future<List<Manga>> _search(String query) async {
     final cleaned = query
         .replaceAll(RegExp(r'[!#:(),-]'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
@@ -58,9 +58,7 @@ class WeebCentralSource implements MangaSource {
         'order': 'Descending',
         'official': 'Any',
         'anime': 'Any',
-        // Match the canonical title's adult classification when resolving;
-        // the public search() method uses Any for general source browsing.
-        'adult': adultMode,
+        'adult': 'False',
       },
     );
 
@@ -127,40 +125,32 @@ class WeebCentralSource implements MangaSource {
     // serially executing every alias before making a decision.
     for (final query in queries) {
       try {
-        final adultModes = allowAdult
-            ? (canonical.isAdult
-                  ? const <String>['True', 'Any']
-                  : const <String>['Any'])
-            : const <String>['False'];
-
         final exactCanonicalNames = <String>{
           canonical.title,
           ...canonical.aliases,
         }.map(SourceMatching.normalize).toSet();
 
-        for (final adultMode in adultModes) {
-          final candidates = await _search(query, adultMode: adultMode);
-          if (candidates.isEmpty) continue;
+        final candidates = await _search(query);
+        if (candidates.isEmpty) continue;
 
-          for (final candidate in candidates) {
-            final candidateNames = <String>{
-              candidate.title,
-              ...candidate.aliases,
-            }.map(SourceMatching.normalize);
-            if (candidateNames.any(exactCanonicalNames.contains)) {
-              return candidate.id.replaceFirst('weebcentral:', '');
-            }
+        for (final candidate in candidates) {
+          final candidateNames = <String>{
+            candidate.title,
+            ...candidate.aliases,
+          }.map(SourceMatching.normalize);
+          if (candidateNames.any(exactCanonicalNames.contains)) {
+            return candidate.id.replaceFirst('weebcentral:', '');
           }
-
-          final match = SourceMatching.bestMatchId(
-            canonical,
-            candidates,
-            sourcePrefix: 'weebcentral:',
-            minimumScore: allowAdult ? .79 : .82,
-            ambiguityMargin: .025,
-          );
-          if (match != null) return match;
         }
+
+        final match = SourceMatching.bestMatchId(
+          canonical,
+          candidates,
+          sourcePrefix: 'weebcentral:',
+          minimumScore: .82,
+          ambiguityMargin: .025,
+        );
+        if (match != null) return match;
       } catch (_) {
         // A different title/alias or another source may still work.
       }

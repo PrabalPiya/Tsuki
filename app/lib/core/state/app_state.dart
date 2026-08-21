@@ -50,7 +50,7 @@ class UserLibraryController extends StateNotifier<UserLibraryState> {
   }
 
   Future<void> toggleBookmark(Manga manga) async {
-    if (manga.isAdult) return;
+    if (!manga.isFriendlyContent) return;
     final next = {...state.bookmarks};
     final metadata = {...state.bookmarkedManga};
     if (!next.add(manga.id)) {
@@ -68,7 +68,7 @@ class UserLibraryController extends StateNotifier<UserLibraryState> {
   }
 
   Future<void> restoreBookmark(Manga manga) async {
-    if (manga.isAdult) return;
+    if (!manga.isFriendlyContent) return;
     final next = {...state.bookmarks, manga.id};
     final metadata = {...state.bookmarkedManga, manga.id: manga};
     state = state.copyWith(bookmarks: next, bookmarkedManga: metadata);
