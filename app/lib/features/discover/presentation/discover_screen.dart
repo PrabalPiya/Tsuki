@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -197,7 +198,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
             const Padding(
               padding: EdgeInsets.only(bottom: 8),
               child: Text(
-                'Preview Â· live rankings unavailable',
+                'Preview Ãƒâ€šÃ‚Â· live rankings unavailable',
                 style: TextStyle(color: AppColors.muted, fontSize: 12),
               ),
             ),
@@ -433,7 +434,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
             child: OneTimeHint(
               id: 'discover_swipe',
               icon: Icons.swipe_vertical_rounded,
-              text: 'Swipe up for next ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· down for previous',
+              text: 'Swipe up for next · down for previous',
             ),
           ),
         ],
@@ -943,6 +944,12 @@ class _DiscoverCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final marked = ref.watch(userLibraryProvider).bookmarks.contains(manga.id);
+    final cardAdultMode = ref.watch(adultModeProvider);
+    unawaited(
+      ref
+          .read(catalogProvider)
+          .prewarmChapters(manga, allowAdult: cardAdultMode),
+    );
 
     final periodLabel = ['Trending', 'Top Rated', 'Popular'][period];
 
@@ -974,7 +981,11 @@ class _DiscoverCard extends ConsumerWidget {
               color: AppColors.surface,
 
               child: InkWell(
-                onTap: () {
+                onTap: () async {
+                  await ref
+                      .read(catalogProvider)
+                      .prewarmChapters(manga, allowAdult: cardAdultMode);
+                  if (!context.mounted) return;
                   context.push('/manga/${Uri.encodeComponent(manga.id)}');
                 },
 
@@ -1121,59 +1132,35 @@ class _DiscoverCard extends ConsumerWidget {
                                   Expanded(
                                     child: _InfoChip(
                                       icon: Icons.star_rounded,
-
                                       label: manga.ratingLabel,
                                     ),
                                   ),
-
-                                  const SizedBox(width: 6),
-
+                                  const SizedBox(width: 5),
                                   Expanded(
                                     child: _InfoChip(
                                       icon: Icons.bolt_rounded,
-
                                       label: manga.statusLabel,
                                     ),
                                   ),
-
-                                  const SizedBox(width: 6),
-
+                                  const SizedBox(width: 5),
                                   Expanded(
                                     child: _InfoChip(
                                       icon: Icons.library_books_rounded,
-
                                       label: '$chapterLabel chp',
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Expanded(
+                                    child: _InfoChip(
+                                      icon: Icons.category_rounded,
+                                      label: manga.genres.isEmpty
+                                          ? '—'
+                                          : manga.genres.first,
                                     ),
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 8),
-
-                              Text(
-                                manga.compactIdentityLabel,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: AppColors.muted,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-
-                              if (manga.displayGenres.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  manga.displayGenres.take(2).join(' â€¢ '),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: AppColors.muted,
-                                    fontSize: 10.5,
-                                  ),
-                                ),
-                              ],
-
-                              const SizedBox(height: 10),
+                              const SizedBox(height: 12),
 
                               /*
                                * SYNOPSIS
@@ -1185,7 +1172,7 @@ class _DiscoverCard extends ConsumerWidget {
 
                                 textAlign: TextAlign.justify,
 
-                                maxLines: 3,
+                                maxLines: 4,
 
                                 overflow: TextOverflow.ellipsis,
 

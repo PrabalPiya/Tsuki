@@ -1,17 +1,6 @@
 import '../../../core/models/manga.dart';
 
-enum MangaBrowseFormat { all, manga, oneShot, novel }
-
-enum MangaBrowseStatus {
-  all,
-  ongoing,
-  completed,
-  hiatus,
-  cancelled,
-  notYetReleased,
-}
-
-enum MangaBrowseCountry { all, japan, southKorea, china, taiwan }
+enum MangaBrowseStatus { all, ongoing, completed, hiatus, cancelled }
 
 enum MangaBrowseSort {
   relevance,
@@ -23,16 +12,17 @@ enum MangaBrowseSort {
   chapters,
 }
 
+/// Minimal browse request used by Tsuki Search.
+///
+/// Keep this intentionally small so the filter UI and metadata backend stay in
+/// lockstep: genre, sort, status, and minimum chapters are the only exposed
+/// filters. A blank [query] is valid when at least one filter/sort is active.
 class MangaBrowseRequest {
   const MangaBrowseRequest({
     this.query = '',
     required this.adultOnly,
-    this.format = MangaBrowseFormat.all,
     this.status = MangaBrowseStatus.all,
-    this.country = MangaBrowseCountry.all,
     this.genres = const <String>{},
-    this.year,
-    this.minimumRating,
     this.minimumChapters,
     this.sort = MangaBrowseSort.relevance,
     this.page = 1,
@@ -41,24 +31,16 @@ class MangaBrowseRequest {
 
   final String query;
   final bool adultOnly;
-  final MangaBrowseFormat format;
   final MangaBrowseStatus status;
-  final MangaBrowseCountry country;
   final Set<String> genres;
-  final int? year;
-  final int? minimumRating;
   final int? minimumChapters;
   final MangaBrowseSort sort;
   final int page;
   final int perPage;
 
   bool get hasFilters =>
-      format != MangaBrowseFormat.all ||
       status != MangaBrowseStatus.all ||
-      country != MangaBrowseCountry.all ||
       genres.isNotEmpty ||
-      year != null ||
-      minimumRating != null ||
       minimumChapters != null ||
       sort != MangaBrowseSort.relevance;
 }
@@ -69,10 +51,10 @@ abstract interface class MetadataProvider {
   Future<Manga?> getById(String id);
 }
 
-/// Optional richer metadata capability used by Search filters.
+/// Optional richer metadata capability used by filter-only browsing.
 ///
-/// Keeping this separate from [MetadataProvider] preserves compatibility with
-/// simple/test metadata implementations that only support title search.
+/// Kept separate from [MetadataProvider] so lightweight test/demo providers do
+/// not need to implement catalogue browsing.
 abstract interface class BrowseMetadataProvider {
   Future<List<Manga>> browse(MangaBrowseRequest request);
 }
@@ -83,6 +65,7 @@ abstract interface class SynopsisService {
 
 class DeterministicSynopsisService implements SynopsisService {
   const DeterministicSynopsisService();
+
   @override
   String summarize(String rawDescription) {
     final plain = rawDescription
@@ -91,11 +74,12 @@ class DeterministicSynopsisService implements SynopsisService {
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
     if (plain.isEmpty) return 'Synopsis unavailable.';
+
     final sentences = plain
         .split(RegExp(r'(?<=[.!?])\s+'))
-        .where((v) => v.length > 20)
+        .where((value) => value.length > 20)
         .take(8)
-        .toList();
+        .toList(growable: false);
     final selected = sentences.isEmpty ? plain : sentences.join(' ');
     return selected.length <= 1000
         ? selected

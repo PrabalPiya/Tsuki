@@ -303,17 +303,7 @@ class _Details extends ConsumerWidget {
 
           /* CHAPTER CONTENT */
           chaptersAsync.when(
-            loading: () {
-              return SliverToBoxAdapter(
-                child: Transform.translate(
-                  offset: const Offset(0, _chapterSectionOffset),
-                  child: const SizedBox(
-                    height: 150,
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
-                ),
-              );
-            },
+            loading: () => const SliverToBoxAdapter(child: SizedBox(height: 1)),
 
             error: (error, stackTrace) {
               return SliverToBoxAdapter(
@@ -626,7 +616,7 @@ class _MangaHero extends StatelessWidget {
       text: TextSpan(text: title, style: titleStyle),
       textDirection: TextDirection.ltr,
       maxLines: 2,
-      ellipsis: 'ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦',
+      ellipsis: '…',
     )..layout(maxWidth: contentWidth);
 
     final synopsisPainter = TextPainter(
@@ -656,7 +646,6 @@ class _MangaHero extends StatelessWidget {
         titlePainter.height +
         _heroTitleToInfoSpacing +
         34 +
-        42 +
         _heroInfoToSynopsisSpacing +
         synopsisPainter.height +
         _heroSynopsisToActionsSpacing +
@@ -808,57 +797,29 @@ class _MangaHero extends StatelessWidget {
                         label: manga.ratingLabel,
                       ),
                     ),
-
-                    const SizedBox(width: 14),
-
+                    const SizedBox(width: 6),
                     Expanded(
                       child: _InfoChip(
                         icon: Icons.bolt_rounded,
                         label: manga.statusLabel,
                       ),
                     ),
-
-                    const SizedBox(width: 14),
-
+                    const SizedBox(width: 6),
                     Expanded(
                       child: _InfoChip(
                         icon: Icons.library_books_rounded,
                         label: '$chapterCountLabel chp',
                       ),
                     ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: _InfoChip(
+                        icon: Icons.category_rounded,
+                        label: manga.genres.isEmpty ? '—' : manga.genres.first,
+                      ),
+                    ),
                   ],
                 ),
-
-                const SizedBox(height: 9),
-
-                Text(
-                  manga.compactIdentityLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: .82),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-
-                const SizedBox(height: 4),
-
-                Text(
-                  <String>[
-                    if (manga.volumeCount > 0) '${manga.volumeCount} volumes',
-                    if ((manga.popularity ?? 0) > 0)
-                      'Popularity ${manga.popularityLabel}',
-                    ...manga.displayGenres.take(2),
-                  ].join(' â€¢ '),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: .70),
-                    fontSize: 11,
-                  ),
-                ),
-
                 const SizedBox(height: _heroInfoToSynopsisSpacing),
 
                 /* SYNOPSIS */

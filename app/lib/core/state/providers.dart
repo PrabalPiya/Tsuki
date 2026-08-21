@@ -17,6 +17,8 @@ import '../../features/reader/data/comick_source.dart';
 import '../../features/reader/data/hitomi_source.dart';
 import '../../features/reader/data/mangadex_source.dart';
 import '../../features/reader/data/mangapill_source.dart';
+import '../../features/reader/data/manhwa18cc_source.dart';
+import '../../features/reader/data/manhwa18net_source.dart';
 import '../../features/reader/data/omega_scans_source.dart';
 import '../../features/reader/data/weebcentral_source.dart';
 import '../../features/reader/data/webtoon_xyz_source.dart';
@@ -73,6 +75,12 @@ final toon18Provider = Provider<AdultMadaraSource>(
 final comicKProvider = Provider<ComicKSource>((ref) => ComicKSource());
 final hitomiProvider = Provider<HitomiSource>((ref) => HitomiSource());
 final mangaPillProvider = Provider<MangaPillSource>((ref) => MangaPillSource());
+final manhwa18CcProvider = Provider<Manhwa18CcSource>(
+  (ref) => Manhwa18CcSource(),
+);
+final manhwa18NetProvider = Provider<Manhwa18NetSource>(
+  (ref) => Manhwa18NetSource(),
+);
 final omegaScansProvider = Provider<OmegaScansSource>(
   (ref) => OmegaScansSource(),
 );
@@ -97,6 +105,8 @@ final catalogProvider = Provider<CatalogRepository>((ref) {
     comicK: ref.watch(comicKProvider),
     hitomi: ref.watch(hitomiProvider),
     mangaPill: ref.watch(mangaPillProvider),
+    manhwa18Cc: ref.watch(manhwa18CcProvider),
+    manhwa18Net: ref.watch(manhwa18NetProvider),
     omegaScans: ref.watch(omegaScansProvider),
     weebCentral: ref.watch(weebCentralProvider),
     webtoonXyz: ref.watch(webtoonXyzProvider),
@@ -155,6 +165,11 @@ final chapterProvider = StreamProvider.autoDispose
       final adultMode = ref.watch(adultModeProvider);
       final repository = ref.watch(catalogProvider);
       final controller = StreamController<List<CanonicalChapter>>();
+
+      final memory = repository.memoryChapters(manga, allowAdult: adultMode);
+      if (memory != null && memory.isNotEmpty) {
+        controller.add(memory);
+      }
 
       Future<void> emitLocal() async {
         final updated = await repository.localChapters(
@@ -226,7 +241,10 @@ final rankingsProvider = FutureProvider.autoDispose
           .where((manga) => manga.isAdult == adultMode)
           .toList(growable: false);
 
-      for (final manga in filtered.take(4)) {
+      for (final manga in filtered.take(2)) {
+        unawaited(catalog.prewarmChapters(manga, allowAdult: adultMode));
+      }
+      for (final manga in filtered.skip(2).take(4)) {
         unawaited(catalog.primeChapterSummary(manga, allowAdult: adultMode));
       }
 

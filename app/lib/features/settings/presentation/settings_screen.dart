@@ -25,8 +25,8 @@ class SettingsScreen extends ConsumerWidget {
                 icon: Icons.shield_moon_rounded,
                 title: 'Adult content',
                 subtitle: state.adultContent
-                    ? 'Only 18+ manga are shown.'
-                    : '18+ manga are hidden.',
+                    ? 'Show only 18+ manga.'
+                    : 'Hide 18+ manga.',
                 value: state.adultContent,
                 onChanged: ref
                     .read(userLibraryProvider.notifier)
@@ -172,9 +172,10 @@ class SettingsScreen extends ConsumerWidget {
 }
 
 class _SmoothModeSwitch extends StatefulWidget {
-  const _SmoothModeSwitch({required this.value});
+  const _SmoothModeSwitch({required this.value, required this.onChanged});
 
   final bool value;
+  final ValueChanged<bool> onChanged;
 
   @override
   State<_SmoothModeSwitch> createState() => _SmoothModeSwitchState();
@@ -183,32 +184,40 @@ class _SmoothModeSwitch extends StatefulWidget {
 class _SmoothModeSwitchState extends State<_SmoothModeSwitch>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
-  late final Animation<double> _curve;
+  bool _busy = false;
 
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 420),
+      duration: const Duration(milliseconds: 500),
+      reverseDuration: const Duration(milliseconds: 500),
       value: widget.value ? 1 : 0,
-    );
-    _curve = CurvedAnimation(
-      parent: _controller,
-      curve: const Cubic(0.22, 0.61, 0.36, 1),
-      reverseCurve: const Cubic(0.22, 0.61, 0.36, 1),
     );
   }
 
   @override
   void didUpdateWidget(covariant _SmoothModeSwitch oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.value != widget.value) {
-      _controller.animateTo(
-        widget.value ? 1 : 0,
-        duration: const Duration(milliseconds: 420),
-        curve: Curves.linear,
+    if (_busy || oldWidget.value == widget.value) return;
+    _animateTo(widget.value);
+  }
+
+  Future<void> _animateTo(bool next) async {
+    if (_busy) return;
+    _busy = true;
+    try {
+      await _controller.animateTo(
+        next ? 1 : 0,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOutCubic,
       );
+      if (mounted && widget.value != next) {
+        widget.onChanged(next);
+      }
+    } finally {
+      _busy = false;
     }
   }
 
@@ -221,60 +230,63 @@ class _SmoothModeSwitchState extends State<_SmoothModeSwitch>
   @override
   Widget build(BuildContext context) {
     return Semantics(
+      button: true,
       toggled: widget.value,
       label: 'Adult content',
-      child: IgnorePointer(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _busy ? null : () => _animateTo(!widget.value),
         child: AnimatedBuilder(
-          animation: _curve,
+          animation: _controller,
           builder: (context, _) {
-            final t = _curve.value;
+            final t = Curves.easeInOutCubic.transform(_controller.value);
             final track = Color.lerp(AppColors.raised, AppColors.accent, t)!;
             final border = Color.lerp(
               AppColors.outline,
-              AppColors.accent.withValues(alpha: .76),
+              AppColors.accent.withValues(alpha: .82),
               t,
             )!;
             final knob = Color.lerp(AppColors.text, AppColors.background, t)!;
 
-            return Container(
-              width: 54,
-              height: 31,
-              padding: const EdgeInsets.all(3),
-              decoration: BoxDecoration(
-                color: track,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: border),
-                boxShadow: t <= .01
-                    ? const <BoxShadow>[]
-                    : <BoxShadow>[
-                        BoxShadow(
-                          color: AppColors.accent.withValues(alpha: .18 * t),
-                          blurRadius: 12 * t,
+            return SizedBox(
+              width: 58,
+              height: 34,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: track,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: border),
+                  boxShadow: [
+                    if (t > .02)
+                      BoxShadow(
+                        color: AppColors.accent.withValues(alpha: .16 * t),
+                        blurRadius: 14 * t,
+                      ),
+                  ],
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(3),
+                  child: Stack(
+                    children: [
+                      Transform.translate(
+                        offset: Offset(26 * t, 0),
+                        child: Container(
+                          width: 26,
+                          height: 26,
+                          decoration: BoxDecoration(
+                            color: knob,
+                            shape: BoxShape.circle,
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x55000000),
+                                blurRadius: 6,
+                                offset: Offset(0, 2),
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
-              ),
-              child: Align(
-                alignment: Alignment.lerp(
-                  Alignment.centerLeft,
-                  Alignment.centerRight,
-                  t,
-                )!,
-                child: Transform.scale(
-                  scale: .94 + (.06 * (1 - (2 * t - 1).abs())),
-                  child: Container(
-                    width: 25,
-                    height: 25,
-                    decoration: BoxDecoration(
-                      color: knob,
-                      shape: BoxShape.circle,
-                      boxShadow: const <BoxShadow>[
-                        BoxShadow(
-                          color: Color(0x55000000),
-                          blurRadius: 5,
-                          offset: Offset(0, 2),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -486,8 +498,7 @@ class _SwitchRow extends StatelessWidget {
       icon: icon,
       title: title,
       subtitle: subtitle,
-      trailing: _SmoothModeSwitch(value: value),
-      onTap: () => onChanged(!value),
+      trailing: _SmoothModeSwitch(value: value, onChanged: onChanged),
     );
   }
 }

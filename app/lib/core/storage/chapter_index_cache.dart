@@ -23,7 +23,7 @@ class ChapterIndexCache {
   // v6 invalidates all earlier partial/wrong source mappings and indexes.
   static const _version = 6;
   static const _chapterPrefix = 'tsuki.chapterIndex.v6.';
-  static const _mappingPrefix = 'tsuki.sourceMapping.v10.';
+  static const _mappingPrefix = 'tsuki.sourceMapping.release1.';
   static const _checkedPrefix = 'tsuki.chapterChecked.v6.';
   static const _deepCheckedPrefix = 'tsuki.chapterDeepChecked.v6.';
   static const _summaryPrefix = 'tsuki.chapterSummary.v6.';
@@ -55,11 +55,11 @@ class ChapterIndexCache {
       // Normal-mode summaries remain compatible, but adult summaries from
       // V6-V8 may have been produced by the broken adult resolver. Ignore
       // those old adult keys during startup so they cannot repopulate the
-      // global registry before the V11 adult index is checked.
+      // global registry before the release adult index is checked.
       final cacheKey = key.substring(_summaryPrefix.length);
       if (cacheKey.contains('|adult:') &&
           !cacheKey.endsWith('|adult:false') &&
-          !cacheKey.endsWith('|adult:v11')) {
+          !cacheKey.endsWith('|adult:release1')) {
         continue;
       }
 

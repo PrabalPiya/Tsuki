@@ -31,8 +31,9 @@ class _BrowseMetadata implements MetadataProvider, BrowseMetadataProvider {
         coverUrl: '',
         synopsis: '',
         status: MangaStatus.completed,
-        chapterCount: 20,
+        chapterCount: 42,
         rating: 8.8,
+        genres: ['Drama'],
       ),
     ];
   }
@@ -59,20 +60,48 @@ void main() {
 
     controller.updateFilters(
       const SearchFilters(
-        minimumRating: 8,
+        genre: 'Drama',
+        status: MangaBrowseStatus.completed,
         minimumChapters: 25,
         sort: MangaBrowseSort.rating,
       ),
     );
     await controller.applyFilters();
 
-    expect(metadata.lastRequest, isNotNull);
-    expect(metadata.lastRequest!.query, isEmpty);
-    expect(metadata.lastRequest!.minimumRating, 8);
-    expect(metadata.lastRequest!.minimumChapters, 25);
-    expect(metadata.lastRequest!.sort, MangaBrowseSort.rating);
+    final request = metadata.lastRequest;
+    expect(request, isNotNull);
+    expect(request!.query, isEmpty);
+    expect(request.genres, {'Drama'});
+    expect(request.status, MangaBrowseStatus.completed);
+    expect(request.minimumChapters, 25);
+    expect(request.sort, MangaBrowseSort.rating);
     expect(controller.state.results.single.title, 'Filtered Manga');
 
+    controller.dispose();
+  });
+
+  test('default filters do not create an empty-query browse request', () async {
+    final metadata = _BrowseMetadata();
+    const config = AppConfig(
+      environment: AppEnvironment.development,
+      useDemoData: true,
+      firebaseProjectId: '',
+      firebaseAppId: '',
+      firebaseApiKey: '',
+      firebaseMessagingSenderId: '',
+      backendBaseUrl: '',
+    );
+    final repository = CatalogRepository(
+      config: config,
+      metadata: metadata,
+      mangaDex: MangaDexSource(),
+    );
+    final controller = SearchController(repository, adultOnly: false);
+
+    await controller.applyFilters();
+
+    expect(metadata.lastRequest, isNull);
+    expect(controller.state.results, isEmpty);
     controller.dispose();
   });
 }

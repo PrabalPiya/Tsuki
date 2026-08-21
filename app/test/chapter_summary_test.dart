@@ -64,11 +64,12 @@ void main() {
     expect(manga.chapterDisplayLabel, '—');
   });
 
-  test('startup ignores stale pre-V11 adult summaries', () async {
+  test('startup ignores stale pre-release adult summaries', () async {
     SharedPreferences.setMockInitialValues({
       'tsuki.chapterSummary.v6.anilist:adult-old|adult:v8': '{"version":6,"mangaId":"anilist:adult-old","count":0,"latestNumber":88}',
       'tsuki.chapterSummary.v6.anilist:adult-v9|adult:v9': '{"version":6,"mangaId":"anilist:adult-v9","count":17,"latestNumber":17}',
       'tsuki.chapterSummary.v6.anilist:adult-v10|adult:v10': '{"version":6,"mangaId":"anilist:adult-v10","count":22,"latestNumber":22}',
+      'tsuki.chapterSummary.v6.anilist:adult-v11|adult:v11': '{"version":6,"mangaId":"anilist:adult-v11","count":30,"latestNumber":30}',
     });
     MangaChapterRegistry.clear();
 
@@ -77,6 +78,7 @@ void main() {
     expect(MangaChapterRegistry.summaryFor('anilist:adult-old'), isNull);
     expect(MangaChapterRegistry.summaryFor('anilist:adult-v9'), isNull);
     expect(MangaChapterRegistry.summaryFor('anilist:adult-v10'), isNull);
+    expect(MangaChapterRegistry.summaryFor('anilist:adult-v11'), isNull);
   });
 
   test('verified latest chapter survives app-style cache warm-up', () async {

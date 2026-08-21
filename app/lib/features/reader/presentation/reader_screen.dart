@@ -628,14 +628,20 @@ class _ReaderPageState extends State<_ReaderPage> {
     listener = ImageStreamListener(
       (info, _) {
         stream.removeListener(listener);
-        final ratio = info.image.width / info.image.height;
-        if (mounted && ratio.isFinite && ratio > 0) {
-          widget.onAspectRatio(ratio);
+        final raw = info.image.width / info.image.height;
+        if (!mounted || !raw.isFinite || raw <= 0) return;
+
+        // Keep pathological metadata from producing a zero-height or enormous
+        // reader item while preserving real double-page spreads.
+        final ratio = raw.clamp(.18, 5.0).toDouble();
+        widget.onAspectRatio(ratio);
+        if ((_aspectRatio - ratio).abs() > .001) {
           setState(() => _aspectRatio = ratio);
         }
       },
       onError: (_, __) {
         stream.removeListener(listener);
+        _resolving = false;
       },
     );
     stream.addListener(listener);
@@ -651,64 +657,82 @@ class _ReaderPageState extends State<_ReaderPage> {
 
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.sizeOf(context).width;
-    final height = width / _aspectRatio;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewportWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        final height = viewportWidth / _aspectRatio;
 
-    if (widget.url.startsWith('demo://')) {
-      return SizedBox(
-        height: height,
-        child: ColoredBox(
-          color: widget.page.isEven ? const Color(0xFFF4F4F4) : Colors.white,
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.auto_stories_outlined,
-                  size: 54,
-                  color: AppColors.muted,
+        if (widget.url.startsWith('demo://')) {
+          return SizedBox(
+            width: viewportWidth,
+            height: height,
+            child: ColoredBox(
+              color: widget.page.isEven
+                  ? const Color(0xFFF4F4F4)
+                  : Colors.white,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.auto_stories_outlined,
+                      size: 54,
+                      color: AppColors.muted,
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Synthetic preview page ${widget.page}',
+                      style: const TextStyle(color: AppColors.muted),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 14),
-                Text(
-                  'Synthetic preview page ${widget.page}',
-                  style: const TextStyle(color: AppColors.muted),
-                ),
-              ],
+              ),
+            ),
+          );
+        }
+
+        final decodeWidth =
+            (viewportWidth * MediaQuery.devicePixelRatioOf(context)).round();
+
+        return AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            width: viewportWidth,
+            height: height,
+            child: CachedNetworkImage(
+              imageUrl: widget.url,
+              httpHeaders: _sourceImageHeaders(widget.sourceId),
+              cacheManager: MangaImageCache.instance,
+              memCacheWidth: decodeWidth,
+              imageBuilder: (_, provider) {
+                _resolveAspect(provider);
+                return _ZoomablePage(imageProvider: provider);
+              },
+              fadeInDuration: const Duration(milliseconds: 100),
+              placeholder: (_, __) => const ColoredBox(
+                color: AppColors.background,
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              ),
+              errorWidget: (_, __, ___) {
+                _reportLoadError();
+                return const ColoredBox(
+                  color: AppColors.background,
+                  child: Center(
+                    child: Text(
+                      'Trying another source…',
+                      style: TextStyle(color: AppColors.muted),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
-        ),
-      );
-    }
-
-    final decodeWidth = (width * MediaQuery.devicePixelRatioOf(context))
-        .round();
-    return SizedBox(
-      width: double.infinity,
-      child: AspectRatio(
-        aspectRatio: _aspectRatio,
-        child: CachedNetworkImage(
-          imageUrl: widget.url,
-          httpHeaders: _sourceImageHeaders(widget.sourceId),
-          cacheManager: MangaImageCache.instance,
-          memCacheWidth: decodeWidth,
-          imageBuilder: (_, provider) {
-            _resolveAspect(provider);
-            return _ZoomablePage(imageProvider: provider);
-          },
-          fadeInDuration: const Duration(milliseconds: 120),
-          placeholder: (_, __) =>
-              const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-          errorWidget: (_, __, ___) {
-            _reportLoadError();
-            return const Center(
-              child: Text(
-                'Trying another source…',
-                style: TextStyle(color: AppColors.muted),
-              ),
-            );
-          },
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -721,6 +745,8 @@ Map<String, String>? _sourceImageHeaders(String sourceId) {
     'comick' => 'https://comick.live/',
     'mangadex' => 'https://mangadex.org/',
     'omegascans' => 'https://omegascans.org/',
+    'manhwa18cc' => 'https://manhwa18.cc/',
+    'manhwa18net' => 'https://manhwa18.net/',
     'ero18x' => 'https://ero18x.com/',
     'toon18' => 'https://toon18.to/',
     'webtoonxyz' => 'https://www.webtoon.xyz/',

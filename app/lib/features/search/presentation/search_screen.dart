@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -17,14 +19,9 @@ class SearchScreen extends ConsumerStatefulWidget {
 }
 
 class _SearchScreenState extends ConsumerState<SearchScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final _controller = TextEditingController();
   final _focus = FocusNode();
-  final _yearController = TextEditingController();
-  late final AnimationController _filterController;
-  late final Animation<double> _filterCurve;
-  late final Animation<Offset> _filterSlide;
-  bool _filtersOpen = false;
 
   static const _genres = <String>[
     'Action',
@@ -34,9 +31,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
     'Ecchi',
     'Fantasy',
     'Horror',
-    'Mahou Shoujo',
-    'Mecha',
-    'Music',
     'Mystery',
     'Psychological',
     'Romance',
@@ -50,40 +44,56 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
   @override
   void initState() {
     super.initState();
-    _filterController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 340),
-      reverseDuration: const Duration(milliseconds: 280),
-    );
-    _filterCurve = CurvedAnimation(
-      parent: _filterController,
-      curve: const Cubic(0.22, 0.61, 0.36, 1),
-      reverseCurve: const Cubic(0.22, 0.61, 0.36, 1),
-    );
-    _filterSlide = Tween<Offset>(
-      begin: const Offset(0, -0.035),
-      end: Offset.zero,
-    ).animate(_filterCurve);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focus.requestFocus());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
   }
 
   @override
   void dispose() {
     _controller.dispose();
     _focus.dispose();
-    _yearController.dispose();
-    _filterController.dispose();
     super.dispose();
   }
 
-  void _toggleFilters() {
-    setState(() => _filtersOpen = !_filtersOpen);
-    if (_filtersOpen) {
-      _focus.unfocus();
-      _filterController.forward();
-    } else {
-      _filterController.reverse();
+  Future<void> _openFilters() async {
+    _focus.unfocus();
+    final current = ref.read(searchProvider).filters;
+    final animation = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 380),
+      reverseDuration: const Duration(milliseconds: 260),
+    );
+
+    final selected = await showModalBottomSheet<SearchFilters>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: .58),
+      isScrollControlled: false,
+      useSafeArea: true,
+      transitionAnimationController: animation,
+      builder: (sheetContext) =>
+          _FilterSheet(initial: current, genres: _genres),
+    );
+    animation.dispose();
+
+    if (!mounted || selected == null) return;
+    final notifier = ref.read(searchProvider.notifier);
+    notifier.updateFilters(selected);
+    await notifier.applyFilters();
+  }
+
+  Future<void> _openManga(Manga manga) async {
+    final adultMode = ref.read(adultModeProvider);
+    try {
+      await ref
+          .read(catalogProvider)
+          .prewarmChapters(manga, allowAdult: adultMode);
+    } catch (_) {
+      // Details still has source fallback/error handling.
     }
+    if (!mounted) return;
+    context.push('/manga/${Uri.encodeComponent(manga.id)}');
   }
 
   @override
@@ -97,9 +107,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _controller.clear();
-        _yearController.clear();
-        _filtersOpen = false;
-        _filterController.value = 0;
         setState(() {});
       });
     });
@@ -122,7 +129,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
             child: TextField(
               controller: _controller,
               focusNode: _focus,
@@ -140,9 +147,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     _FilterButton(
-                      active: _filtersOpen,
                       count: state.filters.activeCount,
-                      onPressed: _toggleFilters,
+                      onPressed: _openFilters,
                     ),
                     if (_controller.text.isNotEmpty)
                       IconButton(
@@ -159,57 +165,48 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
               ),
             ),
           ),
-          ClipRect(
-            child: SizeTransition(
-              sizeFactor: _filterCurve,
-              axisAlignment: -1,
-              child: FadeTransition(
-                opacity: _filterCurve,
-                child: SlideTransition(
-                  position: _filterSlide,
-                  child: _FilterPanel(
-                    filters: state.filters,
-                    adultMode: adultMode,
-                    genres: _genres,
-                    yearController: _yearController,
-                    onChanged: notifier.updateFilters,
-                    onApply: () async {
-                      _focus.unfocus();
-                      if (mounted) {
-                        setState(() => _filtersOpen = false);
-                        await _filterController.reverse();
-                      }
-                      await notifier.applyFilters();
-                    },
-                    onReset: () async {
-                      _yearController.clear();
-                      await notifier.clearFilters();
-                    },
-                  ),
-                ),
-              ),
-            ),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child: state.loading
+                ? const LinearProgressIndicator(
+                    key: ValueKey('search-progress'),
+                    minHeight: 2,
+                  )
+                : const SizedBox(key: ValueKey('search-idle'), height: 2),
           ),
-          if (state.loading) const LinearProgressIndicator(minHeight: 2),
           if (state.error != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-              child: Text(
-                state.error!,
-                style: const TextStyle(color: AppColors.muted),
+              padding: const EdgeInsets.fromLTRB(18, 10, 18, 2),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.cloud_off_rounded,
+                    color: AppColors.muted,
+                    size: 17,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      state.error!,
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: notifier.submit,
+                    child: const Text('Retry'),
+                  ),
+                ],
               ),
             ),
           Expanded(
             child: !state.hasBrowseRequest
                 ? _SearchHint(adultMode: adultMode)
-                : state.query.trim().length < 2 &&
-                      state.filters.hasActive &&
-                      !state.submitted &&
-                      state.results.isEmpty
-                ? const _FilterReadyHint()
                 : state.results.isEmpty && !state.loading
                 ? const _NoResults()
-                : state.submitted
+                : state.submitted || state.query.trim().length < 2
                 ? _buildResultGrid(state.results)
                 : _buildSuggestionList(state.results),
           ),
@@ -218,534 +215,495 @@ class _SearchScreenState extends ConsumerState<SearchScreen>
     );
   }
 
-  Widget _buildSuggestionList(List<Manga> items) => ListView.separated(
-    padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-    itemCount: items.length,
-    separatorBuilder: (_, __) => const SizedBox(height: 10),
-    itemBuilder: (context, index) {
-      final manga = items[index];
-      final chapterLabel =
-          ref.watch(chapterSummaryLabelProvider(manga)).valueOrNull ??
-          manga.chapterDisplayLabel;
-      return Card(
-        child: ListTile(
-          minVerticalPadding: 10,
-          leading: SizedBox(
-            width: 52,
-            child: CoverArt(
-              url: manga.coverUrl,
-              title: manga.title,
-              borderRadius: 10,
-            ),
-          ),
-          title: Text(
-            manga.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 3),
-              Text(
-                manga.compactIdentityLabel,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11, color: AppColors.muted),
+  Widget _buildSuggestionList(List<Manga> items) {
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+      itemCount: items.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (context, index) {
+        final manga = items[index];
+        final adultMode = ref.read(adultModeProvider);
+        unawaited(
+          ref
+              .read(catalogProvider)
+              .prewarmChapters(manga, allowAdult: adultMode),
+        );
+        final chapterLabel =
+            ref.watch(chapterSummaryLabelProvider(manga)).valueOrNull ??
+            manga.chapterDisplayLabel;
+        return Card(
+          child: ListTile(
+            minVerticalPadding: 10,
+            leading: SizedBox(
+              width: 52,
+              child: CoverArt(
+                url: manga.coverUrl,
+                title: manga.title,
+                borderRadius: 10,
               ),
-              const SizedBox(height: 5),
-              Wrap(
+            ),
+            title: Text(
+              manga.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 7),
+              child: Wrap(
                 spacing: 8,
-                runSpacing: 4,
+                runSpacing: 5,
                 children: [
                   _TinyMeta(Icons.star_rounded, manga.ratingLabel),
                   _TinyMeta(Icons.bolt_rounded, manga.statusLabel),
                   _TinyMeta(Icons.library_books_rounded, '$chapterLabel chp'),
+                  _TinyMeta(
+                    Icons.category_rounded,
+                    manga.genres.isEmpty ? '—' : manga.genres.first,
+                  ),
+                ],
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => _openManga(manga),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildResultGrid(List<Manga> items) {
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 22),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisExtent: 382,
+        crossAxisSpacing: 14,
+        mainAxisSpacing: 18,
+      ),
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final manga = items[index];
+        final adultMode = ref.read(adultModeProvider);
+        if (index < 8) {
+          unawaited(
+            ref
+                .read(catalogProvider)
+                .prewarmChapters(manga, allowAdult: adultMode),
+          );
+        }
+        final chapterLabel =
+            ref.watch(chapterSummaryLabelProvider(manga)).valueOrNull ??
+            manga.chapterDisplayLabel;
+
+        return InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () => _openManga(manga),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: CoverArt(url: manga.coverUrl, title: manga.title),
+              ),
+              const SizedBox(height: 9),
+              Text(
+                manga.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 7),
+              Wrap(
+                spacing: 7,
+                runSpacing: 5,
+                children: [
+                  _TinyMeta(Icons.star_rounded, manga.ratingLabel),
+                  _TinyMeta(Icons.bolt_rounded, manga.statusLabel),
+                  _TinyMeta(Icons.library_books_rounded, '$chapterLabel chp'),
+                  _TinyMeta(
+                    Icons.category_rounded,
+                    manga.genres.isEmpty ? '—' : manga.genres.first,
+                  ),
                 ],
               ),
             ],
           ),
-          trailing: const Icon(Icons.chevron_right_rounded),
-          onTap: () => context.push('/manga/${Uri.encodeComponent(manga.id)}'),
-        ),
-      );
-    },
-  );
-
-  Widget _buildResultGrid(List<Manga> items) => GridView.builder(
-    padding: const EdgeInsets.fromLTRB(16, 12, 16, 22),
-    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-      crossAxisCount: 2,
-      mainAxisExtent: 390,
-      crossAxisSpacing: 14,
-      mainAxisSpacing: 18,
-    ),
-    itemCount: items.length,
-    itemBuilder: (context, index) {
-      final manga = items[index];
-      final chapterLabel =
-          ref.watch(chapterSummaryLabelProvider(manga)).valueOrNull ??
-          manga.chapterDisplayLabel;
-      return InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: () => context.push('/manga/${Uri.encodeComponent(manga.id)}'),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AspectRatio(
-              aspectRatio: .68,
-              child: CoverArt(url: manga.coverUrl, title: manga.title),
-            ),
-            const SizedBox(height: 9),
-            Text(
-              manga.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              manga.compactIdentityLabel,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: AppColors.muted),
-            ),
-            const SizedBox(height: 5),
-            Wrap(
-              spacing: 7,
-              runSpacing: 4,
-              children: [
-                _TinyMeta(Icons.star_rounded, manga.ratingLabel),
-                _TinyMeta(Icons.library_books_rounded, '$chapterLabel chp'),
-              ],
-            ),
-            const SizedBox(height: 5),
-            Text(
-              manga.statusLabel,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: AppColors.muted),
-            ),
-            if (manga.displayGenres.isNotEmpty) ...[
-              const SizedBox(height: 5),
-              Text(
-                manga.displayGenres.take(2).join(' • '),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 10, color: AppColors.muted),
-              ),
-            ],
-          ],
-        ),
-      );
-    },
-  );
+        );
+      },
+    );
+  }
 }
 
 class _FilterButton extends StatelessWidget {
-  const _FilterButton({
-    required this.active,
-    required this.count,
-    required this.onPressed,
-  });
+  const _FilterButton({required this.count, required this.onPressed});
 
-  final bool active;
   final int count;
   final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context) => Stack(
-    clipBehavior: Clip.none,
-    children: [
-      IconButton(
-        onPressed: onPressed,
-        icon: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 220),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeInCubic,
-          transitionBuilder: (child, animation) => FadeTransition(
-            opacity: animation,
-            child: ScaleTransition(
-              scale: Tween<double>(begin: .86, end: 1).animate(animation),
-              child: child,
-            ),
-          ),
-          child: Icon(
-            active ? Icons.tune_rounded : Icons.tune_outlined,
-            key: ValueKey<bool>(active),
-            color: active || count > 0 ? AppColors.accent : null,
-          ),
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        IconButton(
+          onPressed: onPressed,
+          icon: const Icon(Icons.tune_rounded),
+          tooltip: 'Filters',
         ),
-        tooltip: 'Filters',
-      ),
-      if (count > 0)
-        Positioned(
-          right: 5,
-          top: 3,
-          child: Container(
-            constraints: const BoxConstraints(minWidth: 17, minHeight: 17),
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            decoration: const BoxDecoration(
-              color: AppColors.accent,
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              '$count',
-              style: const TextStyle(
-                color: AppColors.background,
-                fontSize: 9,
-                fontWeight: FontWeight.w900,
+        if (count > 0)
+          Positioned(
+            top: 2,
+            right: 2,
+            child: Container(
+              width: 17,
+              height: 17,
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(
+                color: AppColors.accent,
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                '$count',
+                style: const TextStyle(
+                  color: AppColors.background,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
             ),
           ),
-        ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
-class _FilterPanel extends StatelessWidget {
-  const _FilterPanel({
-    required this.filters,
-    required this.adultMode,
-    required this.genres,
-    required this.yearController,
-    required this.onChanged,
-    required this.onApply,
-    required this.onReset,
-  });
+class _FilterSheet extends StatefulWidget {
+  const _FilterSheet({required this.initial, required this.genres});
 
-  final SearchFilters filters;
-  final bool adultMode;
+  final SearchFilters initial;
   final List<String> genres;
-  final TextEditingController yearController;
-  final ValueChanged<SearchFilters> onChanged;
-  final VoidCallback onApply;
-  final VoidCallback onReset;
+
+  @override
+  State<_FilterSheet> createState() => _FilterSheetState();
+}
+
+class _FilterSheetState extends State<_FilterSheet> {
+  late SearchFilters _filters;
+
+  @override
+  void initState() {
+    super.initState();
+    _filters = widget.initial;
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.outline),
-      ),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * .52,
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: EdgeInsets.fromLTRB(18, 10, 18, 16 + bottom),
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+          border: Border(top: BorderSide(color: AppColors.outline)),
         ),
-        child: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      adultMode ? 'Filter adult manga' : 'Filter manga',
-                      style: const TextStyle(fontWeight: FontWeight.w900),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 38,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.outline,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Filters',
+                    style: TextStyle(
+                      color: AppColors.text,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
                     ),
                   ),
-                  if (filters.activeCount > 0)
-                    TextButton(onPressed: onReset, child: const Text('Reset')),
-                ],
-              ),
-              const SizedBox(height: 4),
-              _FilterSection(
-                title: 'Sort',
-                child: _HorizontalChoices(
-                  children: MangaBrowseSort.values.map((value) {
-                    return ChoiceChip(
-                      label: Text(_sortLabel(value)),
-                      selected: filters.sort == value,
-                      onSelected: (_) =>
-                          onChanged(filters.copyWith(sort: value)),
-                    );
-                  }).toList(),
                 ),
-              ),
-              _FilterSection(
-                title: 'Format',
-                child: _HorizontalChoices(
-                  children: MangaBrowseFormat.values.map((value) {
-                    return ChoiceChip(
-                      label: Text(_formatLabel(value)),
-                      selected: filters.format == value,
-                      onSelected: (_) =>
-                          onChanged(filters.copyWith(format: value)),
-                    );
-                  }).toList(),
+                TextButton(
+                  onPressed: () {
+                    setState(() => _filters = const SearchFilters());
+                  },
+                  child: const Text('Reset'),
                 ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            _FilterValueRow<String>(
+              icon: Icons.category_outlined,
+              label: 'Genre',
+              value: _filters.genre ?? '',
+              display: _filters.genre ?? 'All genres',
+              values: <String>['', ...widget.genres],
+              labelFor: (value) => value.isEmpty ? 'All genres' : value,
+              onChanged: (value) {
+                setState(() {
+                  _filters = value.isEmpty
+                      ? _filters.copyWith(clearGenre: true)
+                      : _filters.copyWith(genre: value);
+                });
+              },
+            ),
+            _FilterValueRow<MangaBrowseSort>(
+              icon: Icons.swap_vert_rounded,
+              label: 'Sort',
+              value: _filters.sort,
+              display: _sortLabel(_filters.sort),
+              values: const <MangaBrowseSort>[
+                MangaBrowseSort.relevance,
+                MangaBrowseSort.popularity,
+                MangaBrowseSort.rating,
+                MangaBrowseSort.newest,
+                MangaBrowseSort.chapters,
+              ],
+              labelFor: _sortLabel,
+              onChanged: (value) {
+                setState(() => _filters = _filters.copyWith(sort: value));
+              },
+            ),
+            _FilterValueRow<MangaBrowseStatus>(
+              icon: Icons.bolt_outlined,
+              label: 'Status',
+              value: _filters.status,
+              display: _statusLabel(_filters.status),
+              values: const <MangaBrowseStatus>[
+                MangaBrowseStatus.all,
+                MangaBrowseStatus.ongoing,
+                MangaBrowseStatus.completed,
+                MangaBrowseStatus.hiatus,
+                MangaBrowseStatus.cancelled,
+              ],
+              labelFor: _statusLabel,
+              onChanged: (value) {
+                setState(() => _filters = _filters.copyWith(status: value));
+              },
+            ),
+            _FilterValueRow<int>(
+              icon: Icons.library_books_outlined,
+              label: 'Min chapters',
+              value: _filters.minimumChapters ?? 0,
+              display: _filters.minimumChapters == null
+                  ? 'Any'
+                  : '${_filters.minimumChapters}+',
+              values: const <int>[0, 10, 25, 50, 100],
+              labelFor: (value) => value == 0 ? 'Any' : '$value+',
+              onChanged: (value) {
+                setState(() {
+                  _filters = value == 0
+                      ? _filters.copyWith(clearMinimumChapters: true)
+                      : _filters.copyWith(minimumChapters: value);
+                });
+              },
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => Navigator.of(context).pop(_filters),
+                child: const Text('Apply filters'),
               ),
-              _FilterSection(
-                title: 'Status',
-                child: _HorizontalChoices(
-                  children: MangaBrowseStatus.values.map((value) {
-                    return ChoiceChip(
-                      label: Text(_statusLabel(value)),
-                      selected: filters.status == value,
-                      onSelected: (_) =>
-                          onChanged(filters.copyWith(status: value)),
-                    );
-                  }).toList(),
-                ),
-              ),
-              _FilterSection(
-                title: 'Country',
-                child: _HorizontalChoices(
-                  children: MangaBrowseCountry.values.map((value) {
-                    return ChoiceChip(
-                      label: Text(_countryLabel(value)),
-                      selected: filters.country == value,
-                      onSelected: (_) =>
-                          onChanged(filters.copyWith(country: value)),
-                    );
-                  }).toList(),
-                ),
-              ),
-              _FilterSection(
-                title: 'Minimum rating',
-                child: _HorizontalChoices(
-                  children: <int?>[null, 6, 7, 8, 9].map((value) {
-                    return ChoiceChip(
-                      label: Text(value == null ? 'Any' : '$value+'),
-                      selected: filters.minimumRating == value,
-                      onSelected: (_) => onChanged(
-                        value == null
-                            ? filters.copyWith(clearMinimumRating: true)
-                            : filters.copyWith(minimumRating: value),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              _FilterSection(
-                title: 'Minimum chapters',
-                child: _HorizontalChoices(
-                  children: <int?>[null, 10, 25, 50, 100].map((value) {
-                    return ChoiceChip(
-                      label: Text(value == null ? 'Any' : '$value+'),
-                      selected: filters.minimumChapters == value,
-                      onSelected: (_) => onChanged(
-                        value == null
-                            ? filters.copyWith(clearMinimumChapters: true)
-                            : filters.copyWith(minimumChapters: value),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              _FilterSection(
-                title: 'Year',
-                child: SizedBox(
-                  width: 150,
-                  child: TextFormField(
-                    controller: yearController,
-                    keyboardType: TextInputType.number,
-                    maxLength: 4,
-                    decoration: const InputDecoration(
-                      hintText: 'e.g. 2024',
-                      counterText: '',
-                      isDense: true,
-                    ),
-                    onChanged: (raw) {
-                      final year = int.tryParse(raw.trim());
-                      if (raw.trim().isEmpty) {
-                        onChanged(filters.copyWith(clearYear: true));
-                      } else if (year != null && year >= 1900 && year <= 2100) {
-                        onChanged(filters.copyWith(year: year));
-                      }
-                    },
-                  ),
-                ),
-              ),
-              _FilterSection(
-                title: 'Genres',
-                child: Wrap(
-                  spacing: 7,
-                  runSpacing: 7,
-                  children: [...genres, if (adultMode) 'Hentai'].map((genre) {
-                    final selected = filters.genres.contains(genre);
-                    return FilterChip(
-                      label: Text(genre),
-                      selected: selected,
-                      onSelected: (_) {
-                        final next = <String>{...filters.genres};
-                        selected ? next.remove(genre) : next.add(genre);
-                        onChanged(filters.copyWith(genres: next));
-                      },
-                    );
-                  }).toList(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: onApply,
-                  icon: const Icon(Icons.check_rounded),
-                  label: const Text('Apply filters'),
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Filters work without typing a title.',
-                style: TextStyle(color: AppColors.muted, fontSize: 11),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  String _sortLabel(MangaBrowseSort value) => switch (value) {
-    MangaBrowseSort.relevance => 'Relevance',
+  static String _sortLabel(MangaBrowseSort value) => switch (value) {
+    MangaBrowseSort.relevance => 'Best match',
     MangaBrowseSort.popularity => 'Popularity',
     MangaBrowseSort.rating => 'Rating',
-    MangaBrowseSort.trending => 'Trending',
     MangaBrowseSort.newest => 'Newest',
-    MangaBrowseSort.title => 'Title',
     MangaBrowseSort.chapters => 'Chapters',
+    MangaBrowseSort.trending => 'Trending',
+    MangaBrowseSort.title => 'Title',
   };
 
-  String _formatLabel(MangaBrowseFormat value) => switch (value) {
-    MangaBrowseFormat.all => 'All',
-    MangaBrowseFormat.manga => 'Manga',
-    MangaBrowseFormat.oneShot => 'One-shot',
-    MangaBrowseFormat.novel => 'Novel',
-  };
-
-  String _statusLabel(MangaBrowseStatus value) => switch (value) {
-    MangaBrowseStatus.all => 'All',
-    MangaBrowseStatus.ongoing => 'Releasing',
-    MangaBrowseStatus.completed => 'Finished',
+  static String _statusLabel(MangaBrowseStatus value) => switch (value) {
+    MangaBrowseStatus.all => 'Any status',
+    MangaBrowseStatus.ongoing => 'Ongoing',
+    MangaBrowseStatus.completed => 'Completed',
     MangaBrowseStatus.hiatus => 'Hiatus',
     MangaBrowseStatus.cancelled => 'Cancelled',
-    MangaBrowseStatus.notYetReleased => 'Upcoming',
-  };
-
-  String _countryLabel(MangaBrowseCountry value) => switch (value) {
-    MangaBrowseCountry.all => 'All',
-    MangaBrowseCountry.japan => 'Japan',
-    MangaBrowseCountry.southKorea => 'Korea',
-    MangaBrowseCountry.china => 'China',
-    MangaBrowseCountry.taiwan => 'Taiwan',
   };
 }
 
-class _FilterSection extends StatelessWidget {
-  const _FilterSection({required this.title, required this.child});
-  final String title;
-  final Widget child;
+class _FilterValueRow<T> extends StatelessWidget {
+  const _FilterValueRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.display,
+    required this.values,
+    required this.labelFor,
+    required this.onChanged,
+  });
+
+  final IconData icon;
+  final String label;
+  final T value;
+  final String display;
+  final List<T> values;
+  final String Function(T) labelFor;
+  final ValueChanged<T> onChanged;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 12),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(
-            color: AppColors.muted,
-            fontSize: 11,
-            fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) {
+    return Container(
+      height: 56,
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.only(left: 13, right: 4),
+      decoration: BoxDecoration(
+        color: AppColors.raised.withValues(alpha: .72),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.outline),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppColors.muted),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.text,
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+            ),
           ),
-        ),
-        const SizedBox(height: 7),
-        child,
-      ],
-    ),
-  );
-}
-
-class _HorizontalChoices extends StatelessWidget {
-  const _HorizontalChoices({required this.children});
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-    scrollDirection: Axis.horizontal,
-    physics: const BouncingScrollPhysics(),
-    child: Row(
-      children: [
-        for (var i = 0; i < children.length; i++) ...[
-          children[i],
-          if (i != children.length - 1) const SizedBox(width: 7),
+          const Spacer(),
+          PopupMenuButton<T>(
+            initialValue: value,
+            color: AppColors.raised,
+            surfaceTintColor: Colors.transparent,
+            tooltip: label,
+            onSelected: onChanged,
+            itemBuilder: (context) => values
+                .map(
+                  (item) => PopupMenuItem<T>(
+                    value: item,
+                    child: Text(labelFor(item)),
+                  ),
+                )
+                .toList(growable: false),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 135),
+                    child: Text(
+                      display,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.accent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  const Icon(
+                    Icons.expand_more_rounded,
+                    size: 18,
+                    color: AppColors.muted,
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }
 
 class _TinyMeta extends StatelessWidget {
   const _TinyMeta(this.icon, this.text);
+
   final IconData icon;
   final String text;
 
   @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(icon, size: 13, color: AppColors.accent),
-      const SizedBox(width: 3),
-      Text(text, style: const TextStyle(fontSize: 10.5)),
-    ],
-  );
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: AppColors.accent),
+        const SizedBox(width: 3),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 88),
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 10.5),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class _SearchHint extends StatelessWidget {
   const _SearchHint({required this.adultMode});
+
   final bool adultMode;
 
   @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(32),
-      child: Text(
-        adultMode
-            ? 'Search adult manga, or open Filters to browse without typing.'
-            : 'Search manga, or open Filters to browse without typing.',
-        textAlign: TextAlign.center,
-        style: const TextStyle(color: AppColors.muted),
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.manage_search_rounded,
+              size: 42,
+              color: AppColors.muted,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              adultMode
+                  ? 'Search adult manga or use Filters to browse.'
+                  : 'Search manga or use Filters to browse.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.muted),
+            ),
+          ],
+        ),
       ),
-    ),
-  );
-}
-
-class _FilterReadyHint extends StatelessWidget {
-  const _FilterReadyHint();
-
-  @override
-  Widget build(BuildContext context) => const Center(
-    child: Padding(
-      padding: EdgeInsets.all(32),
-      child: Text(
-        'Tap Apply filters to browse matching manga.',
-        textAlign: TextAlign.center,
-        style: TextStyle(color: AppColors.muted),
-      ),
-    ),
-  );
+    );
+  }
 }
 
 class _NoResults extends StatelessWidget {
   const _NoResults();
 
   @override
-  Widget build(BuildContext context) => const Center(
-    child: Padding(
-      padding: EdgeInsets.all(32),
-      child: Text(
-        'No manga match these filters.',
-        textAlign: TextAlign.center,
-        style: TextStyle(color: AppColors.muted),
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(32),
+        child: Text(
+          'No manga match this search.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: AppColors.muted),
+        ),
       ),
-    ),
-  );
+    );
+  }
 }

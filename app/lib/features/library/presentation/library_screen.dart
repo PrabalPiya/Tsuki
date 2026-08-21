@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -42,6 +43,11 @@ final libraryItemsProvider = FutureProvider.autoDispose<List<Manga>>((
       if (manga != null) {
         repository.remember(manga);
         items.add(manga);
+        if (manga.isAdult == state.adultContent) {
+          unawaited(
+            repository.prewarmChapters(manga, allowAdult: state.adultContent),
+          );
+        }
       }
     } catch (_) {
       // Keep loading other bookmarks.

@@ -6,61 +6,39 @@ import '../../../core/data/catalog_repository.dart';
 import '../../../core/models/manga.dart';
 import '../data/metadata_provider.dart';
 
+/// The deliberately small set of filters exposed by Tsuki's search UI.
 class SearchFilters {
   const SearchFilters({
-    this.format = MangaBrowseFormat.all,
+    this.genre,
     this.status = MangaBrowseStatus.all,
-    this.country = MangaBrowseCountry.all,
-    this.genres = const <String>{},
-    this.year,
-    this.minimumRating,
     this.minimumChapters,
     this.sort = MangaBrowseSort.relevance,
   });
 
-  final MangaBrowseFormat format;
+  final String? genre;
   final MangaBrowseStatus status;
-  final MangaBrowseCountry country;
-  final Set<String> genres;
-  final int? year;
-  final int? minimumRating;
   final int? minimumChapters;
   final MangaBrowseSort sort;
 
   bool get hasActive => activeCount > 0;
 
   int get activeCount =>
-      (format == MangaBrowseFormat.all ? 0 : 1) +
+      ((genre == null || genre!.trim().isEmpty) ? 0 : 1) +
       (status == MangaBrowseStatus.all ? 0 : 1) +
-      (country == MangaBrowseCountry.all ? 0 : 1) +
-      (genres.isEmpty ? 0 : 1) +
-      (year == null ? 0 : 1) +
-      (minimumRating == null ? 0 : 1) +
       (minimumChapters == null ? 0 : 1) +
       (sort == MangaBrowseSort.relevance ? 0 : 1);
 
   SearchFilters copyWith({
-    MangaBrowseFormat? format,
+    String? genre,
+    bool clearGenre = false,
     MangaBrowseStatus? status,
-    MangaBrowseCountry? country,
-    Set<String>? genres,
-    int? year,
-    bool clearYear = false,
-    int? minimumRating,
-    bool clearMinimumRating = false,
     int? minimumChapters,
     bool clearMinimumChapters = false,
     MangaBrowseSort? sort,
   }) {
     return SearchFilters(
-      format: format ?? this.format,
+      genre: clearGenre ? null : genre ?? this.genre,
       status: status ?? this.status,
-      country: country ?? this.country,
-      genres: genres ?? this.genres,
-      year: clearYear ? null : year ?? this.year,
-      minimumRating: clearMinimumRating
-          ? null
-          : minimumRating ?? this.minimumRating,
       minimumChapters: clearMinimumChapters
           ? null
           : minimumChapters ?? this.minimumChapters,
@@ -129,10 +107,14 @@ class SearchController extends StateNotifier<SearchState> {
       return;
     }
 
-    _timer = Timer(
-      const Duration(milliseconds: 280),
-      () => _run(value, generation, submitted: trimmed.length < 2),
-    );
+    // Text search remains responsive while filter-only browsing waits for the
+    // explicit Apply action from the bottom sheet.
+    if (trimmed.length >= 2) {
+      _timer = Timer(
+        const Duration(milliseconds: 280),
+        () => _run(value, generation, submitted: false),
+      );
+    }
   }
 
   Future<void> submit([String? value]) async {
@@ -151,7 +133,11 @@ class SearchController extends StateNotifier<SearchState> {
     _timer?.cancel();
     final generation = ++_generation;
     if (state.query.trim().length < 2 && !state.filters.hasActive) {
-      state = state.copyWith(results: const <Manga>[], submitted: false);
+      state = state.copyWith(
+        results: const <Manga>[],
+        loading: false,
+        submitted: false,
+      );
       return;
     }
     await _run(state.query, generation, submitted: true);
@@ -185,16 +171,16 @@ class SearchController extends StateNotifier<SearchState> {
 
     try {
       final filters = state.filters;
+      final genres = filters.genre == null || filters.genre!.trim().isEmpty
+          ? const <String>{}
+          : <String>{filters.genre!.trim()};
+
       final result = await _repository.browse(
         MangaBrowseRequest(
           query: query,
           adultOnly: adultOnly,
-          format: filters.format,
           status: filters.status,
-          country: filters.country,
-          genres: filters.genres,
-          year: filters.year,
-          minimumRating: filters.minimumRating,
+          genres: genres,
           minimumChapters: filters.minimumChapters,
           sort: filters.sort,
         ),
@@ -207,12 +193,13 @@ class SearchController extends StateNotifier<SearchState> {
             .toList(growable: false),
         loading: false,
         submitted: submitted,
+        clearError: true,
       );
     } catch (_) {
       if (generation == _generation) {
         state = state.copyWith(
           loading: false,
-          error: 'Search is unavailable. Try again.',
+          error: 'Could not reach the manga catalogue. Try again.',
         );
       }
     }
