@@ -40,6 +40,7 @@ class MainShell extends ConsumerWidget {
             children: [
               Expanded(
                 child: _NavItem(
+                  label: 'Home',
                   icon: Icons.home_outlined,
                   selectedIcon: Icons.home_rounded,
                   selected: currentIndex == 0,
@@ -51,6 +52,7 @@ class MainShell extends ConsumerWidget {
 
               Expanded(
                 child: _NavItem(
+                  label: 'Discover',
                   icon: Icons.auto_awesome_outlined,
                   selectedIcon: Icons.auto_awesome_rounded,
                   selected: currentIndex == 1,
@@ -62,6 +64,7 @@ class MainShell extends ConsumerWidget {
 
               Expanded(
                 child: _NavItem(
+                  label: 'Search',
                   icon: Icons.search_rounded,
                   selectedIcon: Icons.search_rounded,
                   selected: currentIndex == 2,
@@ -73,6 +76,7 @@ class MainShell extends ConsumerWidget {
 
               Expanded(
                 child: _NavItem(
+                  label: 'Library',
                   icon: Icons.bookmark_border_rounded,
                   selectedIcon: Icons.bookmark_rounded,
                   selected: currentIndex == 3,
@@ -112,12 +116,14 @@ class MainShell extends ConsumerWidget {
 
 class _NavItem extends StatefulWidget {
   const _NavItem({
+    required this.label,
     required this.icon,
     required this.selectedIcon,
     required this.selected,
     required this.onTap,
   });
 
+  final String label;
   final IconData icon;
   final IconData selectedIcon;
 
@@ -189,28 +195,28 @@ class _NavItemState extends State<_NavItem>
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-
-      onTap: _handleTap,
-
-      child: Center(
-        child: ScaleTransition(
-          scale: _scaleAnimation,
-
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-
-            curve: Curves.easeOutCubic,
-
-            child: Icon(
-              widget.selected ? widget.selectedIcon : widget.icon,
-
-              size: widget.selected ? 27 : 24,
-
-              color: widget.selected
-                  ? AppColors.accent
-                  : AppColors.muted.withValues(alpha: 0.78),
+    return Semantics(
+      label: widget.label,
+      button: true,
+      selected: widget.selected,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _handleTap,
+        child: Center(
+          child: ScaleTransition(
+            scale: _scaleAnimation,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOutCubic,
+              child: ExcludeSemantics(
+                child: Icon(
+                  widget.selected ? widget.selectedIcon : widget.icon,
+                  size: widget.selected ? 27 : 24,
+                  color: widget.selected
+                      ? AppColors.accent
+                      : AppColors.muted.withValues(alpha: 0.78),
+                ),
+              ),
             ),
           ),
         ),

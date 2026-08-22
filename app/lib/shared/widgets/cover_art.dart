@@ -14,41 +14,44 @@ class CoverArt extends StatelessWidget {
   final String url, title;
   final double borderRadius;
   @override
-  Widget build(BuildContext context) => DecoratedBox(
-    decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(borderRadius),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x59000000),
-          blurRadius: 18,
-          offset: Offset(0, 10),
-        ),
-      ],
-    ),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(borderRadius),
-      child: AspectRatio(
-        aspectRatio: .68,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            url.isEmpty
-                ? _fallback()
-                : CachedNetworkImage(
-                    imageUrl: url,
-                    cacheManager: MangaImageCache.instance,
-                    fit: BoxFit.cover,
-                    placeholder: (_, __) => _fallback(),
-                    errorWidget: (_, __, ___) => _fallback(),
-                  ),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(color: AppColors.outline),
-                borderRadius: BorderRadius.circular(borderRadius),
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(borderRadius),
+    child: AspectRatio(
+      aspectRatio: .68,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final logicalWidth = constraints.maxWidth.isFinite
+              ? constraints.maxWidth
+              : MediaQuery.sizeOf(context).width;
+          final decodeWidth =
+              (logicalWidth * MediaQuery.devicePixelRatioOf(context))
+                  .ceil()
+                  .clamp(64, 1200);
+
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              url.isEmpty
+                  ? _fallback()
+                  : CachedNetworkImage(
+                      imageUrl: url,
+                      cacheManager: MangaImageCache.instance,
+                      memCacheWidth: decodeWidth,
+                      fit: BoxFit.cover,
+                      fadeInDuration: const Duration(milliseconds: 120),
+                      fadeOutDuration: Duration.zero,
+                      placeholder: (_, _) => _fallback(),
+                      errorWidget: (_, _, _) => _fallback(),
+                    ),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.outline),
+                  borderRadius: BorderRadius.circular(borderRadius),
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     ),
   );

@@ -17,7 +17,7 @@ import 'source_matching.dart';
 ///
 /// The previous Tsuki implementation used the older api.comick.io endpoints.
 /// The maintained reader source now uses comick.live/comick.art with
-/// /api/search and /api/comics/<slug>/chapter-list.
+/// `/api/search` and `/api/comics/<slug>/chapter-list`.
 class ComicKSource implements MangaSource {
   ComicKSource({Dio? client, Dio? mirrorClient})
     : _client = client ?? createHttpClient(baseUrl: 'https://comick.live'),

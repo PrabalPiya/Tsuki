@@ -11,7 +11,7 @@ class OneTimeHint extends StatefulWidget {
     required this.id,
     required this.icon,
     required this.text,
-    this.duration = const Duration(seconds: 5),
+    this.duration = const Duration(seconds: 7),
   });
 
   final String id;
@@ -40,7 +40,7 @@ class _OneTimeHintState extends State<OneTimeHint>
 
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 900),
+      duration: const Duration(milliseconds: 220),
     );
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkAndShow());
@@ -64,28 +64,15 @@ class _OneTimeHintState extends State<OneTimeHint>
       return;
     }
 
-    /*
-     * Mark it seen immediately.
-     *
-     * Even if the user navigates away before the
-     * animation finishes, it will not show again.
-     */
-    await prefs.setBool(key, true);
-
-    if (!mounted) return;
-
     setState(() {
       _checked = true;
       _visible = true;
     });
-
-    /*
-     * Same blink behaviour as Discover.
-     */
-    _controller.repeat(reverse: true);
+    await _controller.forward(from: 0);
+    if (!mounted || !_visible) return;
+    await _markSeen();
 
     _timer?.cancel();
-
     _timer = Timer(widget.duration, _hide);
   }
 
@@ -95,18 +82,20 @@ class _OneTimeHintState extends State<OneTimeHint>
     }
 
     _timer?.cancel();
-
-    await _controller.animateTo(
-      0.0,
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOut,
-    );
-
-    if (!mounted) return;
-
+    _controller.stop();
     setState(() {
       _visible = false;
     });
+    await _markSeen();
+  }
+
+  Future<void> _markSeen() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('$_prefix${widget.id}', true);
+    } catch (_) {
+      // Hint persistence is optional and must never affect navigation.
+    }
   }
 
   @override
@@ -123,28 +112,68 @@ class _OneTimeHintState extends State<OneTimeHint>
       return const SizedBox.shrink();
     }
 
-    return IgnorePointer(
+    final animation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    return Semantics(
+      liveRegion: true,
+      label: widget.text,
+      button: true,
+      hint: 'Tap to dismiss',
       child: FadeTransition(
-        opacity: CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-          decoration: BoxDecoration(
-            color: AppColors.glass,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: AppColors.outline),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(widget.icon, size: 18, color: Colors.white),
-
-              const SizedBox(width: 8),
-
-              Text(
-                widget.text,
-                style: const TextStyle(color: Colors.white, fontSize: 12),
+        opacity: animation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.18),
+            end: Offset.zero,
+          ).animate(animation),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.sizeOf(context).width - 32,
+            ),
+            child: Material(
+              color: AppColors.glass,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: const BorderSide(color: AppColors.outline),
               ),
-            ],
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: _hide,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 9, 8, 9),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(widget.icon, size: 18, color: AppColors.accent),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          widget.text,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.text,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const ExcludeSemantics(
+                        child: Icon(
+                          Icons.close_rounded,
+                          size: 17,
+                          color: AppColors.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),

@@ -206,15 +206,11 @@ class MangaDexSource implements MangaSource {
     Manga canonical, {
     bool allowAdult = false,
   }) async {
-    final match = await _findConservativeMatchDetails(
-      canonical,
-    );
+    final match = await _findConservativeMatchDetails(canonical);
     return match?.id;
   }
 
-  Future<_MangaDexMatch?> _findConservativeMatchDetails(
-    Manga canonical,
-  ) async {
+  Future<_MangaDexMatch?> _findConservativeMatchDetails(Manga canonical) async {
     final expected = <String>{
       canonical.title,
       ...canonical.aliases,

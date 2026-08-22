@@ -16,49 +16,59 @@ class MangaMetadataCache {
     Dio? client,
   }) : _preferences = preferences ?? SharedPreferences.getInstance(),
        _remoteCatalogUrl = remoteCatalogUrl.trim(),
-       _client = client ?? createHttpClient();
+       _client = client ?? createHttpClient(),
+       _ownsClient = client == null;
 
   final Future<SharedPreferences> _preferences;
   final String _remoteCatalogUrl;
   final Dio _client;
+  final bool _ownsClient;
   List<Manga>? _indexMemory;
+  List<_SearchIndexEntry>? _bundledSearchMemory;
+  ({int version, List<Manga> items})? _bundledCatalogMemory;
   Future<void>? _bundledImport;
+  Future<({int version, List<Manga> items})>? _bundledCatalogLoad;
+  Future<List<_SearchIndexEntry>>? _bundledSearchLoad;
   Future<void>? _remoteRefresh;
+  final Map<String, List<Manga>> _searchResultMemory = {};
 
   static const _rankingPrefix = 'metadata.rankings.';
   static const _searchPrefix = 'metadata.search.';
+  static const _searchKeysKey = 'metadata.search_keys';
   static const _indexKey = 'metadata.global_index';
   static const _bundledVersionKey = 'metadata.bundled_catalog_version';
   static const _remoteUpdatedAtKey = 'metadata.remote_catalog_updated_at';
   static const _remoteVersionKey = 'metadata.remote_catalog_version';
   static const _bundledCatalogAsset = 'assets/catalog/catalog.json';
   static const _maxIndexedManga = 2500;
+  static const _maxMemoizedSearches = 32;
+  static const _maxStoredSearches = 24;
   static const _remoteRefreshInterval = Duration(minutes: 15);
 
   Future<void> importBundledCatalog() {
     return _bundledImport ??= _importBundledCatalog();
   }
 
+  Future<void> warmSearchIndex() async {
+    await _loadBundledSearchIndex();
+  }
+
   Future<void> _importBundledCatalog() async {
     try {
-      final raw = await rootBundle.loadString(_bundledCatalogAsset);
-      final decoded = jsonDecode(raw);
-      final payload = decoded is Map
-          ? Map<String, dynamic>.from(decoded)
-          : <String, dynamic>{'items': decoded};
-      final version = (payload['version'] as num?)?.toInt() ?? 1;
+      final bundled = await _loadBundledCatalog();
 
       final prefs = await _preferences;
-      final hasCurrentCatalog = prefs.getInt(_bundledVersionKey) == version;
+      final hasCurrentCatalog =
+          prefs.getInt(_bundledVersionKey) == bundled.version;
       if (hasCurrentCatalog && prefs.getString(_indexKey) != null) return;
 
-      final items = _decodeMangaList(payload['items'])
+      final items = bundled.items
           .where((manga) => manga.hasChapterMetadata)
           .toList(growable: false);
       if (items.isNotEmpty) {
         await mergeManga(items);
       }
-      await prefs.setInt(_bundledVersionKey, version);
+      await prefs.setInt(_bundledVersionKey, bundled.version);
     } catch (_) {
       // A missing or malformed optional seed catalog must never block startup.
     }
@@ -133,35 +143,59 @@ class MangaMetadataCache {
   }
 
   Future<List<Manga>?> loadSearch(String query) async {
-    final payload = await _readPayload('$_searchPrefix${_searchKey(query)}');
+    final key = '$_searchPrefix${_searchKey(query)}';
+    final payload = await _readPayload(key);
     if (payload == null) return null;
 
     try {
       return _decodeMangaList(payload['items']);
     } catch (_) {
+      await (await _preferences).remove(key);
       return null;
     }
   }
 
   Future<void> saveSearch(String query, List<Manga> items) async {
-    await _writePayload('$_searchPrefix${_searchKey(query)}', {
+    final searchKey = _searchKey(query);
+    await _writePayload('$_searchPrefix$searchKey', {
       'savedAt': DateTime.now().millisecondsSinceEpoch,
-      'items': _encodeMangaList(items.take(24).toList(growable: false)),
+      'items': _encodeMangaList(items.take(50).toList(growable: false)),
     });
-    await mergeManga(items);
+    await _pruneStoredSearches(searchKey);
+
+    final current = await _loadBundledSearchIndex();
+    final searchableById = <String, Manga>{};
+    for (final manga in items.where((manga) => manga.isFriendlyContent)) {
+      searchableById[manga.id] = manga;
+    }
+    for (final entry in current) {
+      searchableById.putIfAbsent(entry.manga.id, () => entry.manga);
+    }
+    final searchable = searchableById.values
+        .take(_maxIndexedManga)
+        .toList(growable: false);
+    _bundledSearchMemory = searchable
+        .map(_SearchIndexEntry.new)
+        .toList(growable: false);
+    _searchResultMemory.clear();
   }
 
   Future<List<Manga>> searchIndex(String query, {int limit = 24}) async {
     final needle = _indexKeyForText(query);
-    if (needle.length < 2) return const <Manga>[];
+    if (needle.isEmpty) return const <Manga>[];
+    final memoryKey = '$limit:$needle';
+    final memoized = _searchResultMemory.remove(memoryKey);
+    if (memoized != null) {
+      _searchResultMemory[memoryKey] = memoized;
+      return memoized;
+    }
 
-    await importBundledCatalog();
-    final index = await loadIndex();
+    final index = await _loadBundledSearchIndex();
     final scored = <({Manga manga, double score})>[];
 
-    for (final manga in index) {
-      final score = _score(manga, needle);
-      if (score > 0) scored.add((manga: manga, score: score));
+    for (final entry in index) {
+      final score = _scoreEntry(entry, needle);
+      if (score > 0) scored.add((manga: entry.manga, score: score));
     }
 
     scored.sort((a, b) {
@@ -174,10 +208,89 @@ class MangaMetadataCache {
       return a.manga.title.toLowerCase().compareTo(b.manga.title.toLowerCase());
     });
 
-    return scored
+    final result = scored
         .take(limit)
         .map((entry) => entry.manga)
         .toList(growable: false);
+    _searchResultMemory[memoryKey] = result;
+    if (_searchResultMemory.length > _maxMemoizedSearches) {
+      _searchResultMemory.remove(_searchResultMemory.keys.first);
+    }
+    return result;
+  }
+
+  Future<void> _pruneStoredSearches(String newestKey) async {
+    final prefs = await _preferences;
+    final previous = prefs.getStringList(_searchKeysKey) ?? const <String>[];
+    final retained = <String>[
+      newestKey,
+      ...previous.where((key) => key != newestKey),
+    ].take(_maxStoredSearches).toList(growable: false);
+    final retainedSet = retained.toSet();
+    final stale = prefs
+        .getKeys()
+        .where((key) => key.startsWith(_searchPrefix))
+        .where(
+          (key) => !retainedSet.contains(key.substring(_searchPrefix.length)),
+        )
+        .toList(growable: false);
+    await Future.wait(stale.map(prefs.remove));
+    await prefs.setStringList(_searchKeysKey, retained);
+  }
+
+  Future<List<_SearchIndexEntry>> _loadBundledSearchIndex() {
+    final memory = _bundledSearchMemory;
+    if (memory != null) return Future.value(memory);
+    return _bundledSearchLoad ??= _loadBundledSearchIndexInternal();
+  }
+
+  Future<List<_SearchIndexEntry>> _loadBundledSearchIndexInternal() async {
+    try {
+      final bundled = (await _loadBundledCatalog()).items;
+      final stored = await loadIndex();
+      final values = <String, Manga>{
+        for (final manga in bundled) manga.id: manga,
+        for (final manga in stored) manga.id: manga,
+      }.values;
+      final entries = values
+          .where((manga) => manga.isFriendlyContent)
+          .map(_SearchIndexEntry.new)
+          .toList(growable: false);
+      _bundledSearchMemory = entries;
+      return entries;
+    } catch (_) {
+      final stored = await loadIndex();
+      final entries = stored.map(_SearchIndexEntry.new).toList(growable: false);
+      _bundledSearchMemory = entries;
+      return entries;
+    } finally {
+      _bundledSearchLoad = null;
+    }
+  }
+
+  Future<({int version, List<Manga> items})> _loadBundledCatalog() {
+    final memory = _bundledCatalogMemory;
+    if (memory != null) return Future.value(memory);
+    return _bundledCatalogLoad ??= _loadBundledCatalogInternal();
+  }
+
+  Future<({int version, List<Manga> items})>
+  _loadBundledCatalogInternal() async {
+    try {
+      final raw = await rootBundle.loadString(_bundledCatalogAsset);
+      final decoded = jsonDecode(raw);
+      final payload = decoded is Map
+          ? Map<String, dynamic>.from(decoded)
+          : <String, dynamic>{'items': decoded};
+      final value = (
+        version: (payload['version'] as num?)?.toInt() ?? 1,
+        items: _decodeMangaList(payload['items']),
+      );
+      _bundledCatalogMemory = value;
+      return value;
+    } finally {
+      _bundledCatalogLoad = null;
+    }
   }
 
   Future<List<Manga>> loadIndex() async {
@@ -192,6 +305,7 @@ class MangaMetadataCache {
       _indexMemory = values;
       return values;
     } catch (_) {
+      await (await _preferences).remove(_indexKey);
       return const <Manga>[];
     }
   }
@@ -200,7 +314,10 @@ class MangaMetadataCache {
     await importBundledCatalog();
     unawaited(refreshRemoteCatalog());
     return (await loadIndex())
-        .where((manga) => manga.hasVerifiedChapterSummary || manga.hasChapterMetadata)
+        .where(
+          (manga) =>
+              manga.hasVerifiedChapterSummary || manga.hasChapterMetadata,
+        )
         .take(limit)
         .toList(growable: false);
   }
@@ -230,6 +347,18 @@ class MangaMetadataCache {
 
     final limited = values.take(_maxIndexedManga).toList(growable: false);
     _indexMemory = limited;
+    _searchResultMemory.clear();
+
+    final searchMemory = _bundledSearchMemory;
+    if (searchMemory != null) {
+      final searchable = <String, Manga>{
+        for (final entry in searchMemory) entry.manga.id: entry.manga,
+        for (final manga in limited) manga.id: manga,
+      };
+      _bundledSearchMemory = searchable.values
+          .map(_SearchIndexEntry.new)
+          .toList(growable: false);
+    }
 
     await _writePayload(_indexKey, {
       'savedAt': DateTime.now().millisecondsSinceEpoch,
@@ -255,10 +384,12 @@ class MangaMetadataCache {
     await prefs.setString(key, jsonEncode(payload));
   }
 
-  static List<Object?> _encodeMangaList(List<Manga> items) =>
-      items.where((manga) => manga.isFriendlyContent).map((manga) {
+  static List<Object?> _encodeMangaList(List<Manga> items) => items
+      .where((manga) => manga.isFriendlyContent)
+      .map((manga) {
         return manga.toJson();
-      }).toList(growable: false);
+      })
+      .toList(growable: false);
 
   static List<Manga> _decodeMangaList(Object? raw) {
     final values = raw as List? ?? const [];
@@ -280,13 +411,9 @@ class MangaMetadataCache {
     return base64Url.encode(utf8.encode(normalized));
   }
 
-  static double _score(Manga manga, String needle) {
-    final names = <String>[manga.title, ...manga.aliases]
-        .map(_indexKeyForText)
-        .where((value) => value.isNotEmpty);
-
+  static double _scoreEntry(_SearchIndexEntry entry, String needle) {
     var best = 0.0;
-    for (final name in names) {
+    for (final name in entry.names) {
       final value = name == needle
           ? 1000.0
           : name.startsWith(needle)
@@ -299,14 +426,27 @@ class MangaMetadataCache {
       if (value > best) best = value;
     }
 
-    final genreHit = manga.genres.any((genre) {
-      return _indexKeyForText(genre).contains(needle);
-    });
+    final compactNeedle = _compactSearchKey(needle);
+    if (compactNeedle.length >= 2) {
+      for (final name in entry.compactNames) {
+        final value = name == compactNeedle
+            ? 940.0
+            : name.startsWith(compactNeedle)
+            ? 780.0 -
+                  (name.length - compactNeedle.length).clamp(0, 140).toDouble()
+            : name.contains(compactNeedle)
+            ? 500.0 - name.indexOf(compactNeedle).clamp(0, 140).toDouble()
+            : 0.0;
+        if (value > best) best = value;
+      }
+    }
+
+    final genreHit = entry.genres.any((genre) => genre.contains(needle));
 
     if (best <= 0 && !genreHit) return 0.0;
 
-    final popularity = (manga.popularity ?? 0).clamp(0, 300000) / 6000.0;
-    final rating = (manga.rating ?? 0) * 2.0;
+    final popularity = (entry.manga.popularity ?? 0).clamp(0, 300000) / 6000.0;
+    final rating = (entry.manga.rating ?? 0) * 2.0;
     return best + (genreHit ? 120.0 : 0.0) + popularity + rating;
   }
 
@@ -318,4 +458,34 @@ class MangaMetadataCache {
         .trim()
         .replaceAll(RegExp(r'\s+'), ' ');
   }
+
+  static String _compactSearchKey(String value) {
+    return value.replaceAll(' ', '');
+  }
+
+  void dispose() {
+    if (_ownsClient) _client.close(force: true);
+  }
+}
+
+class _SearchIndexEntry {
+  _SearchIndexEntry(this.manga)
+    : names = <String>{manga.title, ...manga.aliases}
+          .map(MangaMetadataCache._indexKeyForText)
+          .where((value) => value.isNotEmpty)
+          .toList(growable: false),
+      compactNames = <String>{manga.title, ...manga.aliases}
+          .map(MangaMetadataCache._indexKeyForText)
+          .map(MangaMetadataCache._compactSearchKey)
+          .where((value) => value.isNotEmpty)
+          .toList(growable: false),
+      genres = manga.genres
+          .map(MangaMetadataCache._indexKeyForText)
+          .where((value) => value.isNotEmpty)
+          .toList(growable: false);
+
+  final Manga manga;
+  final List<String> names;
+  final List<String> compactNames;
+  final List<String> genres;
 }

@@ -1,60 +1,9 @@
 import '../../../core/models/manga.dart';
 
-enum MangaBrowseStatus { all, ongoing, completed, hiatus, cancelled }
-
-enum MangaBrowseSort {
-  relevance,
-  popularity,
-  rating,
-  trending,
-  newest,
-  title,
-  chapters,
-}
-
-/// Minimal browse request used by Tsuki Search.
-///
-/// Keep this intentionally small so browse features and the metadata backend
-/// stay in lockstep. Only safe-for-general-audiences catalogue requests are
-/// supported.
-class MangaBrowseRequest {
-  const MangaBrowseRequest({
-    this.query = '',
-    this.status = MangaBrowseStatus.all,
-    this.genres = const <String>{},
-    this.minimumChapters,
-    this.sort = MangaBrowseSort.relevance,
-    this.page = 1,
-    this.perPage = 36,
-  });
-
-  final String query;
-  final MangaBrowseStatus status;
-  final Set<String> genres;
-  final int? minimumChapters;
-  final MangaBrowseSort sort;
-  final int page;
-  final int perPage;
-
-  bool get hasBrowseOptions =>
-      status != MangaBrowseStatus.all ||
-      genres.isNotEmpty ||
-      minimumChapters != null ||
-      sort != MangaBrowseSort.relevance;
-}
-
 abstract interface class MetadataProvider {
   String get id;
   Future<List<Manga>> search(String query);
   Future<Manga?> getById(String id);
-}
-
-/// Optional richer metadata capability used by catalogue browsing.
-///
-/// Kept separate from [MetadataProvider] so lightweight test/demo providers do
-/// not need to implement catalogue browsing.
-abstract interface class BrowseMetadataProvider {
-  Future<List<Manga>> browse(MangaBrowseRequest request);
 }
 
 abstract interface class SynopsisService {

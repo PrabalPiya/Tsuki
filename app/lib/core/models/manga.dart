@@ -161,6 +161,13 @@ class Manga {
   String? get verifiedChapterDisplayLabel =>
       MangaChapterRegistry.displayLabelFor(id);
 
+  String? get catalogChapterDisplayLabel {
+    final verified = MangaChapterRegistry.displayLabelFor(id);
+    if (verified != null) return verified;
+    if (_metadataChapterCount <= 0) return null;
+    return _metadataChapterCount.toString();
+  }
+
   String get chapterDisplayLabel {
     final verified = MangaChapterRegistry.displayLabelFor(id);
     if (verified != null) return verified;
@@ -216,7 +223,8 @@ class Manga {
     return value.toString();
   }
 
-  List<String> get displayGenres => _cleanGenres.take(3).toList(growable: false);
+  List<String> get displayGenres =>
+      _cleanGenres.take(3).toList(growable: false);
 
   String get genreLabel {
     final values = _cleanGenres;

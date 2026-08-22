@@ -38,15 +38,24 @@ class UserLibraryController extends StateNotifier<UserLibraryState> {
 
   final String _uid;
   final UserStore _store;
+  ({Set<String> ids, Map<String, Manga> manga})? _pendingBookmarks;
+  Future<void>? _bookmarkWriter;
+  final Map<String, ReadingProgress> _pendingProgress = {};
+  Future<void>? _progressWriter;
 
   Future<void> _load() async {
-    final value = await _store.load(_uid);
-    state = UserLibraryState(
-      loading: false,
-      bookmarks: value.bookmarks,
-      bookmarkedManga: value.bookmarkedManga,
-      progress: value.progress,
-    );
+    try {
+      final value = await _store.load(_uid);
+      if (!mounted) return;
+      state = UserLibraryState(
+        loading: false,
+        bookmarks: value.bookmarks,
+        bookmarkedManga: value.bookmarkedManga,
+        progress: value.progress,
+      );
+    } catch (_) {
+      if (mounted) state = const UserLibraryState(loading: false);
+    }
   }
 
   Future<void> toggleBookmark(Manga manga) async {
@@ -60,11 +69,7 @@ class UserLibraryController extends StateNotifier<UserLibraryState> {
       metadata[manga.id] = manga;
     }
     state = state.copyWith(bookmarks: next, bookmarkedManga: metadata);
-    try {
-      await _store.saveBookmarks(_uid, next, metadata);
-    } catch (_) {
-      // Firestore may be temporarily offline; local state is already durable.
-    }
+    await _queueBookmarkSave(next, metadata);
   }
 
   Future<void> restoreBookmark(Manga manga) async {
@@ -72,11 +77,7 @@ class UserLibraryController extends StateNotifier<UserLibraryState> {
     final next = {...state.bookmarks, manga.id};
     final metadata = {...state.bookmarkedManga, manga.id: manga};
     state = state.copyWith(bookmarks: next, bookmarkedManga: metadata);
-    try {
-      await _store.saveBookmarks(_uid, next, metadata);
-    } catch (_) {
-      // Firestore may be temporarily offline; local state is already durable.
-    }
+    await _queueBookmarkSave(next, metadata);
   }
 
   Future<void> saveProgress(ReadingProgress value) async {
@@ -97,15 +98,57 @@ class UserLibraryController extends StateNotifier<UserLibraryState> {
     state = state.copyWith(
       progress: {...state.progress, value.mangaId: normalized},
     );
-    try {
-      await _store.saveProgress(_uid, normalized);
-    } catch (_) {
-      // Keep reading uninterrupted when optional cloud sync is unavailable.
-    }
+    _pendingProgress[value.mangaId] = normalized;
+    await (_progressWriter ??= _flushProgress());
   }
 
   Future<void> clearAll() async {
+    _pendingBookmarks = null;
+    _pendingProgress.clear();
+    await Future.wait([?_bookmarkWriter, ?_progressWriter]);
     await _store.clearSession(_uid);
-    state = const UserLibraryState(loading: false);
+    if (mounted) state = const UserLibraryState(loading: false);
+  }
+
+  Future<void> _queueBookmarkSave(Set<String> ids, Map<String, Manga> manga) {
+    _pendingBookmarks = (
+      ids: Set<String>.unmodifiable(ids),
+      manga: Map<String, Manga>.unmodifiable(manga),
+    );
+    return _bookmarkWriter ??= _flushBookmarks();
+  }
+
+  Future<void> _flushBookmarks() async {
+    try {
+      while (_pendingBookmarks != null) {
+        final next = _pendingBookmarks!;
+        _pendingBookmarks = null;
+        try {
+          await _store.saveBookmarks(_uid, next.ids, next.manga);
+        } catch (_) {
+          // Optimistic UI remains usable while optional cloud sync recovers.
+        }
+      }
+    } finally {
+      _bookmarkWriter = null;
+    }
+  }
+
+  Future<void> _flushProgress() async {
+    try {
+      while (_pendingProgress.isNotEmpty) {
+        final values = _pendingProgress.values.toList(growable: false);
+        _pendingProgress.clear();
+        for (final value in values) {
+          try {
+            await _store.saveProgress(_uid, value);
+          } catch (_) {
+            // Reading remains uninterrupted while persistence is unavailable.
+          }
+        }
+      }
+    } finally {
+      _progressWriter = null;
+    }
   }
 }

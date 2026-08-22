@@ -50,6 +50,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   final _errors = <int, String>{};
   final _failedPageSources = <int, Set<String>>{};
   final _pageRatios = <String, double>{};
+  final _openedChapterIds = <String>{};
   final _zoomTransform = TransformationController();
 
   List<CanonicalChapter> _chapters = const [];
@@ -108,6 +109,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
       if (!mounted) return;
 
+      final progress = ref.read(userLibraryProvider).progress[widget.mangaId];
+      _openedChapterIds
+        ..clear()
+        ..addAll(progress?.openedChapterIds ?? const <String>{});
       _chapters = readable;
       _start = readable.indexWhere((c) => c.id == widget.initialChapterId);
       if (_start < 0) _start = 0;
@@ -189,12 +194,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     });
   }
 
-  double _pageHeight(String url) =>
-      _readerPageDisplayHeight(
-        width: MediaQuery.sizeOf(context).width,
-        viewportHeight: MediaQuery.sizeOf(context).height,
-        aspectRatio: _pageRatios[url] ?? _fallbackPageAspectRatio,
-      );
+  double _pageHeight(String url) => _readerPageDisplayHeight(
+    width: MediaQuery.sizeOf(context).width,
+    viewportHeight: MediaQuery.sizeOf(context).height,
+    aspectRatio: _pageRatios[url] ?? _fallbackPageAspectRatio,
+  );
 
   void _onScroll() {
     _saveTimer?.cancel();
@@ -232,9 +236,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           index: index,
           page: page,
           relative: ((within - pageStart) / pageHeight).clamp(0.0, 1.0),
-          ratio: pagesHeight <= 0
-              ? 0
-              : (within / pagesHeight).clamp(0.0, 1.0),
+          ratio: pagesHeight <= 0 ? 0 : (within / pagesHeight).clamp(0.0, 1.0),
         );
       }
 
@@ -272,6 +274,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   Future<void> _markChapterOpened(int index) async {
     final existing = ref.read(userLibraryProvider).progress[widget.mangaId];
     final sameChapter = existing?.chapterId == _chapters[index].id;
+    if (mounted) {
+      setState(() => _openedChapterIds.add(_chapters[index].id));
+    }
 
     await ref
         .read(userLibraryProvider.notifier)
@@ -367,9 +372,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
   @override
   Widget build(BuildContext context) {
-    final manga = ref.watch(catalogProvider).cached(widget.mangaId);
-    final library = ref.watch(userLibraryProvider);
-    final progress = library.progress[widget.mangaId];
+    final manga = ref.read(catalogProvider).cached(widget.mangaId);
     final currentChapter = _start >= 0 && _start < _chapters.length
         ? _chapters[_start]
         : null;
@@ -383,9 +386,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           .toList(growable: false);
 
       for (final index in indexes) {
-        final isRead =
-            progress != null &&
-            progress.openedChapterIds.contains(_chapters[index].id);
+        final isRead = _openedChapterIds.contains(_chapters[index].id);
 
         blocks.add((
           chapter: index,
@@ -435,7 +436,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     }
 
     return PopScope(
-      onPopInvokedWithResult: (_, __) => unawaited(_saveProgress()),
+      onPopInvokedWithResult: (_, _) => unawaited(_saveProgress()),
       child: Scaffold(
         backgroundColor: AppColors.background,
         body: GestureDetector(
@@ -591,10 +592,7 @@ class _ChapterHeader extends StatelessWidget {
             if (credit != null)
               Text(
                 credit,
-                style: const TextStyle(
-                  color: AppColors.muted,
-                  fontSize: 11,
-                ),
+                style: const TextStyle(color: AppColors.muted, fontSize: 11),
               ),
           ],
         ),
@@ -651,10 +649,7 @@ class _ChapterError extends StatelessWidget {
 }
 
 class _ChapterNavigation extends StatelessWidget {
-  const _ChapterNavigation({
-    required this.onPrevious,
-    required this.onNext,
-  });
+  const _ChapterNavigation({required this.onPrevious, required this.onNext});
 
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
@@ -753,7 +748,7 @@ class _ReaderPageState extends State<_ReaderPage> {
           });
         }
       },
-      onError: (_, __) {
+      onError: (_, _) {
         stream.removeListener(listener);
         _resolving = false;
       },
@@ -854,13 +849,11 @@ class _ReaderPageState extends State<_ReaderPage> {
                 );
               },
               fadeInDuration: const Duration(milliseconds: 100),
-              placeholder: (_, __) => const ColoredBox(
+              placeholder: (_, _) => const ColoredBox(
                 color: AppColors.background,
-                child: Center(
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
               ),
-              errorWidget: (_, __, ___) {
+              errorWidget: (_, _, _) {
                 _reportLoadError();
                 return const ColoredBox(
                   color: AppColors.background,

@@ -14,8 +14,11 @@ class ChapterIndexCache {
   ChapterIndexCache({Future<SharedPreferences>? preferences})
     : _preferences = preferences ?? SharedPreferences.getInstance() {
     // Keep this fallback for tests/alternate entrypoints. Normal app startup
-    // explicitly awaits [warmGlobalSummaries] before runApp.
-    unawaited(_bootstrapSummaries());
+    // starts [warmGlobalSummaries] before runApp, and its shared in-flight
+    // future prevents concurrent scans of the same preference keys.
+    unawaited(
+      preferences == null ? warmGlobalSummaries() : _bootstrapSummaries(),
+    );
   }
 
   final Future<SharedPreferences> _preferences;
@@ -27,11 +30,18 @@ class ChapterIndexCache {
   static const _checkedPrefix = 'tsuki.chapterChecked.v6.';
   static const _deepCheckedPrefix = 'tsuki.chapterDeepChecked.v6.';
   static const _summaryPrefix = 'tsuki.chapterSummary.v6.';
+  static Future<void>? _globalSummaryWarmup;
 
   /// Warm the tiny source-verified chapter summaries before the first frame.
   /// This is what makes the chapter chip instantaneous for previously-seen
   /// titles: no chapter-list JSON decoding and no website request is needed.
-  static Future<void> warmGlobalSummaries() async {
+  static Future<void> warmGlobalSummaries() {
+    return _globalSummaryWarmup ??= _warmGlobalSummaries().whenComplete(() {
+      _globalSummaryWarmup = null;
+    });
+  }
+
+  static Future<void> _warmGlobalSummaries() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       _loadSummariesFromPreferences(prefs);
@@ -86,39 +96,6 @@ class ChapterIndexCache {
         // Ignore one corrupt summary; the full index can recreate it.
       }
     }
-  }
-
-  /// Persist only the lightweight verified latest-number summary.
-  ///
-  /// This is used by Search/Discover cards so they can learn a manga's latest
-  /// chapter without downloading its full chapter index first.
-  Future<void> writeSummary(
-    String cacheKey, {
-    required String mangaId,
-    required int indexCount,
-    required double? latestNumber,
-  }) async {
-    if (mangaId.trim().isEmpty || indexCount < 0) return;
-    if (latestNumber != null &&
-        (!latestNumber.isFinite || latestNumber < 0 || latestNumber > 20000)) {
-      return;
-    }
-
-    final prefs = await _preferences;
-    MangaChapterRegistry.remember(
-      mangaId,
-      indexCount,
-      latestNumber: latestNumber,
-    );
-    await prefs.setString(
-      '$_summaryPrefix$cacheKey',
-      jsonEncode(<String, Object?>{
-        'version': _version,
-        'mangaId': mangaId,
-        'count': indexCount,
-        'latestNumber': latestNumber,
-      }),
-    );
   }
 
   Future<List<CanonicalChapter>?> readChapters(String cacheKey) async {

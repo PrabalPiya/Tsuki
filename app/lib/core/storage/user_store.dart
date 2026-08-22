@@ -29,11 +29,15 @@ abstract interface class UserStore {
 }
 
 class LocalUserStore implements UserStore {
-  const LocalUserStore();
+  LocalUserStore({Future<SharedPreferences>? preferences})
+    : _preferences = preferences ?? SharedPreferences.getInstance();
+
+  final Future<SharedPreferences> _preferences;
+  final Map<String, Map<String, dynamic>> _progressPayloads = {};
 
   @override
   Future<UserSnapshot> load(String uid) async {
-    final p = await SharedPreferences.getInstance();
+    final p = await _preferences;
     final prefix = 'user.$uid.';
     final bookmarks =
         p.getStringList('${prefix}bookmarks')?.toSet() ?? <String>{};
@@ -58,10 +62,11 @@ class LocalUserStore implements UserStore {
     }
 
     final encoded = p.getString('${prefix}progress');
+    var progressPayload = <String, dynamic>{};
     if (encoded != null) {
       try {
-        final map = jsonDecode(encoded) as Map<String, dynamic>;
-        for (final entry in map.entries) {
+        progressPayload = jsonDecode(encoded) as Map<String, dynamic>;
+        for (final entry in progressPayload.entries) {
           try {
             progress[entry.key] = ReadingProgress.fromJson(
               entry.value as Map<String, dynamic>,
@@ -74,9 +79,13 @@ class LocalUserStore implements UserStore {
         // A corrupt local progress blob should never prevent app startup.
       }
     }
+    _progressPayloads[uid] = progressPayload;
 
-    // Remove the obsolete adult-mode preference if it exists from an old build.
-    await p.remove('${prefix}adult');
+    // Remove the obsolete adult-mode preference once instead of writing on
+    // every startup for current installations.
+    if (p.containsKey('${prefix}adult')) {
+      await p.remove('${prefix}adult');
+    }
 
     final safeBookmarks = bookmarks
         .where((id) => bookmarkedManga[id]?.isFriendlyContent == true)
@@ -109,25 +118,26 @@ class LocalUserStore implements UserStore {
     final safeIds = ids
         .where((id) => !blockedIds.contains(id))
         .toList(growable: false);
-    final p = await SharedPreferences.getInstance();
+    final p = await _preferences;
     await p.setStringList('user.$uid.bookmarks', safeIds);
     await p.setString(
       'user.$uid.catalog',
-      jsonEncode(
-        safeManga.map((key, value) => MapEntry(key, value.toJson())),
-      ),
+      jsonEncode(safeManga.map((key, value) => MapEntry(key, value.toJson()))),
     );
   }
 
   @override
   Future<void> saveProgress(String uid, ReadingProgress value) async {
-    final p = await SharedPreferences.getInstance();
+    final p = await _preferences;
     final key = 'user.$uid.progress';
-    Map<String, dynamic> map;
-    try {
-      map = jsonDecode(p.getString(key) ?? '{}') as Map<String, dynamic>;
-    } catch (_) {
-      map = <String, dynamic>{};
+    var map = _progressPayloads[uid];
+    if (map == null) {
+      try {
+        map = jsonDecode(p.getString(key) ?? '{}') as Map<String, dynamic>;
+      } catch (_) {
+        map = <String, dynamic>{};
+      }
+      _progressPayloads[uid] = map;
     }
     map[value.mangaId] = value.toJson();
     await p.setString(key, jsonEncode(map));
@@ -135,8 +145,9 @@ class LocalUserStore implements UserStore {
 
   @override
   Future<void> clearSession(String uid) async {
-    final p = await SharedPreferences.getInstance();
+    final p = await _preferences;
     final prefix = 'user.$uid.';
+    _progressPayloads.remove(uid);
     await Future.wait([
       p.remove('${prefix}bookmarks'),
       p.remove('${prefix}catalog'),

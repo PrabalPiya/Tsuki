@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -33,9 +32,9 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
   static const _swipeDistanceThreshold = .14;
   static const _swipeVelocityThreshold = 700.0;
 
-  static const _throwHorizontalFactor = 1.02;
-  static const _throwVerticalFactor = .23;
-  static const _throwRotation = .13;
+  static const _throwHorizontalFactor = 1.10;
+  static const _throwVerticalFactor = .16;
+  static const _throwRotation = .11;
 
   static const _dragPreviewHorizontal = 54.0;
   static const _dragPreviewVertical = 22.0;
@@ -43,6 +42,8 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
 
   static const _nextCardScale = .965;
   static const _nextCardYOffset = 14.0;
+  static const _cardTopClearance = 3.0;
+  static const _cardBottomClearance = 2.0;
 
   int _period = 0;
   double _dragY = 0;
@@ -134,49 +135,58 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
         false;
 
     return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 16,
-        title: const Text('Discover'),
-        actions: const [
-          Padding(
-            padding: EdgeInsets.only(right: 16),
-            child: LogoutButton(),
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-            child: _DiscoverPeriodTabs(
-              selectedIndex: _period,
-              onChanged: _changePeriod,
-            ),
-          ),
-          if (preview)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 8),
-              child: Text(
-                'Preview · live rankings unavailable',
-                style: TextStyle(color: AppColors.muted, fontSize: 12),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+              child: SizedBox(
+                height: kToolbarHeight,
+                child: Row(
+                  children: [
+                    Text(
+                      'Discover',
+                      style: Theme.of(context).appBarTheme.titleTextStyle,
+                    ),
+                    const Spacer(),
+                    const LogoutButton(),
+                  ],
+                ),
               ),
             ),
-          Expanded(
-            child: PageView.builder(
-              controller: _pageController,
-              itemCount: RankingPeriod.values.length,
-              physics: const PageScrollPhysics(),
-              onPageChanged: (value) {
-                if (!mounted) return;
-                HapticFeedback.selectionClick();
-                _setPeriod(value);
-              },
-              itemBuilder: (context, periodIndex) {
-                return _buildPeriodPage(periodIndex);
-              },
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+              child: _DiscoverPeriodTabs(
+                selectedIndex: _period,
+                onChanged: _changePeriod,
+              ),
             ),
-          ),
-        ],
+            if (preview)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'Preview · live rankings unavailable',
+                  style: TextStyle(color: AppColors.muted, fontSize: 12),
+                ),
+              ),
+            Expanded(
+              child: PageView.builder(
+                controller: _pageController,
+                clipBehavior: Clip.none,
+                itemCount: RankingPeriod.values.length,
+                physics: const PageScrollPhysics(),
+                onPageChanged: (value) {
+                  if (!mounted) return;
+                  HapticFeedback.selectionClick();
+                  _setPeriod(value);
+                },
+                itemBuilder: (context, periodIndex) {
+                  return _buildPeriodPage(periodIndex);
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -249,13 +259,23 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        return _buildCardStack(
-          periodIndex: periodIndex,
-          items: items,
-          index: index,
-          preview: preview,
-          width: constraints.maxWidth,
-          height: constraints.maxHeight,
+        return Padding(
+          padding: const EdgeInsets.only(
+            top: _cardTopClearance,
+            bottom: _cardBottomClearance,
+          ),
+          child: _buildCardStack(
+            periodIndex: periodIndex,
+            items: items,
+            index: index,
+            preview: preview,
+            width: constraints.maxWidth,
+            height:
+                (constraints.maxHeight -
+                        _cardTopClearance -
+                        _cardBottomClearance)
+                    .clamp(0.0, double.infinity),
+          ),
         );
       },
     );
@@ -429,7 +449,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
             child: OneTimeHint(
               id: 'discover_swipe',
               icon: Icons.swipe_vertical_rounded,
-              text: 'Swipe up for next · down for previous',
+              text: 'Swipe up for next, down for previous',
             ),
           ),
         ],
@@ -868,15 +888,12 @@ class _DiscoverCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final marked = ref.watch(userLibraryProvider).bookmarks.contains(manga.id);
-    unawaited(
-      ref
-          .read(catalogProvider)
-          .prewarmChapters(manga, allowAdult: false),
+    final marked = ref.watch(
+      userLibraryProvider.select((state) => state.bookmarks.contains(manga.id)),
     );
 
     final periodLabel = ['Trending', 'Top Rated', 'Popular'][period];
-    final details = ref.watch(catalogProvider).cached(manga.id);
+    final details = ref.read(catalogProvider).cached(manga.id);
     final chapterLabel =
         ref.watch(chapterSummaryLabelProvider(manga)).valueOrNull ??
         (details ?? manga).verifiedChapterDisplayLabel;
@@ -884,6 +901,9 @@ class _DiscoverCard extends ConsumerWidget {
     final rawSynopsis = (details?.synopsis.isNotEmpty ?? false)
         ? details!.synopsis
         : manga.synopsis;
+    final coverDecodeWidth = (430 * MediaQuery.devicePixelRatioOf(context))
+        .ceil()
+        .clamp(320, 1400);
 
     final synopsis = summarizeSynopsis(rawSynopsis);
     final genreLabel = (details ?? manga).genreLabel;
@@ -899,11 +919,12 @@ class _DiscoverCard extends ConsumerWidget {
             child: Material(
               color: AppColors.surface,
               child: InkWell(
-                onTap: () async {
-                  await ref
-                      .read(catalogProvider)
-                      .prewarmChapters(manga, allowAdult: false);
-                  if (!context.mounted) return;
+                onTap: () {
+                  unawaited(
+                    ref
+                        .read(catalogProvider)
+                        .prewarmChapters(manga, allowAdult: false),
+                  );
                   context.push('/manga/${Uri.encodeComponent(manga.id)}');
                 },
                 child: Stack(
@@ -915,10 +936,13 @@ class _DiscoverCard extends ConsumerWidget {
                           : CachedNetworkImage(
                               imageUrl: manga.coverUrl,
                               cacheManager: MangaImageCache.instance,
+                              memCacheWidth: coverDecodeWidth,
                               fit: BoxFit.cover,
-                              placeholder: (_, __) =>
+                              fadeInDuration: const Duration(milliseconds: 120),
+                              fadeOutDuration: Duration.zero,
+                              placeholder: (_, _) =>
                                   _CoverFallback(title: manga.title),
-                              errorWidget: (_, __, ___) =>
+                              errorWidget: (_, _, _) =>
                                   _CoverFallback(title: manga.title),
                             ),
                     ),
@@ -1042,7 +1066,9 @@ class _DiscoverCard extends ConsumerWidget {
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context).textTheme.bodyMedium
                                     ?.copyWith(
-                                      color: Colors.white.withValues(alpha: .94),
+                                      color: Colors.white.withValues(
+                                        alpha: .94,
+                                      ),
                                       height: 1.45,
                                       letterSpacing: .02,
                                     ),
@@ -1051,6 +1077,7 @@ class _DiscoverCard extends ConsumerWidget {
                               _BookmarkButton(
                                 bookmarked: marked,
                                 onPressed: () {
+                                  HapticFeedback.selectionClick();
                                   ref
                                       .read(userLibraryProvider.notifier)
                                       .toggleBookmark(manga);
@@ -1176,48 +1203,74 @@ class _InfoChip extends StatelessWidget {
   }
 }
 
-class _BookmarkButton extends StatelessWidget {
+class _BookmarkButton extends StatefulWidget {
   const _BookmarkButton({required this.bookmarked, required this.onPressed});
 
   final bool bookmarked;
   final VoidCallback onPressed;
 
   @override
+  State<_BookmarkButton> createState() => _BookmarkButtonState();
+}
+
+class _BookmarkButtonState extends State<_BookmarkButton> {
+  late bool _visualBookmarked = widget.bookmarked;
+
+  @override
+  void didUpdateWidget(covariant _BookmarkButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.bookmarked != widget.bookmarked) {
+      _visualBookmarked = widget.bookmarked;
+    }
+  }
+
+  void _press() {
+    setState(() {
+      _visualBookmarked = !_visualBookmarked;
+    });
+    widget.onPressed();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final bookmarked = _visualBookmarked;
+
     return RepaintBoundary(
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: IconButton(
-              onPressed: onPressed,
-              tooltip: bookmarked ? 'Bookmarked' : 'Bookmark',
-              style: IconButton.styleFrom(
-                backgroundColor: bookmarked
-                    ? AppColors.accent.withValues(alpha: .3)
-                    : AppColors.raised.withValues(alpha: .6),
-                foregroundColor: bookmarked ? AppColors.accent : AppColors.text,
-                side: bookmarked
-                    ? BorderSide(
-                        color: AppColors.accent.withValues(alpha: .65),
-                        width: 1.2,
-                      )
-                    : const BorderSide(color: AppColors.outline, width: 1),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-              icon: Icon(
-                bookmarked
-                    ? Icons.favorite_rounded
-                    : Icons.favorite_border_rounded,
-                size: 22,
-              ),
-              padding: EdgeInsets.zero,
+      child: Transform.scale(
+        scale: bookmarked ? 1.035 : 1.0,
+        child: Container(
+          width: double.infinity,
+          height: 50,
+          decoration: BoxDecoration(
+            color: bookmarked
+                ? AppColors.accent.withValues(alpha: .30)
+                : AppColors.raised.withValues(alpha: .72),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: bookmarked
+                  ? AppColors.accent.withValues(alpha: .65)
+                  : AppColors.outline,
+              width: bookmarked ? 1.2 : 1,
             ),
+          ),
+          child: IconButton(
+            onPressed: _press,
+            tooltip: bookmarked ? 'Bookmarked' : 'Bookmark',
+            style: IconButton.styleFrom(
+              backgroundColor: Colors.transparent,
+              foregroundColor: bookmarked ? AppColors.accent : AppColors.text,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            icon: Icon(
+              bookmarked
+                  ? Icons.favorite_rounded
+                  : Icons.favorite_border_rounded,
+              key: ValueKey<bool>(bookmarked),
+              size: 22,
+            ),
+            padding: EdgeInsets.zero,
           ),
         ),
       ),

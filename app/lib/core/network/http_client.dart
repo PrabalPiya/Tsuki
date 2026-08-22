@@ -32,14 +32,17 @@ Dio createHttpClient({String? baseUrl}) {
       onError: (error, handler) async {
         final request = error.requestOptions;
         final status = error.response?.statusCode;
+        final method = request.method.toUpperCase();
+        final idempotent = method == 'GET' || method == 'HEAD';
         final retryable =
-            status == 429 ||
-            status == 502 ||
-            status == 503 ||
-            status == 504 ||
-            error.type == DioExceptionType.connectionError ||
-            error.type == DioExceptionType.connectionTimeout ||
-            error.type == DioExceptionType.receiveTimeout;
+            idempotent &&
+            (status == 429 ||
+                status == 502 ||
+                status == 503 ||
+                status == 504 ||
+                error.type == DioExceptionType.connectionError ||
+                error.type == DioExceptionType.connectionTimeout ||
+                error.type == DioExceptionType.receiveTimeout);
 
         if (retryable && request.extra['tsukiRetried'] != true) {
           final retryAfter =

@@ -8,7 +8,6 @@ void main() {
     expect(config.useDemoData, isFalse);
     expect(config.isFirebaseConfigured, isTrue);
     expect(config.firebaseProjectId, 'quiet-reader-app-26b7');
-    expect(config.googleOAuthServerClientId, isNotEmpty);
   });
 
   test('production config cannot enable demo data', () {

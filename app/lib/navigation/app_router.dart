@@ -18,30 +18,27 @@ final routerProvider = Provider<GoRouter>(
         branches: [
           StatefulShellBranch(
             routes: [
-              GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
+              GoRoute(path: '/home', builder: (_, _) => const HomeScreen()),
             ],
           ),
           StatefulShellBranch(
             routes: [
               GoRoute(
                 path: '/discover',
-                builder: (_, __) => const DiscoverScreen(),
+                builder: (_, _) => const DiscoverScreen(),
               ),
             ],
           ),
           StatefulShellBranch(
             routes: [
-              GoRoute(
-                path: '/search',
-                builder: (_, __) => const SearchScreen(),
-              ),
+              GoRoute(path: '/search', builder: (_, _) => const SearchScreen()),
             ],
           ),
           StatefulShellBranch(
             routes: [
               GoRoute(
                 path: '/library',
-                builder: (_, __) => const LibraryScreen(),
+                builder: (_, _) => const LibraryScreen(),
               ),
             ],
           ),

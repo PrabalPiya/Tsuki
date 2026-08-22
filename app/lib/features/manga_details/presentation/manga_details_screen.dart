@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -13,7 +14,6 @@ import '../../../core/storage/image_cache.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/synopsis_summary.dart';
 
-const double _detailRadius = 18.0;
 const double _detailPadding = 28.0;
 const double _chapterTileHeight = 60.0;
 const double _chapterSeparatorHeight = 10.0;
@@ -34,6 +34,12 @@ const double _chapterBottomVisualSpacing = 22.0;
 const double _maxCoverRotation = 0.70;
 const Duration _coverReturnDuration = Duration(milliseconds: 300);
 
+final _mangaDetailsProvider = FutureProvider.autoDispose.family<Manga?, String>(
+  (ref, mangaId) {
+    return ref.watch(catalogProvider).details(mangaId);
+  },
+);
+
 class MangaDetailsScreen extends ConsumerWidget {
   const MangaDetailsScreen({super.key, required this.mangaId});
 
@@ -41,9 +47,10 @@ class MangaDetailsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final repository = ref.watch(catalogProvider);
-    final library = ref.watch(userLibraryProvider);
-    final saved = library.bookmarkedManga[mangaId];
+    final repository = ref.read(catalogProvider);
+    final saved = ref.watch(
+      userLibraryProvider.select((state) => state.bookmarkedManga[mangaId]),
+    );
 
     if (saved != null && saved.isFriendlyContent) {
       repository.remember(saved);
@@ -54,46 +61,41 @@ class MangaDetailsScreen extends ConsumerWidget {
       return _Details(manga: cached);
     }
 
-    return FutureBuilder<Manga?>(
-      future: repository.details(mangaId),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
+    return ref
+        .watch(_mangaDetailsProvider(mangaId))
+        .when(
+          loading: () =>
+              const Scaffold(body: Center(child: CircularProgressIndicator())),
+          error: (_, _) {
+            return Scaffold(
+              body: _ModernMessage(
+                icon: Icons.error_outline_rounded,
+                message: 'Unable to load manga details.',
+                onRetry: () {
+                  if (context.canPop()) context.pop();
+                },
+                retryLabel: 'Go Back',
+              ),
+            );
+          },
+          data: (manga) {
+            if (manga == null || !manga.isFriendlyContent) {
+              return Scaffold(
+                body: _ModernMessage(
+                  icon: Icons.menu_book_outlined,
+                  message: 'Manga unavailable right now.',
+                  onRetry: () {
+                    if (context.canPop()) context.pop();
+                  },
+                  retryLabel: 'Go Back',
+                ),
+              );
+            }
 
-        if (snapshot.hasError) {
-          return Scaffold(
-            body: _ModernMessage(
-              icon: Icons.error_outline_rounded,
-              message: 'Unable to load manga details.',
-              onRetry: () {
-                if (context.canPop()) context.pop();
-              },
-              retryLabel: 'Go Back',
-            ),
-          );
-        }
-
-        final manga = snapshot.data;
-        if (manga == null || !manga.isFriendlyContent) {
-          return Scaffold(
-            body: _ModernMessage(
-              icon: Icons.menu_book_outlined,
-              message: 'Manga unavailable right now.',
-              onRetry: () {
-                if (context.canPop()) context.pop();
-              },
-              retryLabel: 'Go Back',
-            ),
-          );
-        }
-
-        repository.remember(manga);
-        return _Details(manga: manga);
-      },
-    );
+            repository.remember(manga);
+            return _Details(manga: manga);
+          },
+        );
   }
 }
 
@@ -104,7 +106,14 @@ class _Details extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final library = ref.watch(userLibraryProvider);
+    final library = ref.watch(
+      userLibraryProvider.select(
+        (state) => (
+          bookmarked: state.bookmarks.contains(manga.id),
+          progress: state.progress[manga.id],
+        ),
+      ),
+    );
 
     if (!manga.isFriendlyContent) {
       return Scaffold(
@@ -120,16 +129,17 @@ class _Details extends ConsumerWidget {
     }
 
     final chaptersAsync = ref.watch(chapterProvider(manga));
-    final bookmarked = library.bookmarks.contains(manga.id);
-    final progress = library.progress[manga.id];
+    final bookmarked = library.bookmarked;
+    final progress = library.progress;
     final loadedChapters =
         chaptersAsync.valueOrNull ?? const <CanonicalChapter>[];
     final readableChapters = loadedChapters
         .where((chapter) => chapter.hasDirectlyReadableCopy)
         .toList(growable: false);
     final chapterCountLabel = _chapterCountLabelFor(readableChapters);
-    final startReadingLabel =
-        progress == null ? 'Start Reading' : 'Continue Reading';
+    final startReadingLabel = progress == null
+        ? 'Start Reading'
+        : 'Continue Reading';
 
     VoidCallback? onStartReading;
     if (readableChapters.isNotEmpty) {
@@ -177,6 +187,7 @@ class _Details extends ConsumerWidget {
                 }
               },
               onToggleBookmark: () {
+                HapticFeedback.selectionClick();
                 ref.read(userLibraryProvider.notifier).toggleBookmark(manga);
               },
             ),
@@ -278,8 +289,7 @@ class _Details extends ConsumerWidget {
                       ),
                       child: _ModernMessage(
                         icon: Icons.menu_book_outlined,
-                        message:
-                            'No readable English chapters are available for this title.',
+                        message: 'No readable English chapters are available for this title.',
                         retryLabel: 'Refresh',
                         onRetry: () {
                           ref.invalidate(chapterProvider(manga));
@@ -473,18 +483,24 @@ class _MangaHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final coverUrl = manga.coverUrl.trim();
+    final width = MediaQuery.sizeOf(context).width;
+    final coverDecodeWidth = (width * MediaQuery.devicePixelRatioOf(context))
+        .ceil()
+        .clamp(320, 1800);
 
     final Widget cover = coverUrl.isEmpty
         ? _HeroFallback(title: manga.title)
         : CachedNetworkImage(
             imageUrl: coverUrl,
             cacheManager: MangaImageCache.instance,
+            memCacheWidth: coverDecodeWidth,
             fit: BoxFit.cover,
-            placeholder: (_, __) => _HeroFallback(title: manga.title),
-            errorWidget: (_, __, ___) => _HeroFallback(title: manga.title),
+            fadeInDuration: const Duration(milliseconds: 120),
+            fadeOutDuration: Duration.zero,
+            placeholder: (_, _) => _HeroFallback(title: manga.title),
+            errorWidget: (_, _, _) => _HeroFallback(title: manga.title),
           );
 
-    final width = MediaQuery.sizeOf(context).width;
     final baseHeroHeight = width / _heroAspectRatio;
     final synopsis = summarizeSynopsis(manga.synopsis);
     final genreLabel = manga.genreLabel;
@@ -931,11 +947,16 @@ class _RotatingCoverCardState extends State<_RotatingCoverCard>
   @override
   Widget build(BuildContext context) {
     final screen = MediaQuery.sizeOf(context);
-    final double cardWidth =
-        screen.width * 0.76 > 360 ? 360 : screen.width * 0.76;
+    final double cardWidth = screen.width * 0.76 > 360
+        ? 360
+        : screen.width * 0.76;
     final cardHeight = cardWidth * 1.50;
-    final rotationPercent =
-        (_rotationY / _maxCoverRotation).clamp(-1.0, 1.0);
+    final coverDecodeWidth =
+        (cardWidth * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(
+          320,
+          1400,
+        );
+    final rotationPercent = (_rotationY / _maxCoverRotation).clamp(-1.0, 1.0);
     final tiltStrength = rotationPercent.abs();
 
     return GestureDetector(
@@ -975,7 +996,10 @@ class _RotatingCoverCardState extends State<_RotatingCoverCard>
                 CachedNetworkImage(
                   imageUrl: widget.manga.coverUrl,
                   cacheManager: MangaImageCache.instance,
+                  memCacheWidth: coverDecodeWidth,
                   fit: BoxFit.cover,
+                  fadeInDuration: const Duration(milliseconds: 120),
+                  fadeOutDuration: Duration.zero,
                   placeholder: (context, url) =>
                       _HeroFallback(title: widget.manga.title),
                   errorWidget: (context, url, error) =>
@@ -1056,32 +1080,62 @@ class _HeroFallback extends StatelessWidget {
   }
 }
 
-class _BookmarkButton extends StatelessWidget {
+class _BookmarkButton extends StatefulWidget {
   const _BookmarkButton({required this.bookmarked, required this.onPressed});
 
   final bool bookmarked;
   final VoidCallback onPressed;
 
   @override
+  State<_BookmarkButton> createState() => _BookmarkButtonState();
+}
+
+class _BookmarkButtonState extends State<_BookmarkButton> {
+  late bool _visualBookmarked = widget.bookmarked;
+
+  @override
+  void didUpdateWidget(covariant _BookmarkButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.bookmarked != widget.bookmarked) {
+      _visualBookmarked = widget.bookmarked;
+    }
+  }
+
+  void _press() {
+    setState(() {
+      _visualBookmarked = !_visualBookmarked;
+    });
+    widget.onPressed();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: SizedBox(
+    final bookmarked = _visualBookmarked;
+
+    return RepaintBoundary(
+      child: Transform.scale(
+        scale: bookmarked ? 1.035 : 1.0,
+        child: Container(
           width: double.infinity,
           height: 50,
+          decoration: BoxDecoration(
+            color: bookmarked
+                ? AppColors.accent.withValues(alpha: 0.30)
+                : AppColors.raised.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: bookmarked
+                  ? AppColors.accent.withValues(alpha: 0.65)
+                  : AppColors.outline,
+              width: bookmarked ? 1.2 : 1,
+            ),
+          ),
           child: IconButton(
-            onPressed: onPressed,
+            onPressed: _press,
             tooltip: bookmarked ? 'Bookmarked' : 'Bookmark',
             style: IconButton.styleFrom(
-              backgroundColor: bookmarked
-                  ? AppColors.accent.withValues(alpha: 0.30)
-                  : AppColors.raised.withValues(alpha: 0.60),
+              backgroundColor: Colors.transparent,
               foregroundColor: bookmarked ? AppColors.accent : AppColors.text,
-              side: bookmarked
-                  ? BorderSide(color: AppColors.accent.withValues(alpha: 0.65))
-                  : const BorderSide(color: AppColors.outline),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
@@ -1090,6 +1144,7 @@ class _BookmarkButton extends StatelessWidget {
               bookmarked
                   ? Icons.favorite_rounded
                   : Icons.favorite_border_rounded,
+              key: ValueKey<bool>(bookmarked),
               size: 22,
             ),
           ),

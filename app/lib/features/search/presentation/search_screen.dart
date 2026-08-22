@@ -48,7 +48,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(searchProvider);
     final notifier = ref.read(searchProvider.notifier);
 
     ref.listen<SearchState>(searchProvider, (previous, next) {
@@ -65,134 +64,171 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         titleSpacing: 16,
         title: const Text('Search'),
         actions: const [
-          Padding(
-            padding: EdgeInsets.only(right: 16),
-            child: LogoutButton(),
-          ),
+          Padding(padding: EdgeInsets.only(right: 16), child: LogoutButton()),
         ],
       ),
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: TextField(
-              controller: _controller,
-              focusNode: _focus,
-              textInputAction: TextInputAction.search,
-              onChanged: (value) {
-                notifier.updateQuery(value);
-                setState(() {});
+            child: ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _controller,
+              builder: (context, value, _) {
+                return TextField(
+                  controller: _controller,
+                  focusNode: _focus,
+                  textInputAction: TextInputAction.search,
+                  onChanged: notifier.updateQuery,
+                  onSubmitted: notifier.submit,
+                  decoration: InputDecoration(
+                    hintText: 'Search manga',
+                    prefixIcon: const Icon(Icons.search_rounded),
+                    suffixIcon: value.text.isEmpty
+                        ? null
+                        : IconButton(
+                            onPressed: () {
+                              _controller.clear();
+                              notifier.updateQuery('');
+                            },
+                            icon: const Icon(Icons.close_rounded),
+                            tooltip: 'Clear search',
+                          ),
+                  ),
+                );
               },
-              onSubmitted: notifier.submit,
-              decoration: InputDecoration(
-                hintText: 'Search manga',
-                prefixIcon: const Icon(Icons.search_rounded),
-                suffixIcon: _controller.text.isEmpty
-                    ? null
-                    : IconButton(
-                        onPressed: () {
-                          _controller.clear();
-                          notifier.updateQuery('');
-                          setState(() {});
-                        },
-                        icon: const Icon(Icons.close_rounded),
-                        tooltip: 'Clear search',
-                      ),
-              ),
             ),
           ),
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 180),
-            child: state.loading
-                ? const LinearProgressIndicator(
-                    key: ValueKey('search-progress'),
-                    minHeight: 2,
-                  )
-                : const SizedBox(key: ValueKey('search-idle'), height: 2),
-          ),
-          if (state.error != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 10, 18, 2),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.cloud_off_rounded,
-                    color: AppColors.muted,
-                    size: 17,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      state.error!,
-                      style: const TextStyle(
-                        color: AppColors.muted,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: notifier.submit,
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            ),
-          Expanded(
-            child: !state.hasBrowseRequest
-                ? const _SearchHint()
-                : state.results.isEmpty && !state.loading
-                    ? const _NoResults()
-                    : state.submitted || state.query.trim().length < 2
-                        ? _buildResultGrid(state.results)
-                        : _buildSuggestionList(state.results),
-          ),
+          const _SearchProgress(),
+          _SearchErrorBanner(onRetry: () => notifier.submit()),
+          Expanded(child: _SearchResults(openManga: _openManga)),
         ],
       ),
     );
   }
+}
 
-  Widget _buildSuggestionList(List<Manga> items) {
+class _SearchProgress extends ConsumerWidget {
+  const _SearchProgress();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final loading = ref.watch(searchProvider.select((state) => state.loading));
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      child: loading
+          ? const LinearProgressIndicator(
+              key: ValueKey('search-progress'),
+              minHeight: 2,
+            )
+          : const SizedBox(key: ValueKey('search-idle'), height: 2),
+    );
+  }
+}
+
+class _SearchErrorBanner extends ConsumerWidget {
+  const _SearchErrorBanner({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final error = ref.watch(searchProvider.select((state) => state.error));
+    if (error == null) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 2),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded, color: AppColors.muted, size: 17),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              error,
+              style: const TextStyle(color: AppColors.muted, fontSize: 12),
+            ),
+          ),
+          TextButton(onPressed: onRetry, child: const Text('Retry')),
+        ],
+      ),
+    );
+  }
+}
+
+class _SearchResults extends ConsumerWidget {
+  const _SearchResults({required this.openManga});
+
+  final Future<void> Function(Manga manga) openManga;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(searchProvider);
+
+    if (!state.hasBrowseRequest) return const _SearchHint();
+    if (state.results.isEmpty && !state.loading) return const _NoResults();
+    if (state.submitted) {
+      return _SearchResultGrid(items: state.results, openManga: openManga);
+    }
+    return _SearchSuggestionList(items: state.results, openManga: openManga);
+  }
+}
+
+class _SearchSuggestionList extends StatelessWidget {
+  const _SearchSuggestionList({required this.items, required this.openManga});
+
+  final List<Manga> items;
+  final Future<void> Function(Manga manga) openManga;
+
+  @override
+  Widget build(BuildContext context) {
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
       itemCount: items.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, index) {
         final manga = items[index];
-        final chapterLabel = manga.verifiedChapterDisplayLabel;
+        final chapterLabel = manga.catalogChapterDisplayLabel;
 
-        return Card(
-          child: ListTile(
-            minVerticalPadding: 10,
-            leading: SizedBox(
-              width: 52,
-              child: CoverArt(
-                url: manga.coverUrl,
-                title: manga.title,
-                borderRadius: 10,
-              ),
+        return ListTile(
+          contentPadding: EdgeInsets.zero,
+          minVerticalPadding: 10,
+          leading: SizedBox(
+            width: 52,
+            child: CoverArt(
+              url: manga.coverUrl,
+              title: manga.title,
+              borderRadius: 10,
             ),
-            title: Text(
-              manga.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            subtitle: Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: _MetaStrip(
-                manga: manga,
-                chapterLabel: chapterLabel,
-                mode: _MetaStripMode.suggestion,
-              ),
-            ),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => _openManga(manga),
           ),
+          title: Text(
+            manga.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: _MetaStrip(
+              manga: manga,
+              chapterLabel: chapterLabel,
+              mode: _MetaStripMode.suggestion,
+            ),
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: () => openManga(manga),
         );
       },
     );
   }
+}
 
-  Widget _buildResultGrid(List<Manga> items) {
+class _SearchResultGrid extends StatelessWidget {
+  const _SearchResultGrid({required this.items, required this.openManga});
+
+  final List<Manga> items;
+  final Future<void> Function(Manga manga) openManga;
+
+  @override
+  Widget build(BuildContext context) {
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 22),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -204,22 +240,17 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       itemCount: items.length,
       itemBuilder: (context, index) {
         final manga = items[index];
-        if (index < 3) {
-          unawaited(
-            ref
-                .read(catalogProvider)
-                .prewarmChapters(manga, allowAdult: false),
-          );
-        }
-        final chapterLabel = manga.verifiedChapterDisplayLabel;
+        final chapterLabel = manga.catalogChapterDisplayLabel;
 
         return InkWell(
           borderRadius: BorderRadius.circular(18),
-          onTap: () => _openManga(manga),
+          onTap: () => openManga(manga),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: CoverArt(url: manga.coverUrl, title: manga.title)),
+              Expanded(
+                child: CoverArt(url: manga.coverUrl, title: manga.title),
+              ),
               const SizedBox(height: 9),
               Text(
                 manga.title,
@@ -322,10 +353,7 @@ class _MetaPill extends StatelessWidget {
               text,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
             ),
           ),
         ],
@@ -368,7 +396,7 @@ class _NoResults extends StatelessWidget {
       child: Padding(
         padding: EdgeInsets.all(32),
         child: Text(
-          'No readable manga match this search.',
+          'No manga match this search.',
           textAlign: TextAlign.center,
           style: TextStyle(color: AppColors.muted),
         ),

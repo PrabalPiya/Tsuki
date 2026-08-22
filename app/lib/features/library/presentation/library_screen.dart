@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -15,15 +17,11 @@ import '../../../shared/widgets/logout_button.dart';
  * LIBRARY PROVIDER
  * ========================================================= */
 
-final libraryItemsProvider = FutureProvider.autoDispose<List<Manga>>((
-  ref,
-) async {
+final libraryItemsProvider = Provider<List<Manga>>((ref) {
   final state = ref.watch(
     userLibraryProvider.select(
-      (value) => (
-        bookmarks: value.bookmarks,
-        bookmarkedManga: value.bookmarkedManga,
-      ),
+      (value) =>
+          (bookmarks: value.bookmarks, bookmarkedManga: value.bookmarkedManga),
     ),
   );
 
@@ -38,13 +36,6 @@ final libraryItemsProvider = FutureProvider.autoDispose<List<Manga>>((
       if (manga != null && manga.isFriendlyContent) {
         repository.remember(manga);
         items.add(manga);
-        unawaited(repository.prewarmChapters(manga, allowAdult: false));
-      } else {
-        unawaited(
-          repository.details(id).then((value) {
-            if (value != null) repository.remember(value);
-          }).catchError((_) => null),
-        );
       }
     } catch (_) {
       // Keep loading other bookmarks.
@@ -204,34 +195,31 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final libraryState = ref.watch(userLibraryProvider);
+    final libraryLoading = ref.watch(
+      userLibraryProvider.select((state) => state.loading),
+    );
+    final freshItems = ref.watch(libraryItemsProvider);
 
-    final itemsState = ref.watch(libraryItemsProvider);
-
-    final freshItems = itemsState.valueOrNull;
-
-    if (freshItems != null) {
-      if (_exitingIds.isEmpty) {
-        _lastItems = freshItems;
-      } else if (_lastItems.isEmpty) {
-        _lastItems = freshItems;
-      }
-
-      final freshIds = freshItems.map((manga) => manga.id).toSet();
-      final settledIds = _hiddenIds.where((id) => !freshIds.contains(id)).toSet();
-
-      if (settledIds.isNotEmpty) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-
-          setState(() {
-            _hiddenIds.removeAll(settledIds);
-          });
-        });
-      }
+    if (_exitingIds.isEmpty) {
+      _lastItems = freshItems;
+    } else if (_lastItems.isEmpty) {
+      _lastItems = freshItems;
     }
 
-    final sourceItems = _exitingIds.isEmpty ? freshItems ?? _lastItems : _lastItems;
+    final freshIds = freshItems.map((manga) => manga.id).toSet();
+    final settledIds = _hiddenIds.where((id) => !freshIds.contains(id)).toSet();
+
+    if (settledIds.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        setState(() {
+          _hiddenIds.removeAll(settledIds);
+        });
+      });
+    }
+
+    final sourceItems = _exitingIds.isEmpty ? freshItems : _lastItems;
     final items = sourceItems
         .where((manga) => !_hiddenIds.contains(manga.id))
         .toList(growable: false);
@@ -243,18 +231,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         title: const Text('Library'),
 
         actions: const [
-          Padding(
-            padding: EdgeInsets.only(right: 16),
-            child: LogoutButton(),
-          ),
+          Padding(padding: EdgeInsets.only(right: 16), child: LogoutButton()),
         ],
       ),
 
       body: Stack(
         children: [
-          Positioned.fill(
-            child: _buildContent(libraryState, itemsState, items),
-          ),
+          Positioned.fill(child: _buildContent(libraryLoading, items)),
 
           if (items.isNotEmpty && !_dragging)
             const Positioned(
@@ -265,7 +248,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                 child: OneTimeHint(
                   id: 'library_drag_remove',
                   icon: Icons.touch_app_rounded,
-                  text: 'Hold & drag down to remove',
+                  text: 'Press and hold, then drag down to remove',
                 ),
               ),
             ),
@@ -273,10 +256,10 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
           Positioned.fill(
             child: IgnorePointer(
               child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOutCubic,
+                duration: const Duration(milliseconds: 210),
+                curve: Curves.easeInOutCubic,
                 opacity: _dragging ? 1.0 : 0.0,
-                child: Container(color: Colors.black.withValues(alpha: 0.42)),
+                child: Container(color: Colors.black.withValues(alpha: 0.62)),
               ),
             ),
           ),
@@ -303,25 +286,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     );
   }
 
-  Widget _buildContent(
-    dynamic libraryState,
-    AsyncValue<List<Manga>> itemsState,
-    List<Manga> items,
-  ) {
-    if ((libraryState.loading || itemsState.isLoading) && _lastItems.isEmpty) {
+  Widget _buildContent(bool libraryLoading, List<Manga> items) {
+    if (libraryLoading && _lastItems.isEmpty) {
       return const Center(child: CircularProgressIndicator());
-    }
-
-    if (itemsState.hasError) {
-      return _LibraryMessage(
-        icon: Icons.cloud_off_rounded,
-        title: 'Library unavailable',
-        message: 'Your library could not be loaded right now.',
-        actionLabel: 'Retry',
-        onAction: () {
-          ref.invalidate(libraryItemsProvider);
-        },
-      );
     }
 
     if (items.isEmpty) {
@@ -379,7 +346,8 @@ class _AnimatedLibraryGrid extends StatelessWidget {
         final tileHeight = tileWidth / _childAspectRatio;
         final rows = (items.length / _columns).ceil();
         final rowGaps = rows <= 0 ? 0 : rows - 1;
-        final contentHeight = _topPadding +
+        final contentHeight =
+            _topPadding +
             _bottomPadding +
             (rows * tileHeight) +
             (rowGaps * _mainAxisSpacing);
@@ -393,23 +361,26 @@ class _AnimatedLibraryGrid extends StatelessWidget {
                 for (var index = 0; index < items.length; index++)
                   AnimatedPositioned(
                     key: ValueKey(items[index].id),
-                    duration: const Duration(milliseconds: 560),
+                    duration: const Duration(milliseconds: 280),
                     curve: Curves.easeOutCubic,
-                    left: _horizontalPadding +
+                    left:
+                        _horizontalPadding +
                         (index % _columns) * (tileWidth + _crossAxisSpacing),
-                    top: _topPadding +
-                        (index ~/ _columns) *
-                            (tileHeight + _mainAxisSpacing),
+                    top:
+                        _topPadding +
+                        (index ~/ _columns) * (tileHeight + _mainAxisSpacing),
                     width: tileWidth,
                     height: tileHeight,
                     child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 170),
+                      duration: const Duration(milliseconds: 150),
                       curve: Curves.easeOutCubic,
                       opacity: exitingIds.contains(items[index].id) ? 0.0 : 1.0,
                       child: AnimatedScale(
-                        duration: const Duration(milliseconds: 170),
+                        duration: const Duration(milliseconds: 150),
                         curve: Curves.easeOutCubic,
-                        scale: exitingIds.contains(items[index].id) ? 0.92 : 1.0,
+                        scale: exitingIds.contains(items[index].id)
+                            ? 0.92
+                            : 1.0,
                         child: itemBuilder(
                           context,
                           items[index],
@@ -616,29 +587,38 @@ class _LibraryItemState extends State<_LibraryItem> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
+    return Semantics(
+      label: widget.manga.title,
+      hint: 'Tap for details. Press and hold, then drag down to remove.',
+      customSemanticsActions: {
+        const CustomSemanticsAction(label: 'Remove from library'): () {
+          widget.onRemove(widget.manga);
+        },
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
 
-      onLongPressStart: widget.exiting ? null : _onLongPressStart,
+        onLongPressStart: widget.exiting ? null : _onLongPressStart,
 
-      onLongPressMoveUpdate: widget.exiting ? null : _onLongPressMove,
+        onLongPressMoveUpdate: widget.exiting ? null : _onLongPressMove,
 
-      onLongPressEnd: widget.exiting ? null : _onLongPressEnd,
+        onLongPressEnd: widget.exiting ? null : _onLongPressEnd,
 
-      onLongPressCancel: widget.exiting
-          ? null
-          : () {
-              unawaited(_cancel());
-            },
+        onLongPressCancel: widget.exiting
+            ? null
+            : () {
+                unawaited(_cancel());
+              },
 
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 140),
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 140),
 
-        curve: Curves.easeOutCubic,
+          curve: Curves.easeOutCubic,
 
-        opacity: _dragging ? 0.0 : 1.0,
+          opacity: _dragging ? 0.0 : 1.0,
 
-        child: _LibraryMangaTile(manga: widget.manga),
+          child: _LibraryMangaTile(manga: widget.manga),
+        ),
       ),
     );
   }
@@ -728,7 +708,6 @@ class _FloatingMangaState extends State<_FloatingManga> {
     final double rawOpacity = deleting ? 0.0 : 1.0 - (widget.pull * 0.16);
 
     final double opacity = rawOpacity.clamp(0.0, 1.0).toDouble();
-
     final double lift = canceling
         ? 0.0
         : _entered
@@ -761,35 +740,16 @@ class _FloatingMangaState extends State<_FloatingManga> {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(18),
 
-                boxShadow: _entered && !canceling
-                    ? [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.48),
-                          blurRadius: 28,
-                          spreadRadius: 1,
-                          offset: const Offset(0, 12),
-                        ),
-                      ]
-                    : [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.18),
-                          blurRadius: 8,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
+                boxShadow: const [],
               ),
 
               child: Material(
                 color: Colors.transparent,
-
                 child: SizedBox(
                   width: widget.size.width,
-
                   height: widget.size.height,
-
                   child: _LibraryMangaTile(
                     manga: widget.manga,
-
                     interactive: false,
                   ),
                 ),
@@ -800,17 +760,13 @@ class _FloatingMangaState extends State<_FloatingManga> {
       ),
     );
 
-    if (deleting || canceling) {
-      return AnimatedPositioned(
-        duration: Duration(milliseconds: motionMs),
-        curve: motionCurve,
-        left: left,
-        top: top,
-        child: floatingChild,
-      );
-    }
-
-    return Positioned(left: left, top: top, child: floatingChild);
+    return AnimatedPositioned(
+      duration: Duration(milliseconds: deleting || canceling ? motionMs : 0),
+      curve: motionCurve,
+      left: left,
+      top: top,
+      child: floatingChild,
+    );
   }
 }
 
@@ -977,17 +933,11 @@ class _LibraryMessage extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.message,
-    this.actionLabel,
-    this.onAction,
   });
 
   final IconData icon;
   final String title;
   final String message;
-
-  final String? actionLabel;
-
-  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -1035,18 +985,6 @@ class _LibraryMessage extends StatelessWidget {
               style: Theme.of(context).textTheme.bodyMedium
                   ?.copyWith(color: AppColors.muted, height: 1.4),
             ),
-
-            if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: 18),
-
-              OutlinedButton.icon(
-                onPressed: onAction,
-
-                icon: const Icon(Icons.refresh_rounded),
-
-                label: Text(actionLabel!),
-              ),
-            ],
           ],
         ),
       ),

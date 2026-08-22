@@ -63,24 +63,21 @@ void main() {
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test(
-    'an unconfigured production build starts a usable local profile',
-    () async {
-      final controller = AuthController(_localConfig);
-      await Future<void>.delayed(Duration.zero);
+  test('an unconfigured production build requires remote accounts', () async {
+    final controller = AuthController(_localConfig);
+    await Future<void>.delayed(Duration.zero);
 
-      expect(controller.state.status, SessionStatus.ready);
-      expect(controller.state.uid, 'local-user');
-      expect(controller.state.isLocalProfile, isTrue);
+    expect(controller.state.status, SessionStatus.backendMissing);
+    expect(controller.state.uid, isNull);
+    expect(controller.state.isLocalProfile, isFalse);
 
-      await controller.signOut();
-      expect(controller.state.status, SessionStatus.ready);
-      controller.dispose();
-    },
-  );
+    await controller.signOut();
+    expect(controller.state.status, SessionStatus.backendMissing);
+    controller.dispose();
+  });
 
   test('local library metadata survives restart and clears safely', () async {
-    const store = LocalUserStore();
+    final store = LocalUserStore();
     await store.saveBookmarks('reader', {_manga.id}, {_manga.id: _manga});
 
     final restored = await store.load('reader');

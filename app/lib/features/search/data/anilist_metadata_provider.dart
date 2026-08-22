@@ -6,12 +6,10 @@ import 'metadata_provider.dart';
 
 /// AniList-backed catalogue metadata.
 ///
-/// Search/browse intentionally uses a small, stable subset of AniList's manga
-/// browse API. Keeping the request surface narrow makes Search reliable while
-/// still supporting internal browse options for genre, sort, status, and
-/// minimum chapters.
-class AniListMetadataProvider
-    implements MetadataProvider, BrowseMetadataProvider {
+/// Search uses a narrow, stable subset of AniList's manga API. Ranking feeds
+/// have dedicated methods below so unused browse options cannot complicate the
+/// user-facing search path.
+class AniListMetadataProvider implements MetadataProvider {
   AniListMetadataProvider({Dio? client, SynopsisService? synopsisService})
     : _client =
           client ?? createHttpClient(baseUrl: 'https://graphql.anilist.co'),
@@ -29,110 +27,26 @@ class AniListMetadataProvider
     genres isAdult''';
 
   @override
-  Future<List<Manga>> search(String query) {
-    return browse(
-      MangaBrowseRequest(
-        query: query,
-        sort: MangaBrowseSort.relevance,
-        perPage: 24,
-      ),
-    );
-  }
-
-  @override
-  Future<List<Manga>> browse(MangaBrowseRequest request) async {
-    final query = request.query.trim();
-    final variables = <String, Object?>{
-      'page': request.page,
-      'perPage': request.perPage.clamp(1, 50),
-      'isAdult': false,
-      'sort': _serverSort(request.sort, hasSearch: query.length >= 2),
-    };
-    final declarations = <String>[
-      r'$page: Int!',
-      r'$perPage: Int!',
-      r'$isAdult: Boolean!',
-      r'$sort: [MediaSort]!',
-    ];
-    final arguments = <String>[
-      'type: MANGA',
-      'isAdult: \$isAdult',
-      'sort: \$sort',
-    ];
-
-    if (query.length >= 2) {
-      variables['search'] = query;
-      declarations.add(r'$search: String');
-      arguments.add('search: \$search');
-    }
-
-    final status = _statusVariable(request.status);
-    if (status != null) {
-      variables['status'] = status;
-      declarations.add(r'$status: MediaStatus');
-      arguments.add('status: \$status');
-    }
-
-    if (request.genres.isNotEmpty) {
-      variables['genres'] = request.genres.toList();
-      declarations.add(r'$genres: [String]');
-      arguments.add('genre_in: \$genres');
-    }
-
-    if (request.minimumChapters != null) {
-      variables['minChapters'] = (request.minimumChapters! - 1).clamp(
-        0,
-        20000,
-      );
-      declarations.add(r'$minChapters: Int');
-      arguments.add('chapters_greater: \$minChapters');
-    }
+  Future<List<Manga>> search(String query) async {
+    final value = query.trim();
+    if (value.length < 2) return const <Manga>[];
 
     final document =
-        '''query BrowseManga(${declarations.join(', ')}) {
-      Page(page: \$page, perPage: \$perPage) {
-        media(${arguments.join(', ')}) {
-          id idMal title { romaji english native } synonyms
-          description(asHtml: false) status format countryOfOrigin
-          startDate { year } averageScore popularity
-          coverImage { extraLarge large } chapters volumes genres isAdult
-        }
+        '''query SearchManga(\$search: String!) {
+      Page(page: 1, perPage: 50) {
+        media(type: MANGA, isAdult: false, search: \$search,
+          sort: [SEARCH_MATCH, POPULARITY_DESC]) { $fields }
       }
     }''';
 
     final response = await _client.post<Map<String, dynamic>>(
       '',
-      data: <String, Object?>{'query': document, 'variables': variables},
+      data: <String, Object?>{
+        'query': document,
+        'variables': <String, Object?>{'search': value},
+      },
     );
-
-    final root = response.data?['data'];
-    if (root is! Map) return const <Manga>[];
-    final page = root['Page'];
-    if (page is! Map) return const <Manga>[];
-
-    final media = page['media'];
-    if (media is! List) return const <Manga>[];
-
-    var values = media
-        .whereType<Map>()
-        .map((raw) => _fromJson(Map<String, dynamic>.from(raw)))
-        .where((manga) => manga.isFriendlyContent)
-        .toList(growable: false);
-
-    // AniList does not expose a stable chapter-count MediaSort in all schema
-    // versions. Fetch with a safe catalogue sort and do this one sort locally.
-    if (request.sort == MangaBrowseSort.chapters) {
-      values = [...values]
-        ..sort((a, b) {
-          final chapters = b.metadataChapterCount.compareTo(
-            a.metadataChapterCount,
-          );
-          if (chapters != 0) return chapters;
-          return (b.popularity ?? 0).compareTo(a.popularity ?? 0);
-        });
-    }
-
-    return values;
+    return _decodePage(response);
   }
 
   @override
@@ -184,6 +98,10 @@ class AniListMetadataProvider
       '',
       data: <String, Object?>{'query': document},
     );
+    return _decodePage(response);
+  }
+
+  List<Manga> _decodePage(Response<Map<String, dynamic>> response) {
     final data = response.data?['data'];
     if (data is! Map) return const <Manga>[];
     final page = data['Page'];
@@ -196,42 +114,6 @@ class AniListMetadataProvider
         .map((raw) => _fromJson(Map<String, dynamic>.from(raw)))
         .where((manga) => manga.isFriendlyContent)
         .toList(growable: false);
-  }
-
-  String? _statusVariable(MangaBrowseStatus value) => switch (value) {
-    MangaBrowseStatus.all => null,
-    MangaBrowseStatus.ongoing => 'RELEASING',
-    MangaBrowseStatus.completed => 'FINISHED',
-    MangaBrowseStatus.hiatus => 'HIATUS',
-    MangaBrowseStatus.cancelled => 'CANCELLED',
-  };
-
-  List<String> _serverSort(MangaBrowseSort value, {required bool hasSearch}) {
-    return switch (value) {
-      MangaBrowseSort.relevance =>
-        hasSearch
-            ? const <String>['SEARCH_MATCH', 'POPULARITY_DESC']
-            : const <String>['POPULARITY_DESC', 'SCORE_DESC'],
-      MangaBrowseSort.popularity => const <String>[
-        'POPULARITY_DESC',
-        'SCORE_DESC',
-      ],
-      MangaBrowseSort.rating => const <String>['SCORE_DESC', 'POPULARITY_DESC'],
-      MangaBrowseSort.trending => const <String>[
-        'TRENDING_DESC',
-        'POPULARITY_DESC',
-      ],
-      MangaBrowseSort.newest => const <String>[
-        'START_DATE_DESC',
-        'POPULARITY_DESC',
-      ],
-      MangaBrowseSort.title => const <String>['TITLE_ROMAJI'],
-      // Chapter ordering is applied locally after a safe server sort.
-      MangaBrowseSort.chapters => const <String>[
-        'POPULARITY_DESC',
-        'SCORE_DESC',
-      ],
-    };
   }
 
   String _currentSeason() {

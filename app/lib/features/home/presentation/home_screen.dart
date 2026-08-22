@@ -1,9 +1,6 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../../../core/models/chapter.dart';
 import '../../../core/models/manga.dart';
@@ -79,10 +76,8 @@ final _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((
 
   final state = ref.watch(
     userLibraryProvider.select(
-      (value) => (
-        bookmarks: value.bookmarks,
-        bookmarkedManga: value.bookmarkedManga,
-      ),
+      (value) =>
+          (bookmarks: value.bookmarks, bookmarkedManga: value.bookmarkedManga),
     ),
   );
 
@@ -97,20 +92,16 @@ final _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((
 
       if (!manga.isFriendlyContent) continue;
 
-      // Home must never block on five websites. Read only the on-device index
-      // here and start the live source check separately. When it finishes,
-      // CatalogRepository emits chapterUpdates and this provider rebuilds.
-      final local = await repository.localChapters(
-        manga,
-        allowAdult: false,
-      );
+      // Home renders from memory/on-device data only. Missing indexes are
+      // queued below so large libraries cannot start every source at once.
+      final local = await repository.localChapters(manga, allowAdult: false);
       entries.add((manga: manga, chapters: local ?? const []));
-
-      repository.chapters(manga, allowAdult: false).ignore();
     } catch (_) {
       // Keep the rest of Home usable when one title/source is unavailable.
     }
   }
+
+  repository.queueLibraryWarmup(entries.map((entry) => entry.manga));
 
   return entries;
 });
@@ -120,92 +111,90 @@ final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
   final progress = libraryState.progress;
 
   return ref.watch(_homeCatalogProvider).whenData((catalog) {
-    final entries = catalog
-        .where((entry) => entry.manga.isFriendlyContent)
-        .map((entry) {
-          final mangaProgress = progress[entry.manga.id];
-          var current = -1;
-          var highest = -1;
+    final entries = catalog.where((entry) => entry.manga.isFriendlyContent).map(
+      (entry) {
+        final mangaProgress = progress[entry.manga.id];
+        var current = -1;
+        var highest = -1;
 
-          if (mangaProgress != null && entry.chapters.isNotEmpty) {
-            current = entry.chapters.indexWhere(
-              (chapter) => chapter.id == mangaProgress.chapterId,
-            );
+        if (mangaProgress != null && entry.chapters.isNotEmpty) {
+          current = entry.chapters.indexWhere(
+            (chapter) => chapter.id == mangaProgress.chapterId,
+          );
 
-            final opened = mangaProgress.openedChapterIds;
-            double? highestNumber;
-            var highestUnnumbered = -1;
+          final opened = mangaProgress.openedChapterIds;
+          double? highestNumber;
+          var highestUnnumbered = -1;
 
-            for (var i = 0; i < entry.chapters.length; i++) {
-              final chapter = entry.chapters[i];
-              if (!opened.contains(chapter.id)) continue;
-
-              final number = chapter.number;
-              if (number != null) {
-                if (highestNumber == null || number > highestNumber) {
-                  highestNumber = number;
-                  highest = i;
-                }
-              } else if (highestUnnumbered < 0) {
-                highestUnnumbered = i;
-              }
-            }
-
-            if (highest < 0) highest = highestUnnumbered;
-            if (highest < 0 && current >= 0) highest = current;
-          }
-
-          var latestIndex = -1;
-          double? latestNumber;
-          var latestDatedIndex = -1;
-          var latestDate = DateTime.fromMillisecondsSinceEpoch(0);
           for (var i = 0; i < entry.chapters.length; i++) {
             final chapter = entry.chapters[i];
+            if (!opened.contains(chapter.id)) continue;
+
             final number = chapter.number;
-            if (number != null &&
-                (latestNumber == null || number > latestNumber)) {
-              latestNumber = number;
-              latestIndex = i;
-            }
-            if (latestDatedIndex < 0 ||
-                chapter.publishedAt.isAfter(latestDate)) {
-              latestDate = chapter.publishedAt;
-              latestDatedIndex = i;
+            if (number != null) {
+              if (highestNumber == null || number > highestNumber) {
+                highestNumber = number;
+                highest = i;
+              }
+            } else if (highestUnnumbered < 0) {
+              highestUnnumbered = i;
             }
           }
-          if (latestIndex < 0) latestIndex = latestDatedIndex;
 
-          final latestIsCurrent = current == latestIndex;
-          final caught =
-              latestIndex >= 0 &&
-              highest == latestIndex &&
-              (!latestIsCurrent ||
-                  (mangaProgress?.chapterProgress ?? 0.0) >= 0.95);
+          if (highest < 0) highest = highestUnnumbered;
+          if (highest < 0 && current >= 0) highest = current;
+        }
 
-          final DateTime sort;
-          if (caught) {
-            sort =
-                mangaProgress?.updatedAt ??
-                DateTime.fromMillisecondsSinceEpoch(0);
-          } else if (latestIndex >= 0) {
-            sort = entry.chapters[latestIndex].publishedAt;
-          } else {
-            sort =
-                mangaProgress?.updatedAt ??
-                DateTime.fromMillisecondsSinceEpoch(0);
+        var latestIndex = -1;
+        double? latestNumber;
+        var latestDatedIndex = -1;
+        var latestDate = DateTime.fromMillisecondsSinceEpoch(0);
+        for (var i = 0; i < entry.chapters.length; i++) {
+          final chapter = entry.chapters[i];
+          final number = chapter.number;
+          if (number != null &&
+              (latestNumber == null || number > latestNumber)) {
+            latestNumber = number;
+            latestIndex = i;
           }
+          if (latestDatedIndex < 0 || chapter.publishedAt.isAfter(latestDate)) {
+            latestDate = chapter.publishedAt;
+            latestDatedIndex = i;
+          }
+        }
+        if (latestIndex < 0) latestIndex = latestDatedIndex;
 
-          return HomeEntry(
-            manga: entry.manga,
-            chapters: entry.chapters,
-            progress: mangaProgress,
-            currentIndex: current,
-            highestReadIndex: highest,
-            caughtUp: caught,
-            sortTime: sort,
-          );
-        })
-        .toList();
+        final latestIsCurrent = current == latestIndex;
+        final caught =
+            latestIndex >= 0 &&
+            highest == latestIndex &&
+            (!latestIsCurrent ||
+                (mangaProgress?.chapterProgress ?? 0.0) >= 0.95);
+
+        final DateTime sort;
+        if (caught) {
+          sort =
+              mangaProgress?.updatedAt ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+        } else if (latestIndex >= 0) {
+          sort = entry.chapters[latestIndex].publishedAt;
+        } else {
+          sort =
+              mangaProgress?.updatedAt ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+        }
+
+        return HomeEntry(
+          manga: entry.manga,
+          chapters: entry.chapters,
+          progress: mangaProgress,
+          currentIndex: current,
+          highestReadIndex: highest,
+          caughtUp: caught,
+          sortTime: sort,
+        );
+      },
+    ).toList();
 
     entries.sort((a, b) => b.sortTime.compareTo(a.sortTime));
     return entries;
@@ -266,10 +255,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         titleSpacing: 16,
         title: const _TsukiTitle(),
         actions: const [
-          Padding(
-            padding: EdgeInsets.only(right: 16),
-            child: LogoutButton(),
-          ),
+          Padding(padding: EdgeInsets.only(right: 16), child: LogoutButton()),
         ],
       ),
       body: Column(
@@ -283,7 +269,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           Expanded(
             child: homeEntries.when(
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (_, __) => const _Empty('Home is unavailable right now.'),
+              error: (_, _) => const _Empty('Home is unavailable right now.'),
               data: (entries) {
                 final active = entries
                     .where((entry) => !entry.caughtUp)
@@ -331,6 +317,7 @@ class _TsukiTitle extends StatelessWidget {
       children: [
         Image.asset(
           'assets/branding/tsuki_logo_transparent.png',
+          cacheWidth: 384,
           width: 58,
           height: 58,
           fit: BoxFit.contain,
@@ -338,11 +325,11 @@ class _TsukiTitle extends StatelessWidget {
         const SizedBox(width: 6),
         Text(
           'Tsuki',
-          style: GoogleFonts.sora(
+          style: const TextStyle(
             color: AppColors.text,
             fontSize: 35,
             fontWeight: FontWeight.w800,
-            letterSpacing: -0.7,
+            letterSpacing: 0,
             height: 1.5,
           ),
         ),
@@ -499,7 +486,7 @@ class _EntryList extends StatelessWidget {
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       itemCount: entries.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (context, index) => _HomeCard(entry: entries[index]),
     );
   }
