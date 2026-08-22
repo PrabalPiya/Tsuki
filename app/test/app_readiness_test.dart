@@ -69,7 +69,6 @@ void main() {
 
     expect(controller.state.status, SessionStatus.backendMissing);
     expect(controller.state.uid, isNull);
-    expect(controller.state.isLocalProfile, isFalse);
 
     await controller.signOut();
     expect(controller.state.status, SessionStatus.backendMissing);

@@ -5,7 +5,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/app_config.dart';
-import '../storage/user_store.dart';
 
 enum SessionStatus {
   loading,
@@ -23,13 +22,11 @@ class AppSession {
     this.uid,
     this.username,
     this.message,
-    this.isLocalProfile = false,
   });
   final SessionStatus status;
   final String? uid;
   final String? username;
   final String? message;
-  final bool isLocalProfile;
 }
 
 class AuthController extends StateNotifier<AppSession> {
@@ -240,40 +237,6 @@ class AuthController extends StateNotifier<AppSession> {
     state = const AppSession(SessionStatus.signedOut);
   }
 
-  Future<String?> deleteAccount() async {
-    if (!_config.isFirebaseConfigured) {
-      return 'Cloud account is not configured.';
-    }
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return 'Sign in again to delete this account.';
-      final document = FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid);
-      await _deleteCollection(document.collection('bookmarks'));
-      await _deleteCollection(document.collection('progress'));
-      await document.delete();
-      final username = state.username ?? user.email?.split('@').first;
-      if (username != null && username.isNotEmpty) {
-        await FirebaseFirestore.instance
-            .collection('usernames')
-            .doc(username)
-            .delete();
-      }
-      await LocalUserStore().clearSession(user.uid);
-      await user.delete();
-      state = const AppSession(SessionStatus.signedOut);
-      return null;
-    } on FirebaseAuthException catch (error) {
-      if (error.code == 'requires-recent-login') {
-        return 'For security, log out, sign in again, then retry deletion.';
-      }
-      return 'Account deletion failed. Try again.';
-    } catch (_) {
-      return 'Account deletion failed. Try again.';
-    }
-  }
-
   String? _normalizeUsername(String value) {
     final normalized = value.trim().toLowerCase();
     final valid = RegExp(r'^[a-z0-9_]{3,20}$').hasMatch(normalized);
@@ -300,20 +263,6 @@ class AuthController extends StateNotifier<AppSession> {
       'weak-password' => 'Password must be at least 6 characters.',
       _ => 'Registration failed. Try again.',
     };
-  }
-
-  Future<void> _deleteCollection(
-    CollectionReference<Map<String, dynamic>> collection,
-  ) async {
-    while (true) {
-      final page = await collection.limit(400).get();
-      if (page.docs.isEmpty) return;
-      final batch = FirebaseFirestore.instance.batch();
-      for (final document in page.docs) {
-        batch.delete(document.reference);
-      }
-      await batch.commit();
-    }
   }
 
   @override

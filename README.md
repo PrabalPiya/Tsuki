@@ -22,8 +22,6 @@ of the way so the user can focus on reading.
 - Resume from saved progress automatically.
 - Cache manga metadata, chapter indexes, images, and local reading state.
 - Sync bookmarks and progress with Firebase when remote accounts are configured.
-- Continue with a local profile if Firebase is unavailable.
-- Delete user data and the Firebase account from Settings.
 
 ## Supported Sources
 
@@ -60,7 +58,6 @@ app/lib
     manga_details/
     reader/      source adapters and reading UI
     search/      AniList search and metadata
-    settings/
   navigation/    app shell and routes
   shared/        demo data, summaries, and reusable widgets
 ```
@@ -140,8 +137,8 @@ provided.
 ## Firebase And User Data
 
 Tsuki can use Firebase Authentication and Cloud Firestore for remote accounts,
-bookmarks, and reading progress. If Firebase is not configured or cannot
-initialize, the app falls back to a usable local profile.
+bookmarks, and reading progress. Production builds that require accounts need a
+configured Firebase project.
 
 Forks should create their own Firebase project and pass Firebase values with
 `--dart-define` or CI secrets. The repository does not include production user
@@ -151,10 +148,9 @@ data, service-account keys, release signing keys, or a real Android
 Firestore data is scoped under each authenticated user. The Firebase rules are
 deny-by-default and tested with the emulator test suite in `firebase/`.
 
-Users can delete their account data from Settings. Account deletion removes
-stored bookmarks, progress, profile data, username mapping, local session data,
-and then deletes the Firebase Auth user when re-authentication requirements are
-satisfied.
+The current app does not include a Settings screen or an in-app account-deletion
+flow. Firebase account and Firestore cleanup should be handled by the project
+operator or through Firebase tooling.
 
 ## Development Commands
 
