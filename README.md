@@ -148,9 +148,6 @@ data, service-account keys, release signing keys, or a real Android
 Firestore data is scoped under each authenticated user. The Firebase rules are
 deny-by-default and tested with the emulator test suite in `firebase/`.
 
-The current app does not include a Settings screen or an in-app account-deletion
-flow. Firebase account and Firestore cleanup should be handled by the project
-operator or through Firebase tooling.
 
 ## Development Commands
 
