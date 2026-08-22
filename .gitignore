@@ -17,7 +17,7 @@ app/android/key.properties
 !.env.example
 **/service-account*.json
 **/google-services.json
-!app/android/app/google-services.json
+!**/google-services.example.json
 **/GoogleService-Info.plist
 **/*debug-token*
 **/*.jks

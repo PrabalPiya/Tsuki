@@ -122,6 +122,11 @@ BACKEND_BASE_URL        optional backend URL
 REMOTE_CATALOG_URL      optional hosted catalog URL
 ```
 
+Firebase client configuration is intentionally not committed. For Android,
+download your own `google-services.json` from Firebase and place it at
+`app/android/app/google-services.json`. A sanitized template is available at
+`app/android/app/google-services.example.json`.
+
 Example development run with demo data:
 
 ```sh
@@ -137,6 +142,11 @@ provided.
 Tsuki can use Firebase Authentication and Cloud Firestore for remote accounts,
 bookmarks, and reading progress. If Firebase is not configured or cannot
 initialize, the app falls back to a usable local profile.
+
+Forks should create their own Firebase project and pass Firebase values with
+`--dart-define` or CI secrets. The repository does not include production user
+data, service-account keys, release signing keys, or a real Android
+`google-services.json`.
 
 Firestore data is scoped under each authenticated user. The Firebase rules are
 deny-by-default and tested with the emulator test suite in `firebase/`.

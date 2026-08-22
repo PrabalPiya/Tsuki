@@ -21,19 +21,15 @@ class AppConfig {
     );
     const project = String.fromEnvironment(
           'FIREBASE_PROJECT_ID',
-          defaultValue: 'quiet-reader-app-26b7',
         ),
         app = String.fromEnvironment(
           'FIREBASE_APP_ID',
-          defaultValue: '1:348316155116:android:48f1884387f456a2bb39c9',
         ),
         key = String.fromEnvironment(
           'FIREBASE_API_KEY',
-          defaultValue: 'AIzaSyD15TzUFztqM1OUZ82r_4S67-E982_SO3Q',
         ),
         sender = String.fromEnvironment(
           'FIREBASE_MESSAGING_SENDER_ID',
-          defaultValue: '348316155116',
         ),
         backend = String.fromEnvironment('BACKEND_BASE_URL'),
         remoteCatalog = String.fromEnvironment('REMOTE_CATALOG_URL'),

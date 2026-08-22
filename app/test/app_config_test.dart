@@ -2,12 +2,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tsuki/core/config/app_config.dart';
 
 void main() {
-  test('default build uses live providers instead of synthetic data', () {
+  test('default build uses live providers without bundled Firebase config', () {
     final config = AppConfig.fromEnvironment();
     expect(config.environment, AppEnvironment.production);
     expect(config.useDemoData, isFalse);
-    expect(config.isFirebaseConfigured, isTrue);
-    expect(config.firebaseProjectId, 'quiet-reader-app-26b7');
+    expect(config.isFirebaseConfigured, isFalse);
+    expect(config.firebaseProjectId, isEmpty);
   });
 
   test('production config cannot enable demo data', () {
