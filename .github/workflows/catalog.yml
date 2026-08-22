@@ -22,10 +22,11 @@ jobs:
         working-directory: app
     steps:
       - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
+      - uses: subosito/flutter-action@v2
         with:
-          sdk: stable
-      - run: dart pub get
+          channel: stable
+          cache: true
+      - run: flutter pub get
       - run: dart run tool/build_catalog.dart --pages 80 --per-page 50 --out ../public/catalog.json
       - uses: actions/upload-pages-artifact@v3
         with:
