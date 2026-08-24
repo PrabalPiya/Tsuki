@@ -140,10 +140,11 @@ Tsuki can use Firebase Authentication and Cloud Firestore for remote accounts,
 bookmarks, and reading progress. Production builds that require accounts need a
 configured Firebase project.
 
-Forks should create their own Firebase project and pass Firebase values with
-`--dart-define` or CI secrets. The repository does not include production user
-data, service-account keys, release signing keys, or a real Android
-`google-services.json`.
+Forks should create their own Firebase project. Android builds automatically
+read the client values from `app/android/app/google-services.json`; CI and
+non-Android builds can pass the same values with `--dart-define`. The repository
+does not include production user data, service-account keys, release signing
+keys, or a real `google-services.json`.
 
 Firestore data is scoped under each authenticated user. The Firebase rules are
 deny-by-default and tested with the emulator test suite in `firebase/`.

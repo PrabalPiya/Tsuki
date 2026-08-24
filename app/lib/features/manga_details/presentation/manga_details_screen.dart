@@ -1,6 +1,5 @@
 import 'dart:ui';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,7 +9,6 @@ import '../../../core/models/chapter.dart';
 import '../../../core/models/manga.dart';
 import '../../../core/models/reading_progress.dart';
 import '../../../core/state/providers.dart';
-import '../../../core/storage/image_cache.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/synopsis_summary.dart';
 
@@ -490,15 +488,13 @@ class _MangaHero extends StatelessWidget {
 
     final Widget cover = coverUrl.isEmpty
         ? _HeroFallback(title: manga.title)
-        : CachedNetworkImage(
-            imageUrl: coverUrl,
-            cacheManager: MangaImageCache.instance,
-            memCacheWidth: coverDecodeWidth,
+        : Image.network(
+            coverUrl,
+            cacheWidth: coverDecodeWidth,
             fit: BoxFit.cover,
-            fadeInDuration: const Duration(milliseconds: 120),
-            fadeOutDuration: Duration.zero,
-            placeholder: (_, _) => _HeroFallback(title: manga.title),
-            errorWidget: (_, _, _) => _HeroFallback(title: manga.title),
+            frameBuilder: (context, child, frame, _) =>
+                frame == null ? _HeroFallback(title: manga.title) : child,
+            errorBuilder: (_, _, _) => _HeroFallback(title: manga.title),
           );
 
     final baseHeroHeight = width / _heroAspectRatio;
@@ -993,16 +989,14 @@ class _RotatingCoverCardState extends State<_RotatingCoverCard>
             child: Stack(
               fit: StackFit.expand,
               children: [
-                CachedNetworkImage(
-                  imageUrl: widget.manga.coverUrl,
-                  cacheManager: MangaImageCache.instance,
-                  memCacheWidth: coverDecodeWidth,
+                Image.network(
+                  widget.manga.coverUrl,
+                  cacheWidth: coverDecodeWidth,
                   fit: BoxFit.cover,
-                  fadeInDuration: const Duration(milliseconds: 120),
-                  fadeOutDuration: Duration.zero,
-                  placeholder: (context, url) =>
-                      _HeroFallback(title: widget.manga.title),
-                  errorWidget: (context, url, error) =>
+                  frameBuilder: (context, child, frame, _) => frame == null
+                      ? _HeroFallback(title: widget.manga.title)
+                      : child,
+                  errorBuilder: (context, error, stackTrace) =>
                       _HeroFallback(title: widget.manga.title),
                 ),
                 IgnorePointer(

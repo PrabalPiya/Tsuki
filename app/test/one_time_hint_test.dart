@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tsuki/shared/widgets/one_time_hint.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-
-  setUp(() => SharedPreferences.setMockInitialValues({}));
 
   testWidgets('hint is dismissible and only appears once', (tester) async {
     const hint = OneTimeHint(

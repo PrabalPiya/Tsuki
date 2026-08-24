@@ -17,12 +17,7 @@ enum SessionStatus {
 }
 
 class AppSession {
-  const AppSession(
-    this.status, {
-    this.uid,
-    this.username,
-    this.message,
-  });
+  const AppSession(this.status, {this.uid, this.username, this.message});
   final SessionStatus status;
   final String? uid;
   final String? username;

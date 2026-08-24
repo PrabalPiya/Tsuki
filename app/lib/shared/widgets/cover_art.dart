@@ -1,8 +1,6 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
-import '../../core/storage/image_cache.dart';
 
 class CoverArt extends StatelessWidget {
   const CoverArt({
@@ -33,15 +31,13 @@ class CoverArt extends StatelessWidget {
             children: [
               url.isEmpty
                   ? _fallback()
-                  : CachedNetworkImage(
-                      imageUrl: url,
-                      cacheManager: MangaImageCache.instance,
-                      memCacheWidth: decodeWidth,
+                  : Image.network(
+                      url,
+                      cacheWidth: decodeWidth,
                       fit: BoxFit.cover,
-                      fadeInDuration: const Duration(milliseconds: 120),
-                      fadeOutDuration: Duration.zero,
-                      placeholder: (_, _) => _fallback(),
-                      errorWidget: (_, _, _) => _fallback(),
+                      frameBuilder: (context, child, frame, _) =>
+                          frame == null ? _fallback() : child,
+                      errorBuilder: (_, _, _) => _fallback(),
                     ),
               DecoratedBox(
                 decoration: BoxDecoration(

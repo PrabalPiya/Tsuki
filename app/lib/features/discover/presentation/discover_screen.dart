@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,7 +7,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/models/manga.dart';
 import '../../../core/state/providers.dart';
-import '../../../core/storage/image_cache.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/synopsis_summary.dart';
 import '../../../shared/widgets/one_time_hint.dart';
@@ -933,16 +931,15 @@ class _DiscoverCard extends ConsumerWidget {
                     Positioned.fill(
                       child: manga.coverUrl.isEmpty
                           ? _CoverFallback(title: manga.title)
-                          : CachedNetworkImage(
-                              imageUrl: manga.coverUrl,
-                              cacheManager: MangaImageCache.instance,
-                              memCacheWidth: coverDecodeWidth,
+                          : Image.network(
+                              manga.coverUrl,
+                              cacheWidth: coverDecodeWidth,
                               fit: BoxFit.cover,
-                              fadeInDuration: const Duration(milliseconds: 120),
-                              fadeOutDuration: Duration.zero,
-                              placeholder: (_, _) =>
-                                  _CoverFallback(title: manga.title),
-                              errorWidget: (_, _, _) =>
+                              frameBuilder: (context, child, frame, _) =>
+                                  frame == null
+                                  ? _CoverFallback(title: manga.title)
+                                  : child,
+                              errorBuilder: (_, _, _) =>
                                   _CoverFallback(title: manga.title),
                             ),
                     ),

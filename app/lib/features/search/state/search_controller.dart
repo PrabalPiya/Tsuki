@@ -51,7 +51,7 @@ class SearchController extends StateNotifier<SearchState> {
   Timer? _remoteTimer;
   int _generation = 0;
   static const _remoteSearchDelay = Duration(milliseconds: 300);
-  static const _suggestionLimit = 12;
+  static const _suggestionLimit = 50;
   static const _resultLimit = 50;
 
   void reset() {
@@ -157,13 +157,17 @@ class SearchController extends StateNotifier<SearchState> {
       if (generation != _generation) return;
 
       final remote = _rememberFriendly(values);
-      unawaited(_cache.saveSearch(query, remote).catchError((_) {}));
+      final merged = _mergeResults(
+        state.results,
+        remote,
+        limit: submitted ? _resultLimit : _suggestionLimit,
+      );
+      for (final manga in merged) {
+        _repository.remember(manga);
+      }
+      unawaited(_cache.saveSearch(query, merged).catchError((_) {}));
       state = state.copyWith(
-        results: _mergeResults(
-          state.results,
-          remote,
-          limit: submitted ? _resultLimit : _suggestionLimit,
-        ),
+        results: merged,
         loading: false,
         submitted: submitted,
         clearError: true,
@@ -189,9 +193,17 @@ class SearchController extends StateNotifier<SearchState> {
     final seenTitles = <String>{};
     final merged = <Manga>[];
 
-    // AniList is already relevance-ranked; local entries fill any remaining
-    // slots and keep the screen useful while the request is in flight.
-    for (final manga in <Manga>[...remote, ...local]) {
+    final localById = {for (final manga in local) manga.id: manga};
+
+    // AniList is already relevance-ranked. Preserve a known local chapter
+    // total when AniList reports zero/unknown for an ongoing title.
+    for (final raw in <Manga>[...remote, ...local]) {
+      final localMatch = localById[raw.id];
+      final manga =
+          raw.metadataChapterCount <= 0 &&
+              (localMatch?.metadataChapterCount ?? 0) > 0
+          ? raw.copyWith(chapterCount: localMatch!.metadataChapterCount)
+          : raw;
       final title = manga.title.trim().toLowerCase();
       if (!seenIds.add(manga.id) || !seenTitles.add(title)) continue;
       merged.add(manga);

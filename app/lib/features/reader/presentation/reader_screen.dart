@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
@@ -8,7 +7,6 @@ import 'package:flutter/services.dart';
 import '../../../core/models/chapter.dart';
 import '../../../core/models/reading_progress.dart';
 import '../../../core/state/providers.dart';
-import '../../../core/storage/image_cache.dart';
 import '../../../core/theme/app_theme.dart';
 
 const double _fallbackPageAspectRatio = .68;
@@ -811,6 +809,11 @@ class _ReaderPageState extends State<_ReaderPage> {
 
         final decodeWidth =
             (viewportWidth * MediaQuery.devicePixelRatioOf(context)).ceil();
+        final provider = NetworkImage(
+          widget.url,
+          headers: _sourceImageHeaders(widget.sourceId),
+        );
+        _resolveAspect(provider);
 
         return AnimatedSize(
           duration: const Duration(milliseconds: 180),
@@ -819,14 +822,16 @@ class _ReaderPageState extends State<_ReaderPage> {
           child: SizedBox(
             width: viewportWidth,
             height: height,
-            child: CachedNetworkImage(
-              imageUrl: widget.url,
-              httpHeaders: _sourceImageHeaders(widget.sourceId),
-              cacheManager: MangaImageCache.instance,
-              memCacheWidth: decodeWidth,
-              imageBuilder: (_, provider) {
-                _resolveAspect(provider);
-                if (!_hasResolvedAspect) {
+            child: Image(
+              image: ResizeImage(provider, width: decodeWidth),
+              width: viewportWidth,
+              height: height,
+              fit: BoxFit.contain,
+              alignment: Alignment.center,
+              filterQuality: FilterQuality.high,
+              gaplessPlayback: true,
+              frameBuilder: (context, child, frame, _) {
+                if (!_hasResolvedAspect || frame == null) {
                   return const ColoredBox(
                     color: AppColors.background,
                     child: Center(
@@ -834,26 +839,9 @@ class _ReaderPageState extends State<_ReaderPage> {
                     ),
                   );
                 }
-
-                return ColoredBox(
-                  color: AppColors.background,
-                  child: Image(
-                    image: provider,
-                    width: viewportWidth,
-                    height: height,
-                    fit: BoxFit.contain,
-                    alignment: Alignment.center,
-                    filterQuality: FilterQuality.high,
-                    gaplessPlayback: true,
-                  ),
-                );
+                return ColoredBox(color: AppColors.background, child: child);
               },
-              fadeInDuration: const Duration(milliseconds: 100),
-              placeholder: (_, _) => const ColoredBox(
-                color: AppColors.background,
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              ),
-              errorWidget: (_, _, _) {
+              errorBuilder: (_, _, _) {
                 _reportLoadError();
                 return const ColoredBox(
                   color: AppColors.background,

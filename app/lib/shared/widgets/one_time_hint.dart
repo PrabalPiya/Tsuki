@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme/app_theme.dart';
 
@@ -25,7 +24,7 @@ class OneTimeHint extends StatefulWidget {
 
 class _OneTimeHintState extends State<OneTimeHint>
     with SingleTickerProviderStateMixin {
-  static const String _prefix = 'tsuki_hint_seen_';
+  static final Set<String> _seen = <String>{};
 
   late final AnimationController _controller;
 
@@ -47,11 +46,7 @@ class _OneTimeHintState extends State<OneTimeHint>
   }
 
   Future<void> _checkAndShow() async {
-    final prefs = await SharedPreferences.getInstance();
-
-    final key = '$_prefix${widget.id}';
-
-    final bool seen = prefs.getBool(key) ?? false;
+    final seen = _seen.contains(widget.id);
 
     if (!mounted) return;
 
@@ -90,12 +85,7 @@ class _OneTimeHintState extends State<OneTimeHint>
   }
 
   Future<void> _markSeen() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('$_prefix${widget.id}', true);
-    } catch (_) {
-      // Hint persistence is optional and must never affect navigation.
-    }
+    _seen.add(widget.id);
   }
 
   @override

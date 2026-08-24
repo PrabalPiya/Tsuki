@@ -125,6 +125,23 @@ void main() {
     expect(MangaChapterRegistry.displayLabelFor('anilist:2'), '124');
     expect(MangaChapterRegistry.countFor('anilist:2'), 2);
   });
+
+  test('current safe cache keys restore the canonical manga summary', () async {
+    final prefs = await SharedPreferences.getInstance();
+    final cache = ChapterIndexCache(preferences: Future.value(prefs));
+    const summary = MangaChapterSummary(indexCount: 0, latestNumber: 88);
+
+    await cache.writeSummary(
+      'anilist:88',
+      summary,
+      cacheKey: 'anilist:88|safe',
+    );
+    MangaChapterRegistry.clear();
+
+    await ChapterIndexCache.warmGlobalSummaries();
+
+    expect(MangaChapterRegistry.displayLabelFor('anilist:88'), '88');
+  });
   test('external-only chapter metadata is not persisted as readable', () async {
     final prefs = await SharedPreferences.getInstance();
     final cache = ChapterIndexCache(preferences: Future.value(prefs));

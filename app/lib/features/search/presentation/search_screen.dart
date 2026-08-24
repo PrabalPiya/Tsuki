@@ -187,7 +187,7 @@ class _SearchSuggestionList extends StatelessWidget {
       separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, index) {
         final manga = items[index];
-        final chapterLabel = manga.catalogChapterDisplayLabel;
+        final chapterLabel = manga.catalogChapterDisplayLabel ?? '—';
 
         return ListTile(
           contentPadding: EdgeInsets.zero,
@@ -240,7 +240,7 @@ class _SearchResultGrid extends StatelessWidget {
       itemCount: items.length,
       itemBuilder: (context, index) {
         final manga = items[index];
-        final chapterLabel = manga.catalogChapterDisplayLabel;
+        final chapterLabel = manga.catalogChapterDisplayLabel ?? '—';
 
         return InkWell(
           borderRadius: BorderRadius.circular(18),

@@ -184,54 +184,45 @@ final rankingServiceProvider = Provider<RankingProvider>((ref) {
   return AniListRankingProvider(ref.watch(anilistProvider));
 });
 
-final rankingsProvider = FutureProvider.autoDispose
-    .family<RankingResult, RankingPeriod>((ref, period) async {
+final rankingsProvider = StreamProvider.autoDispose
+    .family<RankingResult, RankingPeriod>((ref, period) async* {
       ref.keepAlive();
 
       final catalog = ref.watch(catalogProvider);
       final cache = ref.watch(mangaMetadataCacheProvider);
       final cached = await cache.loadRanking(period);
+      var hasFallback = false;
 
       if (cached != null && cached.items.isNotEmpty) {
+        hasFallback = true;
         for (final manga in cached.items) {
           catalog.remember(manga);
         }
-
-        unawaited(() async {
-          final fresh = await _loadRanking(ref, period);
-          if (fresh.items.isNotEmpty) {
-            await cache.saveRanking(period, fresh).catchError((_) {});
-          }
-        }());
-
-        return cached;
+        yield cached;
       }
 
-      final preview = await cache.loadCatalogPreview();
-      if (preview.isNotEmpty) {
+      if (!hasFallback) {
+        final preview = await cache.loadCatalogPreview();
+        hasFallback = preview.isNotEmpty;
         for (final manga in preview) {
           catalog.remember(manga);
         }
-
-        unawaited(() async {
-          final fresh = await _loadRanking(ref, period);
-          if (fresh.items.isNotEmpty) {
-            await cache.saveRanking(period, fresh).catchError((_) {});
-          }
-        }());
-
-        return RankingResult(
-          items: preview,
-          unavailableReason: null,
-          isPreview: true,
-        );
+        if (preview.isNotEmpty) {
+          yield RankingResult(
+            items: preview,
+            unavailableReason: null,
+            isPreview: true,
+          );
+        }
       }
 
       final result = await _loadRanking(ref, period);
       if (result.items.isNotEmpty) {
         await cache.saveRanking(period, result);
+        yield result;
+      } else if (!hasFallback) {
+        yield result;
       }
-      return result;
     });
 
 Future<RankingResult> _loadRanking(Ref ref, RankingPeriod period) async {

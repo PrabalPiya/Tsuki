@@ -19,18 +19,10 @@ class AppConfig {
       (v) => v.name == name,
       orElse: () => AppEnvironment.development,
     );
-    const project = String.fromEnvironment(
-          'FIREBASE_PROJECT_ID',
-        ),
-        app = String.fromEnvironment(
-          'FIREBASE_APP_ID',
-        ),
-        key = String.fromEnvironment(
-          'FIREBASE_API_KEY',
-        ),
-        sender = String.fromEnvironment(
-          'FIREBASE_MESSAGING_SENDER_ID',
-        ),
+    const project = String.fromEnvironment('FIREBASE_PROJECT_ID'),
+        app = String.fromEnvironment('FIREBASE_APP_ID'),
+        key = String.fromEnvironment('FIREBASE_API_KEY'),
+        sender = String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID'),
         backend = String.fromEnvironment('BACKEND_BASE_URL'),
         remoteCatalog = String.fromEnvironment('REMOTE_CATALOG_URL'),
         demo = bool.fromEnvironment('USE_DEMO_DATA', defaultValue: false);
@@ -69,6 +61,16 @@ class AppConfig {
     firebaseApiKey: '',
     firebaseMessagingSenderId: '',
     backendBaseUrl: '',
+    remoteCatalogUrl: remoteCatalogUrl,
+  );
+  AppConfig withFirebaseOptions(FirebaseOptions options) => AppConfig(
+    environment: environment,
+    useDemoData: useDemoData,
+    firebaseProjectId: options.projectId,
+    firebaseAppId: options.appId,
+    firebaseApiKey: options.apiKey,
+    firebaseMessagingSenderId: options.messagingSenderId,
+    backendBaseUrl: backendBaseUrl,
     remoteCatalogUrl: remoteCatalogUrl,
   );
   FirebaseOptions get firebaseOptions => FirebaseOptions(

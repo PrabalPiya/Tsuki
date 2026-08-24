@@ -1,3 +1,5 @@
+// ignore_for_file: prefer_initializing_formals
+
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -30,14 +32,29 @@ abstract interface class UserStore {
 
 class LocalUserStore implements UserStore {
   LocalUserStore({Future<SharedPreferences>? preferences})
-    : _preferences = preferences ?? SharedPreferences.getInstance();
+    : _preferences = preferences;
 
-  final Future<SharedPreferences> _preferences;
+  final Future<SharedPreferences>? _preferences;
+  final Map<String, Set<String>> _bookmarks = {};
+  final Map<String, Map<String, Manga>> _bookmarkedManga = {};
   final Map<String, Map<String, dynamic>> _progressPayloads = {};
+  final Map<String, Map<String, ReadingProgress>> _progress = {};
 
   @override
   Future<UserSnapshot> load(String uid) async {
-    final p = await _preferences;
+    final preferences = _preferences;
+    if (preferences == null) {
+      final bookmarks = _bookmarks[uid] ?? <String>{};
+      final bookmarkedManga = _bookmarkedManga[uid] ?? <String, Manga>{};
+      final progress = _progress[uid] ?? <String, ReadingProgress>{};
+      return UserSnapshot(
+        bookmarks: Set<String>.from(bookmarks),
+        bookmarkedManga: Map<String, Manga>.from(bookmarkedManga),
+        progress: Map<String, ReadingProgress>.from(progress),
+      );
+    }
+
+    final p = await preferences;
     final prefix = 'user.$uid.';
     final bookmarks =
         p.getStringList('${prefix}bookmarks')?.toSet() ?? <String>{};
@@ -118,7 +135,14 @@ class LocalUserStore implements UserStore {
     final safeIds = ids
         .where((id) => !blockedIds.contains(id))
         .toList(growable: false);
-    final p = await _preferences;
+    final preferences = _preferences;
+    if (preferences == null) {
+      _bookmarks[uid] = safeIds.toSet();
+      _bookmarkedManga[uid] = safeManga;
+      return;
+    }
+
+    final p = await preferences;
     await p.setStringList('user.$uid.bookmarks', safeIds);
     await p.setString(
       'user.$uid.catalog',
@@ -128,7 +152,17 @@ class LocalUserStore implements UserStore {
 
   @override
   Future<void> saveProgress(String uid, ReadingProgress value) async {
-    final p = await _preferences;
+    final preferences = _preferences;
+    if (preferences == null) {
+      final values = _progress.putIfAbsent(
+        uid,
+        () => <String, ReadingProgress>{},
+      );
+      values[value.mangaId] = value;
+      return;
+    }
+
+    final p = await preferences;
     final key = 'user.$uid.progress';
     var map = _progressPayloads[uid];
     if (map == null) {
@@ -145,9 +179,16 @@ class LocalUserStore implements UserStore {
 
   @override
   Future<void> clearSession(String uid) async {
-    final p = await _preferences;
-    final prefix = 'user.$uid.';
+    _bookmarks.remove(uid);
+    _bookmarkedManga.remove(uid);
+    _progress.remove(uid);
     _progressPayloads.remove(uid);
+
+    final preferences = _preferences;
+    if (preferences == null) return;
+
+    final p = await preferences;
+    final prefix = 'user.$uid.';
     await Future.wait([
       p.remove('${prefix}bookmarks'),
       p.remove('${prefix}catalog'),

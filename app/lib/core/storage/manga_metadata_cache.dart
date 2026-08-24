@@ -1,3 +1,5 @@
+// ignore_for_file: prefer_initializing_formals
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -14,15 +16,18 @@ class MangaMetadataCache {
     Future<SharedPreferences>? preferences,
     String remoteCatalogUrl = '',
     Dio? client,
-  }) : _preferences = preferences ?? SharedPreferences.getInstance(),
+  }) : _preferences = preferences,
        _remoteCatalogUrl = remoteCatalogUrl.trim(),
        _client = client ?? createHttpClient(),
        _ownsClient = client == null;
 
-  final Future<SharedPreferences> _preferences;
+  final Future<SharedPreferences>? _preferences;
   final String _remoteCatalogUrl;
   final Dio _client;
   final bool _ownsClient;
+  final Map<String, String> _payloadMemory = {};
+  final Map<String, int> _intMemory = {};
+  final Map<String, List<String>> _stringListMemory = {};
   List<Manga>? _indexMemory;
   List<_SearchIndexEntry>? _bundledSearchMemory;
   ({int version, List<Manga> items})? _bundledCatalogMemory;
@@ -57,10 +62,9 @@ class MangaMetadataCache {
     try {
       final bundled = await _loadBundledCatalog();
 
-      final prefs = await _preferences;
       final hasCurrentCatalog =
-          prefs.getInt(_bundledVersionKey) == bundled.version;
-      if (hasCurrentCatalog && prefs.getString(_indexKey) != null) return;
+          await _readInt(_bundledVersionKey) == bundled.version;
+      if (hasCurrentCatalog && await _readRaw(_indexKey) != null) return;
 
       final items = bundled.items
           .where((manga) => manga.hasChapterMetadata)
@@ -68,7 +72,7 @@ class MangaMetadataCache {
       if (items.isNotEmpty) {
         await mergeManga(items);
       }
-      await prefs.setInt(_bundledVersionKey, bundled.version);
+      await _writeInt(_bundledVersionKey, bundled.version);
     } catch (_) {
       // A missing or malformed optional seed catalog must never block startup.
     }
@@ -82,8 +86,7 @@ class MangaMetadataCache {
 
   Future<void> _refreshRemoteCatalog({bool force = false}) async {
     try {
-      final prefs = await _preferences;
-      final updatedAt = prefs.getInt(_remoteUpdatedAtKey) ?? 0;
+      final updatedAt = await _readInt(_remoteUpdatedAtKey) ?? 0;
       final age = DateTime.now().millisecondsSinceEpoch - updatedAt;
       if (!force && age < _remoteRefreshInterval.inMilliseconds) return;
 
@@ -91,8 +94,8 @@ class MangaMetadataCache {
       final payload = _payloadFrom(response.data);
       final version = (payload['version'] as num?)?.toInt();
 
-      if (version != null && prefs.getInt(_remoteVersionKey) == version) {
-        await prefs.setInt(
+      if (version != null && await _readInt(_remoteVersionKey) == version) {
+        await _writeInt(
           _remoteUpdatedAtKey,
           DateTime.now().millisecondsSinceEpoch,
         );
@@ -105,8 +108,8 @@ class MangaMetadataCache {
       if (items.isEmpty) return;
 
       await mergeManga(items);
-      if (version != null) await prefs.setInt(_remoteVersionKey, version);
-      await prefs.setInt(
+      if (version != null) await _writeInt(_remoteVersionKey, version);
+      await _writeInt(
         _remoteUpdatedAtKey,
         DateTime.now().millisecondsSinceEpoch,
       );
@@ -150,7 +153,7 @@ class MangaMetadataCache {
     try {
       return _decodeMangaList(payload['items']);
     } catch (_) {
-      await (await _preferences).remove(key);
+      await _remove(key);
       return null;
     }
   }
@@ -220,22 +223,20 @@ class MangaMetadataCache {
   }
 
   Future<void> _pruneStoredSearches(String newestKey) async {
-    final prefs = await _preferences;
-    final previous = prefs.getStringList(_searchKeysKey) ?? const <String>[];
+    final previous = await _readStringList(_searchKeysKey) ?? const <String>[];
     final retained = <String>[
       newestKey,
       ...previous.where((key) => key != newestKey),
     ].take(_maxStoredSearches).toList(growable: false);
     final retainedSet = retained.toSet();
-    final stale = prefs
-        .getKeys()
+    final stale = (await _keys())
         .where((key) => key.startsWith(_searchPrefix))
         .where(
           (key) => !retainedSet.contains(key.substring(_searchPrefix.length)),
         )
         .toList(growable: false);
-    await Future.wait(stale.map(prefs.remove));
-    await prefs.setStringList(_searchKeysKey, retained);
+    await Future.wait(stale.map(_remove));
+    await _writeStringList(_searchKeysKey, retained);
   }
 
   Future<List<_SearchIndexEntry>> _loadBundledSearchIndex() {
@@ -305,7 +306,7 @@ class MangaMetadataCache {
       _indexMemory = values;
       return values;
     } catch (_) {
-      await (await _preferences).remove(_indexKey);
+      await _remove(_indexKey);
       return const <Manga>[];
     }
   }
@@ -333,7 +334,12 @@ class MangaMetadataCache {
     final existing = {for (final manga in await loadIndex()) manga.id: manga};
 
     for (final manga in safe) {
-      existing[manga.id] = manga;
+      final previous = existing[manga.id];
+      existing[manga.id] =
+          manga.metadataChapterCount <= 0 &&
+              (previous?.metadataChapterCount ?? 0) > 0
+          ? manga.copyWith(chapterCount: previous!.metadataChapterCount)
+          : manga;
     }
 
     final values = existing.values.toList(growable: false)
@@ -367,21 +373,87 @@ class MangaMetadataCache {
   }
 
   Future<Map<String, dynamic>?> _readPayload(String key) async {
-    final prefs = await _preferences;
-    final raw = prefs.getString(key);
+    final raw = await _readRaw(key);
     if (raw == null) return null;
 
     try {
       return jsonDecode(raw) as Map<String, dynamic>;
     } catch (_) {
-      await prefs.remove(key);
+      await _remove(key);
       return null;
     }
   }
 
   Future<void> _writePayload(String key, Map<String, Object?> payload) async {
-    final prefs = await _preferences;
-    await prefs.setString(key, jsonEncode(payload));
+    await _writeRaw(key, jsonEncode(payload));
+  }
+
+  Future<String?> _readRaw(String key) async {
+    final preferences = _preferences;
+    if (preferences == null) return _payloadMemory[key];
+    return (await preferences).getString(key);
+  }
+
+  Future<void> _writeRaw(String key, String value) async {
+    final preferences = _preferences;
+    if (preferences == null) {
+      _payloadMemory[key] = value;
+      return;
+    }
+    await (await preferences).setString(key, value);
+  }
+
+  Future<int?> _readInt(String key) async {
+    final preferences = _preferences;
+    if (preferences == null) return _intMemory[key];
+    return (await preferences).getInt(key);
+  }
+
+  Future<void> _writeInt(String key, int value) async {
+    final preferences = _preferences;
+    if (preferences == null) {
+      _intMemory[key] = value;
+      return;
+    }
+    await (await preferences).setInt(key, value);
+  }
+
+  Future<List<String>?> _readStringList(String key) async {
+    final preferences = _preferences;
+    if (preferences == null) return _stringListMemory[key];
+    return (await preferences).getStringList(key);
+  }
+
+  Future<void> _writeStringList(String key, List<String> value) async {
+    final preferences = _preferences;
+    if (preferences == null) {
+      _stringListMemory[key] = value;
+      return;
+    }
+    await (await preferences).setStringList(key, value);
+  }
+
+  Future<Iterable<String>> _keys() async {
+    final preferences = _preferences;
+    if (preferences == null) {
+      return {
+        ..._payloadMemory.keys,
+        ..._intMemory.keys,
+        ..._stringListMemory.keys,
+      };
+    }
+    return (await preferences).getKeys();
+  }
+
+  Future<void> _remove(String key) async {
+    final preferences = _preferences;
+    if (preferences == null) {
+      _payloadMemory.remove(key);
+      _intMemory.remove(key);
+      _stringListMemory.remove(key);
+      return;
+    }
+    await (await preferences).remove(key);
   }
 
   static List<Object?> _encodeMangaList(List<Manga> items) => items

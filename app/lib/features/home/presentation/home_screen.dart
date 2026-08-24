@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -60,17 +62,56 @@ class HomeEntry {
 
 typedef _HomeCatalogEntry = ({Manga manga, List<CanonicalChapter> chapters});
 
-final _homeRefreshProvider = StreamProvider<int>(
-  (ref) => Stream<int>.periodic(const Duration(minutes: 15), (value) => value),
-);
+final Provider<void> _homeRefreshProvider = Provider<void>((ref) {
+  final timer = Timer.periodic(const Duration(minutes: 15), (_) {
+    ref.invalidate(_homeCatalogProvider);
+  });
+  ref.onDispose(timer.cancel);
+});
 
 final _repositoryChapterUpdatesProvider = StreamProvider<String>((ref) {
   return ref.watch(catalogProvider).chapterUpdates;
 });
 
-final _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((
-  ref,
-) async {
+final _homeChaptersProvider = StreamProvider.autoDispose
+    .family<List<CanonicalChapter>, Manga>((ref, manga) {
+      final repository = ref.watch(catalogProvider);
+      final controller = StreamController<List<CanonicalChapter>>();
+      var pending = Future<void>.value();
+
+      Future<void> emitLocal() async {
+        final chapters = await repository.localChapters(
+          manga,
+          allowAdult: false,
+        );
+        if (!controller.isClosed && chapters != null) {
+          controller.add(chapters);
+        }
+      }
+
+      void scheduleEmit() {
+        pending = pending.then((_) => emitLocal());
+      }
+
+      final memory = repository.memoryChapters(manga, allowAdult: false);
+      if (memory != null) controller.add(memory);
+
+      final subscription = repository.chapterUpdates
+          .where((mangaId) => mangaId == manga.id)
+          .listen((_) => scheduleEmit());
+
+      ref.onDispose(() {
+        unawaited(subscription.cancel());
+        unawaited(pending.whenComplete(controller.close));
+      });
+
+      scheduleEmit();
+      unawaited(repository.prewarmChapters(manga, allowAdult: false));
+      return controller.stream;
+    });
+
+final FutureProvider<List<_HomeCatalogEntry>>
+_homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((ref) async {
   ref.watch(_homeRefreshProvider);
   ref.watch(_repositoryChapterUpdatesProvider);
 
@@ -492,14 +533,21 @@ class _EntryList extends StatelessWidget {
   }
 }
 
-class _HomeCard extends StatelessWidget {
+class _HomeCard extends ConsumerWidget {
   const _HomeCard({required this.entry});
 
   final HomeEntry entry;
 
   @override
-  Widget build(BuildContext context) {
-    final highestRead = entry.highestReadChapter;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final loaded = ref.watch(_homeChaptersProvider(entry.manga)).valueOrNull;
+    final chapters = loaded != null && loaded.isNotEmpty
+        ? loaded
+        : entry.chapters;
+    final latest = _latestChapter(chapters);
+    final highestRead = _highestReadChapter(chapters, entry.progress);
+    final summaryLabel = entry.manga.catalogChapterDisplayLabel ?? '—';
+    final hasChapters = chapters.isNotEmpty;
     final String lastRead;
     if (highestRead != null) {
       lastRead = highestRead.numberLabel;
@@ -560,8 +608,8 @@ class _HomeCard extends StatelessWidget {
                       const SizedBox(height: 5),
                       _ChapterInfoLine(
                         label: 'New chapter',
-                        value: entry.latest?.numberLabel ?? '—',
-                        valueColor: entry.hasChapters
+                        value: latest?.numberLabel ?? summaryLabel,
+                        valueColor: latest != null || summaryLabel != '—'
                             ? AppColors.accent
                             : AppColors.muted,
                       ),
@@ -576,8 +624,8 @@ class _HomeCard extends StatelessWidget {
                       const SizedBox(height: 2),
                       _ChapterInfoLine(
                         label: 'Last upload',
-                        value: _formatUploadDate(entry.latest?.publishedAt),
-                        valueColor: entry.latest == null
+                        value: _formatUploadDate(latest?.publishedAt),
+                        valueColor: latest == null
                             ? AppColors.muted
                             : AppColors.text,
                       ),
@@ -596,18 +644,18 @@ class _HomeCard extends StatelessWidget {
                               borderRadius: BorderRadius.circular(buttonRadius),
                             ),
                           ),
-                          onPressed: !entry.hasChapters || entry.caughtUp
+                          onPressed: !hasChapters || entry.caughtUp
                               ? null
                               : () {
                                   final chapterId =
                                       entry.progress?.chapterId ??
-                                      entry.chapters.first.id;
+                                      chapters.first.id;
                                   context.push(
                                     '/reader/${Uri.encodeComponent(entry.manga.id)}?chapter=${Uri.encodeComponent(chapterId)}',
                                   );
                                 },
                           child: Text(
-                            !entry.hasChapters
+                            !hasChapters
                                 ? 'Finding chapters…'
                                 : entry.progress == null
                                 ? 'Start Reading'
@@ -625,6 +673,42 @@ class _HomeCard extends StatelessWidget {
       ),
     );
   }
+}
+
+CanonicalChapter? _latestChapter(List<CanonicalChapter> chapters) {
+  CanonicalChapter? latestNumbered;
+  CanonicalChapter? latestDated;
+  for (final chapter in chapters) {
+    final number = chapter.number;
+    if (number != null &&
+        (latestNumbered == null || number > (latestNumbered.number ?? -1))) {
+      latestNumbered = chapter;
+    }
+    if (latestDated == null ||
+        chapter.publishedAt.isAfter(latestDated.publishedAt)) {
+      latestDated = chapter;
+    }
+  }
+  return latestNumbered ?? latestDated;
+}
+
+CanonicalChapter? _highestReadChapter(
+  List<CanonicalChapter> chapters,
+  ReadingProgress? progress,
+) {
+  if (progress == null || chapters.isEmpty) return null;
+
+  CanonicalChapter? highestNumbered;
+  CanonicalChapter? current;
+  for (final chapter in chapters) {
+    if (chapter.id == progress.chapterId) current = chapter;
+    if (!progress.openedChapterIds.contains(chapter.id)) continue;
+    if (highestNumbered == null ||
+        (chapter.number ?? -1) > (highestNumbered.number ?? -1)) {
+      highestNumbered = chapter;
+    }
+  }
+  return highestNumbered ?? current;
 }
 
 String _formatUploadDate(DateTime? value) {

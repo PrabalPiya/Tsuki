@@ -6,22 +6,23 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/chapter.dart';
 import '../models/manga.dart';
 
-/// Small on-device cache for source mappings and chapter metadata.
+/// Small session cache for source mappings and chapter metadata.
 ///
-/// Only metadata is persisted. Manga page images remain on the source sites
-/// and are requested by the reader when a chapter is opened.
+/// Runtime app data stays in memory. Manga page images remain on the source
+/// sites and are requested by the reader when a chapter is opened.
 class ChapterIndexCache {
   ChapterIndexCache({Future<SharedPreferences>? preferences})
-    : _preferences = preferences ?? SharedPreferences.getInstance() {
-    // Keep this fallback for tests/alternate entrypoints. Normal app startup
-    // starts [warmGlobalSummaries] before runApp, and its shared in-flight
-    // future prevents concurrent scans of the same preference keys.
+    : _preferences = preferences {
+    // Tests can inject preferences to exercise legacy decoding, but runtime
+    // app data stays in memory and does not touch device storage.
     unawaited(
-      preferences == null ? warmGlobalSummaries() : _bootstrapSummaries(),
+      preferences == null ? Future<void>.value() : _bootstrapSummaries(),
     );
   }
 
-  final Future<SharedPreferences> _preferences;
+  final Future<SharedPreferences>? _preferences;
+  final Map<String, String> _stringMemory = {};
+  final Map<String, int> _intMemory = {};
 
   // v6 invalidates all earlier partial/wrong source mappings and indexes.
   static const _version = 6;
@@ -52,7 +53,8 @@ class ChapterIndexCache {
 
   Future<void> _bootstrapSummaries() async {
     try {
-      _loadSummariesFromPreferences(await _preferences);
+      final preferences = _preferences;
+      if (preferences != null) _loadSummariesFromPreferences(await preferences);
     } catch (_) {
       // SharedPreferences startup failure must never block the app.
     }
@@ -99,8 +101,7 @@ class ChapterIndexCache {
   }
 
   Future<List<CanonicalChapter>?> readChapters(String cacheKey) async {
-    final prefs = await _preferences;
-    final raw = prefs.getString('$_chapterPrefix$cacheKey');
+    final raw = await _readString('$_chapterPrefix$cacheKey');
     if (raw == null || raw.isEmpty) {
       return null;
     }
@@ -110,7 +111,7 @@ class ChapterIndexCache {
       if (decoded is! Map<String, dynamic> ||
           decoded['version'] != _version ||
           decoded['chapters'] is! List) {
-        await _forgetSummary(prefs, cacheKey);
+        await _forgetSummary(cacheKey);
         return null;
       }
 
@@ -134,21 +135,21 @@ class ChapterIndexCache {
 
       final chapters = byKey.values.toList()..sort(_chapterOrder);
       if (chapters.isEmpty) {
-        await _forgetSummary(prefs, cacheKey);
+        await _forgetSummary(cacheKey);
         return null;
       }
 
       _rememberSummary(cacheKey, chapters);
       return chapters;
     } catch (_) {
-      await prefs.remove('$_chapterPrefix$cacheKey');
-      await _forgetSummary(prefs, cacheKey);
+      await _remove('$_chapterPrefix$cacheKey');
+      await _forgetSummary(cacheKey);
       return null;
     }
   }
 
-  Future<void> _forgetSummary(SharedPreferences prefs, String cacheKey) async {
-    await prefs.remove('$_summaryPrefix$cacheKey');
+  Future<void> _forgetSummary(String cacheKey) async {
+    await _remove('$_summaryPrefix$cacheKey');
     final mangaId = _mangaIdFromCacheKey(cacheKey);
     if (mangaId.isNotEmpty) MangaChapterRegistry.remove(mangaId);
   }
@@ -173,26 +174,24 @@ class ChapterIndexCache {
 
     if (clean.isEmpty) return;
 
-    final prefs = await _preferences;
     final payload = <String, Object?>{
       'version': _version,
       'chapters': clean.map(_chapterToJson).toList(growable: false),
     };
 
-    await prefs.setString('$_chapterPrefix$cacheKey', jsonEncode(payload));
-    await _writeSummary(prefs, cacheKey, clean);
+    await _writeString('$_chapterPrefix$cacheKey', jsonEncode(payload));
+    await _writeSummary(cacheKey, clean);
 
     final now = DateTime.now().millisecondsSinceEpoch;
     if (markChecked) {
-      await prefs.setInt('$_checkedPrefix$cacheKey', now);
+      await _writeInt('$_checkedPrefix$cacheKey', now);
     }
     if (markDeepChecked) {
-      await prefs.setInt('$_deepCheckedPrefix$cacheKey', now);
+      await _writeInt('$_deepCheckedPrefix$cacheKey', now);
     }
   }
 
   Future<void> _writeSummary(
-    SharedPreferences prefs,
     String cacheKey,
     List<CanonicalChapter> chapters,
   ) async {
@@ -202,15 +201,33 @@ class ChapterIndexCache {
     final summary = _summaryFor(chapters);
     MangaChapterRegistry.rememberSummary(mangaId, summary);
 
-    await prefs.setString(
-      '$_summaryPrefix$cacheKey',
-      jsonEncode(<String, Object?>{
-        'version': _version,
-        'mangaId': mangaId,
-        'count': summary.indexCount,
-        'latestNumber': summary.latestNumber,
-      }),
-    );
+    await writeSummary(mangaId, summary, cacheKey: cacheKey);
+  }
+
+  /// Persists only the tiny latest-chapter summary. Runtime chapter indexes
+  /// can stay memory-only while Home/Search still have an immediate label on
+  /// the next launch.
+  Future<void> writeSummary(
+    String mangaId,
+    MangaChapterSummary summary, {
+    String? cacheKey,
+  }) async {
+    if (mangaId.trim().isEmpty) return;
+    MangaChapterRegistry.rememberSummary(mangaId, summary);
+
+    final encoded = jsonEncode(<String, Object?>{
+      'version': _version,
+      'mangaId': mangaId,
+      'count': summary.indexCount,
+      'latestNumber': summary.latestNumber,
+    });
+    final key = '$_summaryPrefix${cacheKey ?? '$mangaId|safe'}';
+    final preferences = _preferences;
+    if (preferences != null) {
+      await (await preferences).setString(key, encoded);
+      return;
+    }
+    await (await SharedPreferences.getInstance()).setString(key, encoded);
   }
 
   void _rememberSummary(String cacheKey, List<CanonicalChapter> chapters) {
@@ -233,17 +250,15 @@ class ChapterIndexCache {
   }
 
   Future<void> markChecked(String cacheKey, {bool deep = false}) async {
-    final prefs = await _preferences;
     final now = DateTime.now().millisecondsSinceEpoch;
-    await prefs.setInt('$_checkedPrefix$cacheKey', now);
+    await _writeInt('$_checkedPrefix$cacheKey', now);
     if (deep) {
-      await prefs.setInt('$_deepCheckedPrefix$cacheKey', now);
+      await _writeInt('$_deepCheckedPrefix$cacheKey', now);
     }
   }
 
   Future<String?> readMapping(String mappingKey) async {
-    final prefs = await _preferences;
-    final value = prefs.getString('$_mappingPrefix$mappingKey');
+    final value = await _readString('$_mappingPrefix$mappingKey');
     if (value == null || value.trim().isEmpty) return null;
     return value;
   }
@@ -251,13 +266,11 @@ class ChapterIndexCache {
   Future<void> writeMapping(String mappingKey, String sourceMangaId) async {
     final value = sourceMangaId.trim();
     if (value.isEmpty) return;
-    final prefs = await _preferences;
-    await prefs.setString('$_mappingPrefix$mappingKey', value);
+    await _writeString('$_mappingPrefix$mappingKey', value);
   }
 
   Future<void> removeMapping(String mappingKey) async {
-    final prefs = await _preferences;
-    await prefs.remove('$_mappingPrefix$mappingKey');
+    await _remove('$_mappingPrefix$mappingKey');
   }
 
   Future<bool> isStale(
@@ -265,9 +278,8 @@ class ChapterIndexCache {
     Duration maxAge, {
     bool deep = false,
   }) async {
-    final prefs = await _preferences;
     final prefix = deep ? _deepCheckedPrefix : _checkedPrefix;
-    final value = prefs.getInt('$prefix$cacheKey');
+    final value = await _readInt('$prefix$cacheKey');
     if (value == null) return true;
 
     final checked = DateTime.fromMillisecondsSinceEpoch(value);
@@ -358,11 +370,54 @@ class ChapterIndexCache {
   }
 
   String _mangaIdFromCacheKey(String cacheKey) {
-    final marker = cacheKey.indexOf('|adult:');
-    return marker < 0 ? cacheKey : cacheKey.substring(0, marker);
+    final adultMarker = cacheKey.indexOf('|adult:');
+    final safeMarker = cacheKey.indexOf('|safe');
+    final markers = [adultMarker, safeMarker].where((value) => value >= 0);
+    if (markers.isEmpty) return cacheKey;
+    return cacheKey.substring(0, markers.reduce((a, b) => a < b ? a : b));
   }
 
   String _numberLabel(double value) => value == value.roundToDouble()
       ? value.toInt().toString()
       : value.toString();
+
+  Future<String?> _readString(String key) async {
+    final preferences = _preferences;
+    if (preferences == null) return _stringMemory[key];
+    return (await preferences).getString(key);
+  }
+
+  Future<void> _writeString(String key, String value) async {
+    final preferences = _preferences;
+    if (preferences == null) {
+      _stringMemory[key] = value;
+      return;
+    }
+    await (await preferences).setString(key, value);
+  }
+
+  Future<int?> _readInt(String key) async {
+    final preferences = _preferences;
+    if (preferences == null) return _intMemory[key];
+    return (await preferences).getInt(key);
+  }
+
+  Future<void> _writeInt(String key, int value) async {
+    final preferences = _preferences;
+    if (preferences == null) {
+      _intMemory[key] = value;
+      return;
+    }
+    await (await preferences).setInt(key, value);
+  }
+
+  Future<void> _remove(String key) async {
+    final preferences = _preferences;
+    if (preferences == null) {
+      _stringMemory.remove(key);
+      _intMemory.remove(key);
+      return;
+    }
+    await (await preferences).remove(key);
+  }
 }
