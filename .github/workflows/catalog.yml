@@ -3,7 +3,8 @@ name: Manga catalog
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/15 * * * *'
+    # Refresh four times daily, offset from the busy top-of-hour window.
+    - cron: '17 */6 * * *'
 
 permissions:
   contents: read
