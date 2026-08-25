@@ -1,96 +1,37 @@
 # Tsuki
 
-Tsuki is an Android-first Flutter manga reader focused on a simple reading loop:
-
-**Search -> Understand -> Bookmark -> Read**
+Tsuki is an Android-first, open-source Flutter manga reader. It combines manga
+metadata with chapters from multiple sources, giving users one clean library,
+continuous reading, and synced progress.
 
 ## Download
 
 [Download Tsuki v1 for Android](https://github.com/PrabalPiya/Tsuki/raw/refs/heads/main/releases/tsuki_v1.apk)
 
-Android may ask you to allow installation from your browser or file manager.
-The APK is release-signed and requires Android 7.0 or newer.
+The release-signed APK requires Android 7.0 or newer. Android may ask you to
+allow installation from your browser or file manager.
 
-The app treats manga as canonical titles instead of exposing the user to a list
-of source websites. Metadata comes from AniList, while readable chapters are
-resolved from supported external manga sources. Tsuki keeps source matching,
-duplicate chapter handling, fallbacks, reading progress, and updates mostly out
-of the way so the user can focus on reading.
+## Features
 
-## What It Does
+- Search and discover manga using AniList metadata and rankings.
+- View manga details, ratings, descriptions, and merged chapter lists.
+- Bookmark manga in a personal library.
+- Sync bookmarks and reading progress per Firebase account.
+- Resume chapters from saved progress in a continuous vertical reader.
+- Cache metadata, chapter indexes, images, and local reading state.
+- Fall back between supported chapter sources when a copy is unavailable.
 
-- Search for manga using AniList metadata.
-- Browse Discover sections for trending, popular, and top-rated titles.
-- View concise manga details, cover art, ratings, descriptions, and chapter
-  lists.
-- Bookmark titles into a personal library.
-- Track active reads, caught-up titles, and chapter progress.
-- Read chapters in a continuous vertical reader.
-- Resume from saved progress automatically.
-- Cache manga metadata, chapter indexes, images, and local reading state.
-- Sync bookmarks and progress with Firebase when remote accounts are configured.
-
-## Supported Sources
-
-Tsuki separates metadata from chapter/page sources:
+## Sources
 
 - Metadata and rankings: AniList
-- Chapter and page sources: MangaDex, ComicK, MangaPill, WeebCentral, and Asura
-- Demo catalog: available only when explicitly enabled for non-production builds
+- Chapters and pages: MangaDex, Demonic Scans, Manganato, and Asura Scans
 
-The source layer is provider-neutral. The app resolves conservative title
-matches, merges duplicate chapter entries, prefers reliable direct-readable
-copies, and silently falls back to another source when a chapter copy fails.
+Tsuki does not host manga content. Covers, metadata, chapters, and pages remain
+the property of their respective providers and creators.
 
-## App Structure
+## Development
 
-The Flutter app lives in `app/` and is organized by feature and shared core
-services:
-
-```text
-app/lib
-  core/
-    auth/        Firebase authentication session state
-    config/      build-time app configuration
-    data/        catalog orchestration and source merging
-    models/      manga, chapter, and reading progress models
-    network/     shared HTTP and source failure handling
-    state/       Riverpod providers and app state
-    storage/     local cache, Firestore sync, and user storage
-    theme/       visual theme
-  features/
-    discover/    rankings and discovery UI
-    home/        active and caught-up dashboard
-    library/     bookmarked titles
-    manga_details/
-    reader/      source adapters and reading UI
-    search/      AniList search and metadata
-  navigation/    app shell and routes
-  shared/        demo data, summaries, and reusable widgets
-```
-
-Supporting directories:
-
-```text
-backend/   Optional Node/Firebase Admin backend utilities
-firebase/  Firestore rules, indexes, and emulator tests
-.github/   CI, catalog publishing, CodeQL, and dependency automation
-```
-
-## Requirements
-
-- Flutter stable
-- Dart SDK supplied by Flutter
-- Android Studio or Android SDK tooling
-- Node.js 22 or newer for backend and Firestore rules tests
-- Firebase CLI for Firestore emulator tests
-
-Do not run `dart pub get` for the Flutter app. Use `flutter pub get` from the
-`app/` directory so Flutter SDK dependencies can resolve correctly.
-
-## Getting Started
-
-Install Flutter, then run the app:
+Requirements: Flutter stable, Android SDK, and Node.js 22 or newer.
 
 ```sh
 cd app
@@ -105,107 +46,31 @@ cd app
 flutter build apk --release
 ```
 
-Release builds intended for distribution should use a private signing key. Do
-not distribute builds signed only with local development credentials.
+Distribution builds should use a private release signing key configured in
+`app/android/key.properties`.
 
-## Configuration
+## Firebase Configuration
 
-Runtime configuration is read from Dart compile-time environment values in
-`app/lib/core/config/app_config.dart`.
+Account login, bookmark sync, and reading-progress sync require Firebase
+Authentication and Cloud Firestore. Add your Android Firebase configuration at
+`app/android/app/google-services.json`; a sanitized example is included beside
+it.
 
-Common values:
+Runtime settings are provided through Dart compile-time values such as
+`APP_ENV`, `USE_DEMO_DATA`, `BACKEND_BASE_URL`, and `REMOTE_CATALOG_URL`.
+Production mode always disables demo data.
+
+Firestore data is separated by authenticated user UID. Security rules and
+emulator tests are available in `firebase/`.
+
+## Project Layout
 
 ```text
-APP_ENV                 development, staging, or production
-USE_DEMO_DATA           enables demo data outside production
-FIREBASE_PROJECT_ID     Firebase project ID
-FIREBASE_APP_ID         Firebase app ID
-FIREBASE_API_KEY        Firebase API key
-FIREBASE_MESSAGING_SENDER_ID
-BACKEND_BASE_URL        optional backend URL
-REMOTE_CATALOG_URL      optional hosted catalog URL
+app/       Flutter Android application
+backend/   Optional Node/Firebase Admin utilities
+firebase/  Firestore rules, indexes, and tests
 ```
 
-Firebase client configuration is intentionally not committed. For Android,
-download your own `google-services.json` from Firebase and place it at
-`app/android/app/google-services.json`. A sanitized template is available at
-`app/android/app/google-services.example.json`.
+## License
 
-Example development run with demo data:
-
-```sh
-cd app
-flutter run --dart-define=APP_ENV=development --dart-define=USE_DEMO_DATA=true
-```
-
-Production mode always disables demo data, even if `USE_DEMO_DATA=true` is
-provided.
-
-## Firebase And User Data
-
-Tsuki can use Firebase Authentication and Cloud Firestore for remote accounts,
-bookmarks, and reading progress. Production builds that require accounts need a
-configured Firebase project.
-
-Forks should create their own Firebase project. Android builds automatically
-read the client values from `app/android/app/google-services.json`; CI and
-non-Android builds can pass the same values with `--dart-define`. The repository
-does not include production user data, service-account keys, release signing
-keys, or a real `google-services.json`.
-
-Firestore data is scoped under each authenticated user. The Firebase rules are
-deny-by-default and tested with the emulator test suite in `firebase/`.
-
-
-## Development Commands
-
-Flutter app:
-
-```sh
-cd app
-flutter pub get
-dart format --output=none .
-flutter analyze
-flutter test
-```
-
-Optional backend:
-
-```sh
-cd backend
-npm ci
-npm test
-npm start
-```
-
-Firestore rules:
-
-```sh
-cd firebase
-npm ci --ignore-scripts
-npm test
-```
-
-## CI
-
-GitHub Actions runs:
-
-- Flutter dependency resolution, formatting, analysis, and tests
-- Backend Node tests
-- Firestore emulator rules tests
-- CodeQL scanning
-- Scheduled catalog generation and GitHub Pages artifact deployment
-
-The catalog workflow uses Flutter dependency resolution because the app depends
-on Flutter SDK packages.
-
-## Content, Attribution, And License
-
-This repository contains application code only. Manga pages, covers, metadata,
-and chapters are provided by configured external services and remain subject to
-their own licenses and terms.
-
-Deployed builds must retain required source and scanlation-group attribution and
-must comply with each source provider's acceptable-use policy.
-
-The code in this repository is licensed under the MIT License.
+Source code is available under the [MIT License](LICENSE).
