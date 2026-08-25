@@ -606,13 +606,15 @@ class _HomeCard extends ConsumerWidget {
                       ),
                       const SizedBox(height: 5),
                       _ChapterInfoLine(
-                        label: 'Type',
-                        value: entry.manga.publicationTypeLabel,
-                        valueColor: AppColors.accent,
+                        label: 'Last Chapter Uploaded',
+                        value: latest?.numberLabel ?? 'Unavailable',
+                        valueColor: latest == null
+                            ? AppColors.muted
+                            : AppColors.accent,
                       ),
                       const SizedBox(height: 2),
                       _ChapterInfoLine(
-                        label: 'Last read',
+                        label: 'Last Chapter Read',
                         value: lastRead,
                         valueColor: highestRead == null
                             ? AppColors.muted
@@ -620,7 +622,7 @@ class _HomeCard extends ConsumerWidget {
                       ),
                       const SizedBox(height: 2),
                       _ChapterInfoLine(
-                        label: 'Last upload',
+                        label: 'Last Upload',
                         value: _formatUploadDate(latest?.publishedAt),
                         valueColor: latest == null
                             ? AppColors.muted

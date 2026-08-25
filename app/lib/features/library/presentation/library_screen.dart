@@ -269,7 +269,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
             curve: Curves.easeOutBack,
             left: 0.0,
             right: 0.0,
-            bottom: _dragging ? 12.0 : -90.0,
+            bottom: _dragging ? 28.0 : -90.0,
             child: IgnorePointer(
               child: AnimatedOpacity(
                 duration: const Duration(milliseconds: 150),

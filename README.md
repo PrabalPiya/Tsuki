@@ -4,6 +4,13 @@ Tsuki is an Android-first Flutter manga reader focused on a simple reading loop:
 
 **Search -> Understand -> Bookmark -> Read**
 
+## Download
+
+[Download Tsuki v1 for Android](https://github.com/PrabalPiya/Tsuki/raw/refs/heads/main/releases/tsuki_v1.apk)
+
+Android may ask you to allow installation from your browser or file manager.
+The APK is release-signed and requires Android 7.0 or newer.
+
 The app treats manga as canonical titles instead of exposing the user to a list
 of source websites. Metadata comes from AniList, while readable chapters are
 resolved from supported external manga sources. Tsuki keeps source matching,
