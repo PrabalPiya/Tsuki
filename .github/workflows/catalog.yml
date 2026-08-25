@@ -30,7 +30,9 @@ jobs:
       - run: flutter pub get
       # AniList is currently capped at 30 requests/minute and also burst-limits.
       - run: dart run tool/build_catalog.dart --pages 80 --per-page 50 --delay-ms 2200 --max-retries 5 --out ../public/catalog.json
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: public
 
