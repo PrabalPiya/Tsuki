@@ -6,10 +6,9 @@ import '../models/manga.dart';
 import '../storage/chapter_index_cache.dart';
 
 import '../../features/reader/data/asura_source.dart';
-import '../../features/reader/data/comick_source.dart';
+import '../../features/reader/data/demonic_scans_source.dart';
 import '../../features/reader/data/mangadex_source.dart';
-import '../../features/reader/data/mangapill_source.dart';
-import '../../features/reader/data/weebcentral_source.dart';
+import '../../features/reader/data/manganato_source.dart';
 import '../../features/search/data/metadata_provider.dart';
 import '../../shared/demo_catalog.dart';
 
@@ -18,14 +17,12 @@ class CatalogRepository {
     required this.config,
     required this.metadata,
     required this.mangaDex,
-    ComicKSource? comicK,
-    MangaPillSource? mangaPill,
-    WeebCentralSource? weebCentral,
+    DemonicScansSource? demonicScans,
+    ManganatoSource? manganato,
     AsuraSource? asura,
     ChapterIndexCache? chapterIndexCache,
-  }) : _comicK = comicK ?? ComicKSource(),
-       _mangaPill = mangaPill ?? MangaPillSource(),
-       _weebCentral = weebCentral ?? WeebCentralSource(),
+  }) : _demonicScans = demonicScans ?? DemonicScansSource(),
+       _manganato = manganato ?? ManganatoSource(),
        _asura = asura ?? AsuraSource(),
        _indexCache = chapterIndexCache ?? ChapterIndexCache() {
     if (config.useDemoData) {
@@ -38,9 +35,8 @@ class CatalogRepository {
   final AppConfig config;
   final MetadataProvider metadata;
   final MangaDexSource mangaDex;
-  final ComicKSource _comicK;
-  final MangaPillSource _mangaPill;
-  final WeebCentralSource _weebCentral;
+  final DemonicScansSource _demonicScans;
+  final ManganatoSource _manganato;
   final AsuraSource _asura;
   final ChapterIndexCache _indexCache;
 
@@ -55,6 +51,10 @@ class CatalogRepository {
   final Map<String, Manga> _libraryWarmupQueue = {};
   final Set<String> _libraryWarmupActive = {};
   Future<void>? _libraryWarmup;
+  final Map<String, Manga> _summaryWarmupQueue = {};
+  final Set<String> _summaryWarmupActive = {};
+  final Map<String, DateTime> _summaryWarmupChecked = {};
+  Future<void>? _summaryWarmup;
   final StreamController<String> _chapterUpdateController =
       StreamController<String>.broadcast();
 
@@ -63,6 +63,13 @@ class CatalogRepository {
   static const _firstChapterDeadline = Duration(seconds: 6);
   static const _quickRefreshAge = Duration(minutes: 10);
   static const _deepRefreshAge = Duration(hours: 6);
+  static const _enabledSourceIds = <String>{
+    'demo',
+    'mangadex',
+    'asura',
+    'demonicscans',
+    'manganato',
+  };
 
   Stream<String> get chapterUpdates => _chapterUpdateController.stream;
 
@@ -190,9 +197,119 @@ class CatalogRepository {
     }
   }
 
+  /// Queues a lightweight latest-chapter probe when a card becomes visible.
+  ///
+  /// This does not download full chapter indexes. It compares the latest
+  /// chapter advertised by every matched source and publishes the highest
+  /// verified number through [chapterUpdates], allowing cards to update
+  /// without requiring a visit to Details.
+  void queueChapterSummaryWarmup(Manga manga) {
+    if (config.useDemoData || !isFriendly(manga)) return;
+    if (manga.status == MangaStatus.notYetReleased ||
+        manga.format == MangaFormat.oneShot ||
+        (manga.status == MangaStatus.completed && manga.hasChapterMetadata)) {
+      return;
+    }
+
+    final checked = _summaryWarmupChecked[manga.id];
+    if (checked != null &&
+        DateTime.now().difference(checked) < _quickRefreshAge) {
+      return;
+    }
+    if (_summaryWarmupActive.contains(manga.id) ||
+        _summaryWarmupQueue.containsKey(manga.id)) {
+      return;
+    }
+
+    _summaryWarmupQueue[manga.id] = manga;
+    _summaryWarmup ??= _drainSummaryWarmup();
+  }
+
+  Future<void> _drainSummaryWarmup() async {
+    try {
+      while (_summaryWarmupQueue.isNotEmpty) {
+        final batch = _summaryWarmupQueue.values
+            .take(3)
+            .toList(growable: false);
+        for (final manga in batch) {
+          _summaryWarmupQueue.remove(manga.id);
+          _summaryWarmupActive.add(manga.id);
+        }
+
+        await Future.wait(batch.map(_refreshCardChapterSummary));
+
+        final checkedAt = DateTime.now();
+        for (final manga in batch) {
+          _summaryWarmupActive.remove(manga.id);
+          _summaryWarmupChecked[manga.id] = checkedAt;
+        }
+      }
+    } finally {
+      _summaryWarmup = null;
+      if (_summaryWarmupQueue.isNotEmpty) {
+        _summaryWarmup = _drainSummaryWarmup();
+      }
+    }
+  }
+
+  Future<void> _refreshCardChapterSummary(Manga manga) async {
+    final probes = await _safeLatestPrimaries(manga, allowAdult: false);
+    if (probes.isEmpty) return;
+
+    final freshestProbe = probes.first;
+    final probedLatest = freshestProbe.chapter.number;
+    if (probedLatest == null) return;
+    final metadataTotal = manga.metadataChapterCount.toDouble();
+    final candidate = metadataTotal > probedLatest
+        ? metadataTotal
+        : probedLatest;
+
+    final current = MangaChapterRegistry.summaryFor(manga.id);
+    final currentLatest = current?.latestNumber;
+    final summaryNeedsUpdate =
+        currentLatest == null || currentLatest < candidate;
+
+    // If this title already has a readable on-device index, update that index
+    // from the newly discovered freshest source as part of the card refresh.
+    // This bypasses an old "recently checked" timestamp that may have been
+    // written when only a stale provider was available. Never prefetch entire
+    // indexes for never-opened search results.
+    final local = await localChapters(manga, allowAdult: false);
+
+    if (summaryNeedsUpdate) {
+      final summary = MangaChapterSummary(
+        indexCount: current?.indexCount ?? 0,
+        latestNumber: candidate,
+      );
+      await _indexCache.writeSummary(manga.id, summary);
+
+      if (!_chapterUpdateController.isClosed) {
+        _chapterUpdateController.add(manga.id);
+      }
+    }
+
+    if (local == null ||
+        local.isEmpty ||
+        candidate <= (_latestNumber(local) ?? 0)) {
+      return;
+    }
+    final fresh = await _safe(
+      () => _loadSourceByName(manga, freshestProbe.source, allowAdult: false),
+    );
+    if (fresh.isEmpty) return;
+
+    final merged = _mergeChapters([...local, ...fresh]);
+    await _storeChapterIndex(
+      manga,
+      _chapterCacheKey(manga, false),
+      merged,
+      markChecked: true,
+    );
+  }
+
   /// Queues library chapter discovery with bounded concurrency.
   ///
-  /// A manga opens five source requests internally, so warming every bookmark
+  /// A manga opens four source requests internally, so warming every bookmark
   /// at once can overwhelm both the device and the remote sources. This queue
   /// processes two manga at a time and coalesces repeated Home rebuilds.
   void queueLibraryWarmup(Iterable<Manga> manga) {
@@ -248,12 +365,13 @@ class CatalogRepository {
     if (active != null) return active;
 
     final future = _indexCache.readChapters(cacheKey).then((stored) {
-      if (stored == null || stored.isEmpty) {
+      final clean = stored == null ? null : _sanitizeBatch(stored);
+      if (clean == null || clean.isEmpty) {
         _knownMissingIndexes.add(cacheKey);
         return null;
       }
-      _rememberChapterIndex(manga, cacheKey, stored, notify: false);
-      return stored;
+      _rememberChapterIndex(manga, cacheKey, clean, notify: false);
+      return clean;
     });
     _localLookups[cacheKey] = future;
     try {
@@ -324,11 +442,10 @@ class CatalogRepository {
       return const <Future<List<CanonicalChapter>> Function()>[];
     }
     return <Future<List<CanonicalChapter>> Function()>[
-      () => _loadWeebCentral(manga, allowAdult: false),
-      () => _loadComicK(manga),
+      () => _loadDemonicScans(manga),
+      () => _loadManganato(manga),
       () => _loadMangaDex(manga, allowAdult: false),
       () => _loadAsura(manga),
-      () => _loadMangaPill(manga),
     ];
   }
 
@@ -474,20 +591,23 @@ class CatalogRepository {
         existing.isEmpty ||
         await _indexCache.isStale(cacheKey, _deepRefreshAge, deep: true);
 
-    // Normal refresh: probe a source that is actually appropriate for this
-    // title. The previous build only checked WeebCentral, so adult manga that
-    // existed only on ComicK/MangaDex/MangaPill could never discover updates
-    // until a deep refresh.
+    // Normal refresh probes every enabled source before choosing the newest
+    // readable index.
     if (!deep && existing.isNotEmpty) {
-      final probe = await _safeLatestPrimary(manga, allowAdult: false);
+      final probes = await _safeLatestPrimaries(manga, allowAdult: false);
       var result = existing;
 
-      if (probe != null && _isNewerThanIndex(probe.chapter, existing)) {
+      // Probe every source before choosing. The old first-response-wins race
+      // allowed a fast but stale provider to hide another provider that was
+      // tens of chapters newer. Work from newest to oldest and keep trying if
+      // a source advertises a new chapter but its readable index then fails.
+      for (final probe in probes) {
+        if (!_isNewerThanIndex(probe.chapter, result)) continue;
         final fresh = await _safe(
           () => _loadSourceByName(manga, probe.source, allowAdult: false),
         );
         if (fresh.isNotEmpty) {
-          result = _mergeChapters([...existing, ...fresh]);
+          result = _mergeChapters([...result, ...fresh]);
         }
       }
 
@@ -495,8 +615,7 @@ class CatalogRepository {
       return result;
     }
 
-    // Deep refresh: merge the strongest complete indexes. Adult titles use
-    // providers that actually expose adult/general catalogues first.
+    // Deep refresh merges the complete indexes from every enabled source.
     final loaders = _loadersFor(manga, allowAdult: false);
 
     // Do not wrap a complete paginated source harvest in one global timeout.
@@ -544,50 +663,57 @@ class CatalogRepository {
     }());
   }
 
-  Future<({String source, CanonicalChapter chapter})?> _safeLatestPrimary(
-    Manga manga, {
-    required bool allowAdult,
-  }) {
+  Future<List<({String source, CanonicalChapter chapter})>>
+  _safeLatestPrimaries(Manga manga, {required bool allowAdult}) async {
     const sourceOrder = <String>[
-      'weebcentral',
-      'comick',
+      'demonicscans',
+      'manganato',
       'mangadex',
-      'mangapill',
       'asura',
     ];
 
-    final completer = Completer<({String source, CanonicalChapter chapter})?>();
-    var remaining = sourceOrder.length;
+    final probes = await Future.wait(
+      sourceOrder.map((source) async {
+        try {
+          final chapter = await _latestFromSource(
+            manga,
+            source,
+            allowAdult: false,
+          ).timeout(_primaryTimeout);
+          final number = chapter?.number;
+          if (chapter == null ||
+              (number != null &&
+                  (!number.isFinite || number < 0 || number > 20000))) {
+            return null;
+          }
+          return (source: source, chapter: chapter);
+        } catch (_) {
+          return null;
+        }
+      }),
+    );
 
-    if (remaining == 0) {
-      completer.complete(null);
-      return completer.future;
+    final available = probes
+        .whereType<({String source, CanonicalChapter chapter})>()
+        .toList(growable: false);
+    available.sort(
+      (left, right) => _compareLatestChapters(right.chapter, left.chapter),
+    );
+    return available;
+  }
+
+  int _compareLatestChapters(CanonicalChapter left, CanonicalChapter right) {
+    final leftNumber = left.number;
+    final rightNumber = right.number;
+    if (leftNumber != null && rightNumber != null) {
+      final byNumber = leftNumber.compareTo(rightNumber);
+      if (byNumber != 0) return byNumber;
+    } else if (leftNumber != null) {
+      return 1;
+    } else if (rightNumber != null) {
+      return -1;
     }
-
-    void finishedWithoutValue() {
-      remaining--;
-      if (remaining == 0 && !completer.isCompleted) {
-        completer.complete(null);
-      }
-    }
-
-    for (final source in sourceOrder) {
-      unawaited(
-        _latestFromSource(manga, source, allowAdult: false)
-            .timeout(_primaryTimeout)
-            .then((chapter) {
-              if (chapter != null && !completer.isCompleted) {
-                completer.complete((source: source, chapter: chapter));
-              }
-            })
-            .catchError((_) {
-              // Another source can still provide the summary.
-            })
-            .whenComplete(finishedWithoutValue),
-      );
-    }
-
-    return completer.future;
+    return left.publishedAt.compareTo(right.publishedAt);
   }
 
   Future<CanonicalChapter?> _latestFromSource(
@@ -606,67 +732,39 @@ class CatalogRepository {
                   mangaDex.findConservativeMatch(manga, allowAdult: false),
             );
       if (sourceId == null) return null;
-      return _latestChapterFrom(await mangaDex.getChapters(sourceId));
+      return await mangaDex.getLatestChapter(sourceId);
     }
 
-    if (sourceName == 'comick') {
+    if (sourceName == 'demonicscans') {
       final sourceId = await _resolveMapped(
         manga,
-        sourceName: 'comick',
-        resolver: () => _comicK.findConservativeMatch(manga),
+        sourceName: 'demonicscans',
+        resolver: () => _demonicScans.findConservativeMatch(manga),
       );
       if (sourceId == null) return null;
-      return await _comicK.getLatestChapter(sourceId);
+      return await _demonicScans.getLatestChapter(sourceId);
     }
 
-    if (sourceName == 'mangapill') {
+    if (sourceName == 'manganato') {
       final sourceId = await _resolveMapped(
         manga,
-        sourceName: 'mangapill',
-        resolver: () => _mangaPill.findConservativeMatch(manga),
+        sourceName: 'manganato',
+        resolver: () => _manganato.findConservativeMatch(manga),
       );
       if (sourceId == null) return null;
-      return _latestChapterFrom(await _mangaPill.getChapters(sourceId));
-    }
-
-    if (sourceName == 'weebcentral') {
-      final sourceId = await _resolveMapped(
-        manga,
-        sourceName: 'weebcentral',
-        resolver: () =>
-            _weebCentral.findConservativeMatch(manga, allowAdult: false),
-      );
-      if (sourceId == null) return null;
-      return await _weebCentral.getLatestChapter(sourceId);
+      return await _manganato.getLatestChapter(sourceId);
     }
 
     if (sourceName == 'asura') {
-      final values = await _loadAsura(manga);
-      return _latestChapterFrom(values);
+      final sourceId = await _resolveMapped(
+        manga,
+        sourceName: 'asura',
+        resolver: () => _asura.findConservativeMatch(manga),
+      );
+      if (sourceId == null) return null;
+      return await _asura.getLatestChapter(sourceId);
     }
     return null;
-  }
-
-  CanonicalChapter? _latestChapterFrom(List<CanonicalChapter> values) {
-    CanonicalChapter? latestNumbered;
-    CanonicalChapter? latestDated;
-
-    for (final chapter in values) {
-      final number = chapter.number;
-      if (number != null &&
-          number.isFinite &&
-          number >= 0 &&
-          (latestNumbered == null || number > (latestNumbered.number ?? -1))) {
-        latestNumbered = chapter;
-      }
-
-      if (latestDated == null ||
-          chapter.publishedAt.isAfter(latestDated.publishedAt)) {
-        latestDated = chapter;
-      }
-    }
-
-    return latestNumbered ?? latestDated;
   }
 
   Future<List<CanonicalChapter>> _loadSourceByName(
@@ -676,10 +774,9 @@ class CatalogRepository {
   }) {
     if (!isFriendly(manga)) return Future.value(const <CanonicalChapter>[]);
     return switch (sourceName) {
-      'weebcentral' => _loadWeebCentral(manga, allowAdult: false),
-      'comick' => _loadComicK(manga),
+      'demonicscans' => _loadDemonicScans(manga),
+      'manganato' => _loadManganato(manga),
       'mangadex' => _loadMangaDex(manga, allowAdult: false),
-      'mangapill' => _loadMangaPill(manga),
       'asura' => _loadAsura(manga),
       _ => Future.value(const <CanonicalChapter>[]),
     };
@@ -726,14 +823,25 @@ class CatalogRepository {
     final result = <CanonicalChapter>[];
     for (final chapter in values) {
       final number = chapter.number;
-      if (chapter.sourceCopies.isEmpty || !chapter.hasDirectlyReadableCopy) {
+      final copies = chapter.sourceCopies
+          .where((copy) => _enabledSourceIds.contains(copy.sourceId))
+          .toList(growable: false);
+      if (copies.isEmpty || !copies.any((copy) => copy.isDirectlyReadable)) {
         continue;
       }
       if (number != null &&
           (!number.isFinite || number < 0 || number > 20000)) {
         continue;
       }
-      result.add(chapter);
+      result.add(
+        CanonicalChapter(
+          id: chapter.id,
+          number: chapter.number,
+          title: chapter.title,
+          publishedAt: chapter.publishedAt,
+          sourceCopies: copies,
+        ),
+      );
     }
     return result;
   }
@@ -779,23 +887,21 @@ class CatalogRepository {
     }
   }
 
-  Future<List<CanonicalChapter>> _loadComicK(Manga manga) => _loadMappedSource(
-    manga,
-    sourceName: 'comick',
-    resolver: () => _comicK.findConservativeMatch(manga),
-    fetch: _comicK.getChapters,
-  );
+  Future<List<CanonicalChapter>> _loadDemonicScans(Manga manga) =>
+      _loadMappedSource(
+        manga,
+        sourceName: 'demonicscans',
+        resolver: () => _demonicScans.findConservativeMatch(manga),
+        fetch: _demonicScans.getChapters,
+      );
 
-  Future<List<CanonicalChapter>> _loadWeebCentral(
-    Manga manga, {
-    required bool allowAdult,
-  }) => _loadMappedSource(
-    manga,
-    sourceName: 'weebcentral',
-    resolver: () =>
-        _weebCentral.findConservativeMatch(manga, allowAdult: false),
-    fetch: _weebCentral.getChapters,
-  );
+  Future<List<CanonicalChapter>> _loadManganato(Manga manga) =>
+      _loadMappedSource(
+        manga,
+        sourceName: 'manganato',
+        resolver: () => _manganato.findConservativeMatch(manga),
+        fetch: _manganato.getChapters,
+      );
 
   Future<List<CanonicalChapter>> _loadAsura(Manga manga) => _loadMappedSource(
     manga,
@@ -803,14 +909,6 @@ class CatalogRepository {
     resolver: () => _asura.findConservativeMatch(manga),
     fetch: _asura.getChapters,
   );
-
-  Future<List<CanonicalChapter>> _loadMangaPill(Manga manga) =>
-      _loadMappedSource(
-        manga,
-        sourceName: 'mangapill',
-        resolver: () => _mangaPill.findConservativeMatch(manga),
-        fetch: _mangaPill.getChapters,
-      );
 
   Future<List<CanonicalChapter>> _loadMappedSource(
     Manga manga, {
@@ -1089,20 +1187,17 @@ class CatalogRepository {
       }
       try {
         if (copy.sourceId == 'demo') return demoPages(copy.chapterId);
-        if (copy.sourceId == _weebCentral.id) {
-          return await _weebCentral.getChapterPages(copy.chapterId);
-        }
         if (copy.sourceId == mangaDex.id) {
           return await mangaDex.getChapterPages(copy.chapterId);
         }
-        if (copy.sourceId == _comicK.id) {
-          return await _comicK.getChapterPages(copy.chapterId);
+        if (copy.sourceId == _demonicScans.id) {
+          return await _demonicScans.getChapterPages(copy.chapterId);
+        }
+        if (copy.sourceId == _manganato.id) {
+          return await _manganato.getChapterPages(copy.chapterId);
         }
         if (copy.sourceId == _asura.id) {
           return await _asura.getChapterPages(copy.chapterId);
-        }
-        if (copy.sourceId == _mangaPill.id) {
-          return await _mangaPill.getChapterPages(copy.chapterId);
         }
       } catch (error) {
         lastError = error;

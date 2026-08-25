@@ -164,8 +164,23 @@ class Manga {
   String? get catalogChapterDisplayLabel {
     final verified = MangaChapterRegistry.displayLabelFor(id);
     if (verified != null) return verified;
-    if (_metadataChapterCount <= 0) return null;
-    return _metadataChapterCount.toString();
+    if (_metadataChapterCount > 0) return _metadataChapterCount.toString();
+    if (format == MangaFormat.oneShot) return '1';
+    if (status == MangaStatus.notYetReleased) return '0';
+    if (volumeCount > 0) return '${_chapterLowerBound(volumeCount)}+';
+
+    // AniList defines MANGA as a professionally published work with more than
+    // one chapter. This is the strongest instant lower bound available when
+    // AniList omits the current chapter total for a releasing title. The card
+    // silently replaces it with a source-verified number in the background.
+    if (format == MangaFormat.manga) return '2+';
+    return '1+';
+  }
+
+  static int _chapterLowerBound(int knownMinimum) {
+    if (knownMinimum < 10) return knownMinimum;
+    if (knownMinimum < 100) return (knownMinimum ~/ 10) * 10;
+    return (knownMinimum ~/ 100) * 100;
   }
 
   String get chapterDisplayLabel {
@@ -195,6 +210,16 @@ class Manga {
     MangaFormat.novel => 'Novel',
     MangaFormat.unknown => 'Manga',
   };
+
+  String get publicationTypeLabel {
+    if (format == MangaFormat.novel) return 'Novel';
+    if (format == MangaFormat.oneShot) return 'One-shot';
+    return switch (countryCode?.trim().toUpperCase()) {
+      'KR' => 'Manhwa',
+      'CN' || 'TW' => 'Manhua',
+      _ => 'Manga',
+    };
+  }
 
   String get countryLabel => switch (countryCode?.toUpperCase()) {
     'JP' => 'Japan',

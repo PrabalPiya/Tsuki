@@ -18,11 +18,11 @@ void main() {
         publishedAt: DateTime.utc(2026, 8, 19),
         sourceCopies: [
           ChapterSourceCopy(
-            sourceId: 'comick',
+            sourceId: 'demonicscans',
             chapterId: 'chapter-124',
             reliability: .88,
             publishedAt: DateTime.utc(2026, 8, 19),
-            attribution: 'ComicK',
+            attribution: 'Demonic Scans',
           ),
         ],
       ),
@@ -39,14 +39,17 @@ void main() {
     expect(restored, isNotNull);
     expect(restored, hasLength(1));
     expect(restored!.single.number, 124);
-    expect(restored.single.sourceCopies.single.sourceId, 'comick');
+    expect(restored.single.sourceCopies.single.sourceId, 'demonicscans');
   });
 
   test('source mappings are persisted locally', () async {
     final cache = ChapterIndexCache();
 
-    await cache.writeMapping('anilist:1|comick', 'hid|slug');
+    await cache.writeMapping('anilist:1|demonicscans', 'encoded-series-path');
 
-    expect(await cache.readMapping('anilist:1|comick'), 'hid|slug');
+    expect(
+      await cache.readMapping('anilist:1|demonicscans'),
+      'encoded-series-path',
+    );
   });
 }

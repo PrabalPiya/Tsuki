@@ -316,7 +316,7 @@ class AsuraSource implements MangaSource {
 
       // Tiled images require source-specific reconstruction. Do not display a
       // scrambled page or attempt to defeat that mechanism; let the canonical
-      // chapter fall back to WeebCentral/MangaDex/ComicK instead.
+      // chapter fall back to MangaDex or Demonic Scans instead.
       if (tiled) {
         throw const SourceFailure(
           'This Asura copy uses a protected tiled image format.',

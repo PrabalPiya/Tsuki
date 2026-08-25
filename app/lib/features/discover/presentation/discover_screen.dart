@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/models/manga.dart';
@@ -122,7 +123,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
 
     final currentPeriod = RankingPeriod.values[_period];
     final currentRanking = ref.watch(rankingsProvider(currentPeriod));
-    final currentResolvedRanking = currentRanking.valueOrNull;
+    final currentResolvedRanking = currentRanking.value;
 
     if (currentResolvedRanking != null) {
       _rankingCache[currentPeriod] = currentResolvedRanking;
@@ -223,7 +224,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
   Widget _buildPeriodPage(int periodIndex) {
     final period = RankingPeriod.values[periodIndex];
     final ranking = ref.watch(rankingsProvider(period));
-    final resolvedRanking = ranking.valueOrNull;
+    final resolvedRanking = ranking.value;
 
     if (resolvedRanking != null) {
       _rankingCache[period] = resolvedRanking;
@@ -245,7 +246,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Text(
-            ranking.valueOrNull?.unavailableReason ??
+            ranking.value?.unavailableReason ??
                 displayedRanking?.unavailableReason ??
                 'Rankings unavailable.',
             textAlign: TextAlign.center,
@@ -892,9 +893,6 @@ class _DiscoverCard extends ConsumerWidget {
 
     final periodLabel = ['Trending', 'Top Rated', 'Popular'][period];
     final details = ref.read(catalogProvider).cached(manga.id);
-    final chapterLabel =
-        ref.watch(chapterSummaryLabelProvider(manga)).valueOrNull ??
-        (details ?? manga).verifiedChapterDisplayLabel;
 
     final rawSynopsis = (details?.synopsis.isNotEmpty ?? false)
         ? details!.synopsis
@@ -1022,11 +1020,10 @@ class _DiscoverCard extends ConsumerWidget {
                                     icon: Icons.bolt_rounded,
                                     label: manga.statusLabel,
                                   ),
-                                  if (chapterLabel != null)
-                                    _InfoChipData(
-                                      icon: Icons.library_books_rounded,
-                                      label: '$chapterLabel chp',
-                                    ),
+                                  _InfoChipData(
+                                    icon: Icons.auto_stories_rounded,
+                                    label: manga.publicationTypeLabel,
+                                  ),
                                 ],
                               ),
                               const SizedBox(height: 12),

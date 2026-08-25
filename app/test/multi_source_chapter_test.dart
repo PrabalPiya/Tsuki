@@ -20,14 +20,14 @@ void main() {
           publishedAt: epoch,
         ),
         ChapterSourceCopy(
-          sourceId: 'comick',
-          chapterId: 'comick-b',
+          sourceId: 'asura',
+          chapterId: 'asura-b',
           reliability: .78,
           publishedAt: epoch,
         ),
         ChapterSourceCopy(
-          sourceId: 'mangapill',
-          chapterId: 'mangapill-c',
+          sourceId: 'demonicscans',
+          chapterId: 'demonic-c',
           reliability: .66,
           publishedAt: epoch,
         ),
@@ -40,7 +40,7 @@ void main() {
 
     expect(
       chapter.sourceCopies.map((copy) => copy.sourceId),
-      containsAll(['mangadex', 'comick', 'mangapill']),
+      containsAll(['mangadex', 'asura', 'demonicscans']),
     );
   });
 

@@ -540,13 +540,12 @@ class _HomeCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final loaded = ref.watch(_homeChaptersProvider(entry.manga)).valueOrNull;
+    final loaded = ref.watch(_homeChaptersProvider(entry.manga)).value;
     final chapters = loaded != null && loaded.isNotEmpty
         ? loaded
         : entry.chapters;
     final latest = _latestChapter(chapters);
     final highestRead = _highestReadChapter(chapters, entry.progress);
-    final summaryLabel = entry.manga.catalogChapterDisplayLabel ?? '—';
     final hasChapters = chapters.isNotEmpty;
     final String lastRead;
     if (highestRead != null) {
@@ -607,11 +606,9 @@ class _HomeCard extends ConsumerWidget {
                       ),
                       const SizedBox(height: 5),
                       _ChapterInfoLine(
-                        label: 'New chapter',
-                        value: latest?.numberLabel ?? summaryLabel,
-                        valueColor: latest != null || summaryLabel != '—'
-                            ? AppColors.accent
-                            : AppColors.muted,
+                        label: 'Type',
+                        value: entry.manga.publicationTypeLabel,
+                        valueColor: AppColors.accent,
                       ),
                       const SizedBox(height: 2),
                       _ChapterInfoLine(

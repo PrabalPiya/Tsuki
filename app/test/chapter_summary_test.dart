@@ -57,11 +57,95 @@ void main() {
       synopsis: '',
       status: MangaStatus.ongoing,
       chapterCount: 0,
+      format: MangaFormat.manga,
     );
 
     MangaChapterRegistry.remember(manga.id, 0, latestNumber: null);
 
     expect(manga.chapterDisplayLabel, '—');
+  });
+
+  test('cards always have an immediate numeric chapter lower bound', () {
+    const ongoing = Manga(
+      id: 'anilist:ongoing',
+      title: 'Ongoing',
+      coverUrl: '',
+      synopsis: '',
+      status: MangaStatus.ongoing,
+      chapterCount: 0,
+      format: MangaFormat.manga,
+    );
+    const withVolumes = Manga(
+      id: 'anilist:volumes',
+      title: 'Known volumes',
+      coverUrl: '',
+      synopsis: '',
+      status: MangaStatus.ongoing,
+      chapterCount: 0,
+      volumeCount: 27,
+    );
+    const oneShot = Manga(
+      id: 'anilist:one-shot',
+      title: 'One shot',
+      coverUrl: '',
+      synopsis: '',
+      status: MangaStatus.completed,
+      chapterCount: 0,
+      format: MangaFormat.oneShot,
+    );
+    const upcoming = Manga(
+      id: 'anilist:upcoming',
+      title: 'Upcoming',
+      coverUrl: '',
+      synopsis: '',
+      status: MangaStatus.notYetReleased,
+      chapterCount: 0,
+    );
+
+    expect(ongoing.catalogChapterDisplayLabel, '2+');
+    expect(withVolumes.catalogChapterDisplayLabel, '20+');
+    expect(oneShot.catalogChapterDisplayLabel, '1');
+    expect(upcoming.catalogChapterDisplayLabel, '0');
+  });
+
+  test('verified chapter summary replaces the immediate fallback', () {
+    const manga = Manga(
+      id: 'anilist:fallback-upgrade',
+      title: 'Fallback upgrade',
+      coverUrl: '',
+      synopsis: '',
+      status: MangaStatus.ongoing,
+      chapterCount: 0,
+      volumeCount: 27,
+    );
+
+    expect(manga.catalogChapterDisplayLabel, '20+');
+
+    MangaChapterRegistry.remember(manga.id, 84, latestNumber: 91);
+
+    expect(manga.catalogChapterDisplayLabel, '91');
+  });
+
+  test('publication type follows origin metadata', () {
+    Manga manga(String id, String? countryCode, {MangaFormat? format}) => Manga(
+      id: id,
+      title: id,
+      coverUrl: '',
+      synopsis: '',
+      status: MangaStatus.ongoing,
+      chapterCount: 0,
+      countryCode: countryCode,
+      format: format ?? MangaFormat.manga,
+    );
+
+    expect(manga('jp', 'JP').publicationTypeLabel, 'Manga');
+    expect(manga('kr', 'KR').publicationTypeLabel, 'Manhwa');
+    expect(manga('cn', 'CN').publicationTypeLabel, 'Manhua');
+    expect(manga('tw', 'TW').publicationTypeLabel, 'Manhua');
+    expect(
+      manga('novel', 'KR', format: MangaFormat.novel).publicationTypeLabel,
+      'Novel',
+    );
   });
 
   test('startup ignores stale pre-release adult summaries', () async {

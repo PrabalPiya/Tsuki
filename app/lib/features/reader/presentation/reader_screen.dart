@@ -863,10 +863,9 @@ class _ReaderPageState extends State<_ReaderPage> {
 
 Map<String, String>? _sourceImageHeaders(String sourceId) {
   final referer = switch (sourceId) {
-    'weebcentral' => 'https://weebcentral.com/',
     'asura' => 'https://asurascans.com/',
-    'mangapill' => 'https://mangapill.com/',
-    'comick' => 'https://comick.live/',
+    'demonicscans' => 'https://demonicscans.org/',
+    'manganato' => 'https://www.manganato.gg/',
     'mangadex' => 'https://mangadex.org/',
     _ => null,
   };

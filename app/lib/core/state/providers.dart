@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 
 import '../auth/auth_controller.dart';
 import '../config/app_config.dart';
@@ -13,10 +14,9 @@ import '../storage/user_store.dart';
 
 import '../../features/discover/data/ranking_provider.dart';
 import '../../features/reader/data/asura_source.dart';
-import '../../features/reader/data/comick_source.dart';
+import '../../features/reader/data/demonic_scans_source.dart';
 import '../../features/reader/data/mangadex_source.dart';
-import '../../features/reader/data/mangapill_source.dart';
-import '../../features/reader/data/weebcentral_source.dart';
+import '../../features/reader/data/manganato_source.dart';
 import '../../features/search/data/anilist_metadata_provider.dart';
 import '../../features/search/state/search_controller.dart';
 
@@ -75,11 +75,10 @@ final userLibraryProvider =
     });
 
 final mangaDexProvider = Provider<MangaDexSource>((ref) => MangaDexSource());
-final comicKProvider = Provider<ComicKSource>((ref) => ComicKSource());
-final mangaPillProvider = Provider<MangaPillSource>((ref) => MangaPillSource());
-final weebCentralProvider = Provider<WeebCentralSource>(
-  (ref) => WeebCentralSource(),
+final demonicScansProvider = Provider<DemonicScansSource>(
+  (ref) => DemonicScansSource(),
 );
+final manganatoProvider = Provider<ManganatoSource>((ref) => ManganatoSource());
 final asuraProvider = Provider<AsuraSource>((ref) => AsuraSource());
 final anilistProvider = Provider<AniListMetadataProvider>(
   (ref) => AniListMetadataProvider(),
@@ -90,9 +89,8 @@ final catalogProvider = Provider<CatalogRepository>((ref) {
     config: ref.watch(appConfigProvider),
     metadata: ref.watch(anilistProvider),
     mangaDex: ref.watch(mangaDexProvider),
-    comicK: ref.watch(comicKProvider),
-    mangaPill: ref.watch(mangaPillProvider),
-    weebCentral: ref.watch(weebCentralProvider),
+    demonicScans: ref.watch(demonicScansProvider),
+    manganato: ref.watch(manganatoProvider),
     asura: ref.watch(asuraProvider),
   );
   ref.onDispose(repository.dispose);
@@ -108,6 +106,7 @@ final chapterSummaryLabelProvider = StreamProvider.autoDispose
       final repository = ref.watch(catalogProvider);
 
       yield manga.catalogChapterDisplayLabel;
+      repository.queueChapterSummaryWarmup(manga);
 
       await for (final _ in repository.chapterUpdates.where(
         (mangaId) => mangaId == manga.id,

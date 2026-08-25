@@ -129,12 +129,10 @@ class _Details extends ConsumerWidget {
     final chaptersAsync = ref.watch(chapterProvider(manga));
     final bookmarked = library.bookmarked;
     final progress = library.progress;
-    final loadedChapters =
-        chaptersAsync.valueOrNull ?? const <CanonicalChapter>[];
+    final loadedChapters = chaptersAsync.value ?? const <CanonicalChapter>[];
     final readableChapters = loadedChapters
         .where((chapter) => chapter.hasDirectlyReadableCopy)
         .toList(growable: false);
-    final chapterCountLabel = _chapterCountLabelFor(readableChapters);
     final startReadingLabel = progress == null
         ? 'Start Reading'
         : 'Continue Reading';
@@ -173,7 +171,6 @@ class _Details extends ConsumerWidget {
           SliverToBoxAdapter(
             child: _MangaHero(
               manga: manga,
-              chapterCountLabel: chapterCountLabel,
               bookmarked: bookmarked,
               startReadingLabel: startReadingLabel,
               onStartReading: onStartReading,
@@ -315,21 +312,6 @@ class _Details extends ConsumerWidget {
       ),
     );
   }
-
-  String? _chapterCountLabelFor(List<CanonicalChapter> chapters) {
-    if (chapters.isEmpty) return null;
-    CanonicalChapter latest = chapters.first;
-    for (final chapter in chapters.skip(1)) {
-      final latestNumber = latest.number;
-      final chapterNumber = chapter.number;
-      if (latestNumber != null && chapterNumber != null) {
-        if (chapterNumber > latestNumber) latest = chapter;
-      } else if (chapter.publishedAt.isAfter(latest.publishedAt)) {
-        latest = chapter;
-      }
-    }
-    return latest.numberLabel;
-  }
 }
 
 class _ChapterViewport extends StatefulWidget {
@@ -444,7 +426,6 @@ class _ChapterViewportState extends State<_ChapterViewport> {
 class _MangaHero extends StatelessWidget {
   const _MangaHero({
     required this.manga,
-    required this.chapterCountLabel,
     required this.onBack,
     required this.bookmarked,
     required this.onToggleBookmark,
@@ -453,7 +434,6 @@ class _MangaHero extends StatelessWidget {
   });
 
   final Manga manga;
-  final String? chapterCountLabel;
   final VoidCallback onBack;
   final bool bookmarked;
   final VoidCallback onToggleBookmark;
@@ -688,15 +668,13 @@ class _MangaHero extends StatelessWidget {
                         label: manga.statusLabel,
                       ),
                     ),
-                    if (chapterCountLabel != null) ...[
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: _InfoChip(
-                          icon: Icons.library_books_rounded,
-                          label: '$chapterCountLabel chp',
-                        ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: _InfoChip(
+                        icon: Icons.auto_stories_rounded,
+                        label: manga.publicationTypeLabel,
                       ),
-                    ],
+                    ),
                   ],
                 ),
                 const SizedBox(height: _heroInfoToSynopsisSpacing),

@@ -173,21 +173,20 @@ class _SearchResults extends ConsumerWidget {
   }
 }
 
-class _SearchSuggestionList extends StatelessWidget {
+class _SearchSuggestionList extends ConsumerWidget {
   const _SearchSuggestionList({required this.items, required this.openManga});
 
   final List<Manga> items;
   final Future<void> Function(Manga manga) openManga;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
       itemCount: items.length,
       separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, index) {
         final manga = items[index];
-        final chapterLabel = manga.catalogChapterDisplayLabel ?? '—';
 
         return ListTile(
           contentPadding: EdgeInsets.zero,
@@ -207,11 +206,7 @@ class _SearchSuggestionList extends StatelessWidget {
           ),
           subtitle: Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: _MetaStrip(
-              manga: manga,
-              chapterLabel: chapterLabel,
-              mode: _MetaStripMode.suggestion,
-            ),
+            child: _MetaStrip(manga: manga, mode: _MetaStripMode.suggestion),
           ),
           trailing: const Icon(Icons.chevron_right_rounded),
           onTap: () => openManga(manga),
@@ -221,14 +216,14 @@ class _SearchSuggestionList extends StatelessWidget {
   }
 }
 
-class _SearchResultGrid extends StatelessWidget {
+class _SearchResultGrid extends ConsumerWidget {
   const _SearchResultGrid({required this.items, required this.openManga});
 
   final List<Manga> items;
   final Future<void> Function(Manga manga) openManga;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 22),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -240,7 +235,6 @@ class _SearchResultGrid extends StatelessWidget {
       itemCount: items.length,
       itemBuilder: (context, index) {
         final manga = items[index];
-        final chapterLabel = manga.catalogChapterDisplayLabel ?? '—';
 
         return InkWell(
           borderRadius: BorderRadius.circular(18),
@@ -259,11 +253,7 @@ class _SearchResultGrid extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),
-              _MetaStrip(
-                manga: manga,
-                chapterLabel: chapterLabel,
-                mode: _MetaStripMode.result,
-              ),
+              _MetaStrip(manga: manga, mode: _MetaStripMode.result),
             ],
           ),
         );
@@ -275,14 +265,9 @@ class _SearchResultGrid extends StatelessWidget {
 enum _MetaStripMode { suggestion, result }
 
 class _MetaStrip extends StatelessWidget {
-  const _MetaStrip({
-    required this.manga,
-    required this.chapterLabel,
-    required this.mode,
-  });
+  const _MetaStrip({required this.manga, required this.mode});
 
   final Manga manga;
-  final String? chapterLabel;
   final _MetaStripMode mode;
 
   @override
@@ -297,8 +282,7 @@ class _MetaStrip extends StatelessWidget {
           children: [
             _MetaPill(Icons.star_rounded, manga.ratingLabel),
             _MetaPill(Icons.bolt_rounded, manga.statusLabel),
-            if (chapterLabel != null)
-              _MetaPill(Icons.library_books_rounded, '$chapterLabel chp'),
+            _MetaPill(Icons.auto_stories_rounded, manga.publicationTypeLabel),
           ],
         ),
       );
@@ -315,10 +299,8 @@ class _MetaStrip extends StatelessWidget {
             _MetaPill(Icons.star_rounded, manga.ratingLabel),
             const SizedBox(width: 5),
             _MetaPill(Icons.bolt_rounded, manga.statusLabel),
-            if (chapterLabel != null) ...[
-              const SizedBox(width: 5),
-              _MetaPill(Icons.library_books_rounded, '$chapterLabel chp'),
-            ],
+            const SizedBox(width: 5),
+            _MetaPill(Icons.auto_stories_rounded, manga.publicationTypeLabel),
           ],
         ),
       ),
