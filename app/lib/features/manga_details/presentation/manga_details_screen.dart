@@ -62,30 +62,45 @@ class MangaDetailsScreen extends ConsumerWidget {
     return ref
         .watch(_mangaDetailsProvider(mangaId))
         .when(
-          loading: () =>
-              const Scaffold(body: Center(child: CircularProgressIndicator())),
+          loading: () => Scaffold(
+            appBar: AppBar(
+              leading: IconButton(
+                onPressed: () => _goBackOrHome(context),
+                icon: const Icon(Icons.arrow_back_rounded),
+              ),
+            ),
+            body: const Center(child: CircularProgressIndicator()),
+          ),
           error: (_, _) {
             return Scaffold(
+              appBar: AppBar(
+                leading: IconButton(
+                  onPressed: () => _goBackOrHome(context),
+                  icon: const Icon(Icons.arrow_back_rounded),
+                ),
+              ),
               body: _ModernMessage(
                 icon: Icons.error_outline_rounded,
                 message: 'Unable to load manga details.',
-                onRetry: () {
-                  if (context.canPop()) context.pop();
-                },
-                retryLabel: 'Go Back',
+                onRetry: () => ref.invalidate(_mangaDetailsProvider(mangaId)),
+                retryLabel: 'Retry',
               ),
             );
           },
           data: (manga) {
             if (manga == null || !manga.isFriendlyContent) {
               return Scaffold(
+                appBar: AppBar(
+                  leading: IconButton(
+                    onPressed: () => _goBackOrHome(context),
+                    icon: const Icon(Icons.arrow_back_rounded),
+                  ),
+                ),
                 body: _ModernMessage(
                   icon: Icons.menu_book_outlined,
                   message: 'Manga unavailable right now.',
-                  onRetry: () {
-                    if (context.canPop()) context.pop();
-                  },
-                  retryLabel: 'Go Back',
+                  onRetry: () => ref.invalidate(_mangaDetailsProvider(mangaId)),
+                  retryLabel: 'Retry',
                 ),
               );
             }
@@ -119,9 +134,7 @@ class _Details extends ConsumerWidget {
           icon: Icons.visibility_off_rounded,
           message: "This title isn't available in Tsuki.",
           retryLabel: 'Go Back',
-          onRetry: () {
-            if (context.canPop()) context.pop();
-          },
+          onRetry: () => _goBackOrHome(context),
         ),
       );
     }
@@ -180,11 +193,7 @@ class _Details extends ConsumerWidget {
               startReadingLabel: startReadingLabel,
               onStartReading: onStartReading,
               onBack: () {
-                if (context.canPop()) {
-                  context.pop();
-                } else {
-                  context.go('/');
-                }
+                _goBackOrHome(context);
               },
               onToggleBookmark: () {
                 HapticFeedback.selectionClick();
@@ -253,7 +262,12 @@ class _Details extends ConsumerWidget {
             ),
           ),
           chaptersAsync.when(
-            loading: () => const SliverToBoxAdapter(child: SizedBox(height: 1)),
+            loading: () => const SliverToBoxAdapter(
+              child: SizedBox(
+                height: 112,
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            ),
             error: (error, stackTrace) {
               return SliverToBoxAdapter(
                 child: Transform.translate(
@@ -316,6 +330,14 @@ class _Details extends ConsumerWidget {
         ],
       ),
     );
+  }
+}
+
+void _goBackOrHome(BuildContext context) {
+  if (context.canPop()) {
+    context.pop();
+  } else {
+    context.go('/home');
   }
 }
 

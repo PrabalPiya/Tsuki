@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/models/chapter.dart';
 import '../../../core/models/reading_progress.dart';
@@ -50,6 +51,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   final _failedPageSources = <int, Set<String>>{};
   final _pageFallbacks = <int, Future<bool>>{};
   final _pageRatios = <String, double>{};
+  final _pageKeys = <String, GlobalKey>{};
   final _openedChapterIds = <String>{};
   final _zoomTransform = TransformationController();
 
@@ -62,6 +64,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   Timer? _saveTimer;
   Timer? _hideTimer;
   String? _fatalError;
+  ({String key, double relative})? _pendingRestore;
+  bool _correctingRestore = false;
 
   @override
   void initState() {
@@ -144,6 +148,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     _errors.clear();
     _failedPageSources.clear();
     _pageFallbacks.clear();
+    _pageKeys.clear();
+    _pendingRestore = null;
     await _initialize();
   }
 
@@ -199,6 +205,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       if (urls.isEmpty) return;
 
       final page = saved.pageIndex.clamp(0, urls.length - 1);
+      _pendingRestore = (
+        key: _pageIdentity(index, page + 1, urls[page]),
+        relative: saved.relativeOffset,
+      );
       var offset = 72.0;
       for (var i = 0; i < page; i++) {
         offset += _pageHeight(urls[i]);
@@ -207,6 +217,42 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
       _scroll.jumpTo(offset.clamp(0, _scroll.position.maxScrollExtent));
     });
+  }
+
+  String _pageIdentity(int chapter, int page, String url) =>
+      '$chapter:$page:$url';
+
+  void _recordPageAspect(String key, String url, double ratio) {
+    _pageRatios[url] = ratio;
+    if (_pendingRestore?.key != key) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_correctRestoredPosition());
+    });
+  }
+
+  Future<void> _correctRestoredPosition() async {
+    final pending = _pendingRestore;
+    if (pending == null || _correctingRestore || !mounted) return;
+    final pageContext = _pageKeys[pending.key]?.currentContext;
+    final render = pageContext?.findRenderObject();
+    if (pageContext == null || render is! RenderBox || !render.hasSize) return;
+
+    _correctingRestore = true;
+    _adjustingWindow = true;
+    try {
+      await Scrollable.ensureVisible(
+        pageContext,
+        duration: Duration.zero,
+        alignment: 0,
+      );
+      if (!mounted || !_scroll.hasClients) return;
+      final offset = _scroll.offset + (render.size.height * pending.relative);
+      _scroll.jumpTo(offset.clamp(0, _scroll.position.maxScrollExtent));
+      _pendingRestore = null;
+    } finally {
+      _correctingRestore = false;
+      _adjustingWindow = false;
+    }
   }
 
   double _pageHeight(String url) => _readerPageDisplayHeight(
@@ -467,6 +513,67 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     }
   }
 
+  Future<void> _showChapterPicker() async {
+    if (_chapters.isEmpty) return;
+    final selected = await showModalBottomSheet<int>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      builder: (sheetContext) {
+        final height = MediaQuery.sizeOf(sheetContext).height * .72;
+        return SafeArea(
+          child: SizedBox(
+            height: height,
+            child: Column(
+              children: [
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 18, 20, 12),
+                  child: Text(
+                    'Choose chapter',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _chapters.length,
+                    itemExtent: 54,
+                    itemBuilder: (_, index) => ListTile(
+                      selected: index == _start,
+                      title: Text(
+                        'Chapter ${_chapters[index].numberLabel}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: index == _start
+                          ? const Icon(
+                              Icons.check_rounded,
+                              color: AppColors.accent,
+                            )
+                          : null,
+                      onTap: () => Navigator.of(sheetContext).pop(index),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (selected != null && mounted && selected != _start) {
+      await _goToChapter(selected);
+    }
+  }
+
+  void _leaveReader() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/home');
+    }
+  }
+
   Future<void> _goToChapter(int index) async {
     if (index < 0 || index >= _chapters.length) return;
 
@@ -478,6 +585,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     _failedPageSources.clear();
     _pageFallbacks.clear();
     _pageRatios.clear();
+    _pageKeys.clear();
+    _pendingRestore = null;
     _restored = false;
     _zoomTransform.value = Matrix4.identity();
 
@@ -626,12 +735,27 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                         child: switch (block.type) {
                           _BlockType.header => _ChapterHeader(chapter: chapter),
                           _BlockType.page => _ReaderPage(
+                            key: _pageKeys.putIfAbsent(
+                              _pageIdentity(
+                                block.chapter,
+                                block.page,
+                                block.url!,
+                              ),
+                              GlobalKey.new,
+                            ),
                             url: block.url!,
                             sourceId: chapterPages!.sourceId,
                             page: block.page,
                             initialAspectRatio: _pageRatios[block.url!],
-                            onAspectRatio: (ratio) =>
-                                _pageRatios[block.url!] = ratio,
+                            onAspectRatio: (ratio) => _recordPageAspect(
+                              _pageIdentity(
+                                block.chapter,
+                                block.page,
+                                block.url!,
+                              ),
+                              block.url!,
+                              ratio,
+                            ),
                             onLoadError: () => _retryChapterWithNextSource(
                               block.chapter,
                               chapterPages.sourceId,
@@ -669,7 +793,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                         child: Row(
                           children: [
                             IconButton(
-                              onPressed: () => Navigator.of(context).pop(),
+                              onPressed: _leaveReader,
                               icon: const Icon(
                                 Icons.arrow_back,
                                 color: AppColors.text,
@@ -709,27 +833,13 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                 ),
                               ),
                             ),
-                            PopupMenuButton<int>(
+                            IconButton(
                               tooltip: 'Choose chapter',
                               icon: const Icon(
                                 Icons.format_list_numbered_rounded,
                                 color: AppColors.text,
                               ),
-                              onSelected: (index) =>
-                                  unawaited(_goToChapter(index)),
-                              itemBuilder: (_) => [
-                                for (
-                                  var index = 0;
-                                  index < _chapters.length;
-                                  index++
-                                )
-                                  PopupMenuItem<int>(
-                                    value: index,
-                                    child: Text(
-                                      'Chapter ${_chapters[index].numberLabel}',
-                                    ),
-                                  ),
-                              ],
+                              onPressed: _showChapterPicker,
                             ),
                           ],
                         ),
@@ -847,6 +957,7 @@ class _ChapterBoundary extends StatelessWidget {
 
 class _ReaderPage extends StatefulWidget {
   const _ReaderPage({
+    super.key,
     required this.url,
     required this.sourceId,
     required this.page,

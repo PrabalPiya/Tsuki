@@ -342,7 +342,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           Expanded(
             child: homeEntries.when(
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (_, _) => const _Empty('Home is unavailable right now.'),
+              error: (_, _) => _Empty(
+                'Home could not be loaded.',
+                onRetry: () => ref.invalidate(_homeCatalogProvider),
+              ),
               data: (entries) {
                 final active = entries
                     .where((entry) => !entry.caughtUp)
@@ -807,9 +810,10 @@ class _ChapterInfoLine extends StatelessWidget {
 }
 
 class _Empty extends StatelessWidget {
-  const _Empty(this.message);
+  const _Empty(this.message, {this.onRetry});
 
   final String message;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -829,6 +833,14 @@ class _Empty extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: AppColors.muted),
                 ),
+                if (onRetry != null) ...[
+                  const SizedBox(height: 12),
+                  FilledButton.tonalIcon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Retry'),
+                  ),
+                ],
               ],
             ),
           ),

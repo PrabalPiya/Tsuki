@@ -123,13 +123,7 @@ class _MigrationScreenState extends ConsumerState<MigrationScreen> {
       _working = true;
       _error = null;
       _completed = 0;
-      _total = preview.matches.where((match) {
-        final selected =
-            match.status == ImportMatchStatus.matched ||
-            match.status == ImportMatchStatus.conflict ||
-            _reviewChoices[preview.matches.indexOf(match)] != null;
-        return selected;
-      }).length;
+      _total = _selectedCount(preview);
     });
     try {
       final resolved = <ImportMatch>[];
@@ -147,7 +141,7 @@ class _MigrationScreenState extends ConsumerState<MigrationScreen> {
                 ),
         );
       }
-      await ref
+      final importedCount = await ref
           .read(migrationServiceProvider)
           .commit(
             ImportPreview(document: preview.document, matches: resolved),
@@ -161,8 +155,20 @@ class _MigrationScreenState extends ConsumerState<MigrationScreen> {
             },
           );
       if (!mounted) return;
+      if (importedCount == 0) {
+        setState(() {
+          _error = 'No selected manga could be verified. Review the matches and try again.';
+        });
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Migration imported into your library.')),
+        SnackBar(
+          content: Text(
+            importedCount == 1
+                ? 'Imported 1 manga into your library.'
+                : 'Imported $importedCount manga into your library.',
+          ),
+        ),
       );
       Navigator.of(context).pop();
     } catch (_) {
@@ -170,6 +176,19 @@ class _MigrationScreenState extends ConsumerState<MigrationScreen> {
     } finally {
       if (mounted) setState(() => _working = false);
     }
+  }
+
+  int _selectedCount(ImportPreview preview) {
+    var count = 0;
+    for (var index = 0; index < preview.matches.length; index++) {
+      final status = preview.matches[index].status;
+      if (status == ImportMatchStatus.matched ||
+          status == ImportMatchStatus.conflict ||
+          _reviewChoices[index] != null) {
+        count++;
+      }
+    }
+    return count;
   }
 
   @override
@@ -249,14 +268,27 @@ class _MigrationScreenState extends ConsumerState<MigrationScreen> {
                   }),
                 ),
             _UnmatchedSection(
-              matches: preview.matches
-                  .where((match) => match.status == ImportMatchStatus.unmatched)
-                  .toList(growable: false),
+              matches: [
+                for (var index = 0; index < preview.matches.length; index++)
+                  if (preview.matches[index].status ==
+                      ImportMatchStatus.unmatched)
+                    (index: index, match: preview.matches[index]),
+              ],
+              choices: _reviewChoices,
+              onChanged: (index, value) => setState(() {
+                _reviewChoices[index] = value;
+              }),
             ),
             const SizedBox(height: 16),
             FilledButton(
-              onPressed: _working ? null : _commit,
-              child: const Text('Import matched manga'),
+              onPressed: _working || _selectedCount(preview) == 0
+                  ? null
+                  : _commit,
+              child: Text(
+                _selectedCount(preview) == 0
+                    ? 'Select manga to import'
+                    : 'Import selected manga',
+              ),
             ),
           ],
         ],
@@ -290,9 +322,15 @@ class _Summary extends StatelessWidget {
 }
 
 class _UnmatchedSection extends StatelessWidget {
-  const _UnmatchedSection({required this.matches});
+  const _UnmatchedSection({
+    required this.matches,
+    required this.choices,
+    required this.onChanged,
+  });
 
-  final List<ImportMatch> matches;
+  final List<({int index, ImportMatch match})> matches;
+  final Map<int, Manga?> choices;
+  final void Function(int index, Manga? value) onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -307,21 +345,151 @@ class _UnmatchedSection extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.w700),
         ),
         subtitle: const Text(
-          'These entries will be skipped during import.',
+          'Search for each title and select the correct manga, or leave it skipped.',
           style: TextStyle(color: AppColors.muted, fontSize: 12),
         ),
         children: [
           const Divider(height: 1),
-          for (final match in matches)
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.menu_book_outlined, size: 20),
-              title: Text(match.entry.title),
-              subtitle: Text(
-                '${match.entry.source} · ${match.entry.rawChapter ?? 'no progress'}',
-                style: const TextStyle(color: AppColors.muted, fontSize: 12),
+          for (final item in matches)
+            _ManualMatchItem(
+              key: ValueKey(item.match.entry.sourceKey),
+              match: item.match,
+              value: choices[item.index],
+              onChanged: (value) => onChanged(item.index, value),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ManualMatchItem extends ConsumerStatefulWidget {
+  const _ManualMatchItem({
+    super.key,
+    required this.match,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final ImportMatch match;
+  final Manga? value;
+  final ValueChanged<Manga?> onChanged;
+
+  @override
+  ConsumerState<_ManualMatchItem> createState() => _ManualMatchItemState();
+}
+
+class _ManualMatchItemState extends ConsumerState<_ManualMatchItem> {
+  late final TextEditingController _query = TextEditingController(
+    text: widget.match.entry.title,
+  );
+  List<Manga> _results = const [];
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  Future<void> _search() async {
+    final query = _query.text.trim();
+    if (query.length < 2) {
+      setState(() => _error = 'Enter at least 2 characters.');
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final results = await ref.read(catalogProvider).searchMetadataOnly(query);
+      if (!mounted) return;
+      setState(() {
+        _results = results.take(8).toList(growable: false);
+        if (_results.isEmpty) _error = 'No manga matched this title.';
+      });
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Search failed. Please try again.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.match.entry.title,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _query,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => _search(),
+            decoration: InputDecoration(
+              labelText: 'Find this manga',
+              suffixIcon: IconButton(
+                onPressed: _loading ? null : _search,
+                tooltip: 'Search metadata',
+                icon: _loading
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.search_rounded),
               ),
             ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              _error!,
+              style: const TextStyle(color: AppColors.muted, fontSize: 12),
+            ),
+          ],
+          if (widget.value != null) ...[
+            const SizedBox(height: 8),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.check_circle, color: AppColors.accent),
+              title: Text(widget.value!.title),
+              subtitle: const Text('Selected for import'),
+              trailing: IconButton(
+                onPressed: () => widget.onChanged(null),
+                tooltip: 'Clear selection',
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ),
+          ],
+          for (final manga in _results)
+            if (manga.id != widget.value?.id)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: SizedBox(
+                  width: 36,
+                  height: 52,
+                  child: CoverArt(
+                    url: manga.coverUrl,
+                    title: manga.title,
+                    borderRadius: 6,
+                  ),
+                ),
+                title: Text(
+                  manga.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(manga.publicationTypeLabel),
+                trailing: const Icon(Icons.add_circle_outline_rounded),
+                onTap: () => widget.onChanged(manga),
+              ),
         ],
       ),
     );

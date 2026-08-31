@@ -38,6 +38,8 @@ class _ControlledStore implements UserStore {
   final progressWrites = <ReadingProgress>[];
   Completer<void>? bookmarkGate;
   Completer<void>? progressGate;
+  bool failNextBookmarkWrite = false;
+  bool failNextProgressWrite = false;
 
   @override
   Future<UserSnapshot> load(String uid) async => initial;
@@ -49,6 +51,10 @@ class _ControlledStore implements UserStore {
     Map<String, Manga> manga,
   ) async {
     bookmarkWrites.add({...ids});
+    if (failNextBookmarkWrite) {
+      failNextBookmarkWrite = false;
+      throw StateError('bookmark write failed');
+    }
     final gate = bookmarkGate;
     bookmarkGate = null;
     await gate?.future;
@@ -57,6 +63,10 @@ class _ControlledStore implements UserStore {
   @override
   Future<void> saveProgress(String uid, ReadingProgress progress) async {
     progressWrites.add(progress);
+    if (failNextProgressWrite) {
+      failNextProgressWrite = false;
+      throw StateError('progress write failed');
+    }
     final gate = progressGate;
     progressGate = null;
     await gate?.future;
@@ -128,6 +138,27 @@ void main() {
       controller.dispose();
     },
   );
+
+  test('failed bookmark and progress writes are retried', () async {
+    final store = _ControlledStore()
+      ..failNextBookmarkWrite = true
+      ..failNextProgressWrite = true;
+    final controller = UserLibraryController('reader', store);
+    await Future<void>.delayed(Duration.zero);
+
+    await controller.toggleBookmark(_firstManga);
+    await controller.saveProgress(_progress(4));
+    expect(store.bookmarkWrites, hasLength(1));
+    expect(store.progressWrites, hasLength(1));
+
+    await Future<void>.delayed(const Duration(milliseconds: 2200));
+
+    expect(store.bookmarkWrites, hasLength(2));
+    expect(store.bookmarkWrites.last, {_firstManga.id});
+    expect(store.progressWrites, hasLength(2));
+    expect(store.progressWrites.last.pageIndex, 4);
+    controller.dispose();
+  });
 
   test('removes multiple bookmarks in one state update', () async {
     final store = _ControlledStore();

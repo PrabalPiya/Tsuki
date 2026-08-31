@@ -346,8 +346,9 @@ void main() {
         resolver: const MangaIdentityResolver(),
       );
 
-      await service.commit(preview, library);
+      final importedCount = await service.commit(preview, library);
 
+      expect(importedCount, 1);
       expect(library.importedManga[manga.id]?.sourceMappings, const {
         'mangadex': 'source-title-id',
       });

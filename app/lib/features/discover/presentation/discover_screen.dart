@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/data/catalog_repository.dart';
 import '../../../core/models/manga.dart';
 import '../../../core/state/providers.dart';
 import '../../../core/theme/app_theme.dart';
@@ -15,6 +16,11 @@ import '../../../shared/widgets/logout_button.dart';
 import '../data/ranking_provider.dart';
 
 final discoverResetProvider = StateProvider<int>((ref) => 0);
+
+List<Manga> canonicalizeDiscoverItems(
+  Iterable<Manga> values,
+  CatalogRepository repository,
+) => values.map(repository.canonicalizeForLibrary).toList(growable: false);
 
 class DiscoverScreen extends ConsumerStatefulWidget {
   const DiscoverScreen({super.key});
@@ -161,11 +167,22 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
               ),
             ),
             if (preview)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 8),
-                child: Text(
-                  'Preview · live rankings unavailable',
-                  style: TextStyle(color: AppColors.muted, fontSize: 12),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text(
+                      'Showing saved rankings',
+                      style: TextStyle(color: AppColors.muted, fontSize: 12),
+                    ),
+                    TextButton(
+                      onPressed: () => ref.invalidate(
+                        rankingsProvider(RankingPeriod.values[_period]),
+                      ),
+                      child: const Text('Refresh'),
+                    ),
+                  ],
                 ),
               ),
             Expanded(
@@ -231,7 +248,11 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
     }
 
     final displayedRanking = resolvedRanking ?? _rankingCache[period];
-    final items = displayedRanking?.items ?? const <Manga>[];
+    final repository = ref.read(catalogProvider);
+    final items = canonicalizeDiscoverItems(
+      displayedRanking?.items ?? const <Manga>[],
+      repository,
+    );
     final preview = displayedRanking?.isPreview ?? false;
     final index = items.isEmpty
         ? 0
@@ -245,12 +266,23 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
-          child: Text(
-            ranking.value?.unavailableReason ??
-                displayedRanking?.unavailableReason ??
-                'Rankings unavailable.',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: AppColors.muted),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                ranking.value?.unavailableReason ??
+                    displayedRanking?.unavailableReason ??
+                    'Rankings unavailable.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.muted),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                onPressed: () => ref.invalidate(rankingsProvider(period)),
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Retry'),
+              ),
+            ],
           ),
         ),
       );

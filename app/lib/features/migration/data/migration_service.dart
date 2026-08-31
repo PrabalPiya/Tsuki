@@ -309,7 +309,7 @@ class MigrationService {
     );
   }
 
-  Future<void> commit(
+  Future<int> commit(
     ImportPreview preview,
     UserLibraryController library, {
     void Function(int completed, int total)? onEnrichmentProgress,
@@ -403,13 +403,14 @@ class MigrationService {
     await library.importBatch(manga, progress);
     await _sessions.record(
       document: preview.document,
-      matchedCount: preview.count(ImportMatchStatus.matched),
+      matchedCount: manga.length,
       needsReviewCount: preview.count(ImportMatchStatus.needsReview),
       unmatchedCount: preview.count(ImportMatchStatus.unmatched),
       conflictCount: preview.count(ImportMatchStatus.conflict),
       errorCount: preview.count(ImportMatchStatus.error),
       mangaIds: manga.keys,
     );
+    return manga.length;
   }
 
   String _numberLabel(double value) => value == value.roundToDouble()

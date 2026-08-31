@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../identity/manga_identity_resolver.dart';
@@ -44,6 +46,10 @@ class UserLibraryController extends StateNotifier<UserLibraryState> {
   Future<void>? _bookmarkWriter;
   final Map<String, ReadingProgress> _pendingProgress = {};
   Future<void>? _progressWriter;
+  Timer? _bookmarkRetryTimer;
+  Timer? _progressRetryTimer;
+  int _bookmarkFailures = 0;
+  int _progressFailures = 0;
 
   UserLibraryState get currentState => state;
 
@@ -290,9 +296,15 @@ class UserLibraryController extends StateNotifier<UserLibraryState> {
         );
 
   Future<void> clearAll() async {
+    _bookmarkRetryTimer?.cancel();
+    _progressRetryTimer?.cancel();
     _pendingBookmarks = null;
     _pendingProgress.clear();
     await Future.wait([?_bookmarkWriter, ?_progressWriter]);
+    _bookmarkRetryTimer?.cancel();
+    _progressRetryTimer?.cancel();
+    _pendingBookmarks = null;
+    _pendingProgress.clear();
     await _store.clearSession(_uid);
     if (mounted) state = const UserLibraryState(loading: false);
   }
@@ -312,8 +324,14 @@ class UserLibraryController extends StateNotifier<UserLibraryState> {
         _pendingBookmarks = null;
         try {
           await _store.saveBookmarks(_uid, next.ids, next.manga);
+          _bookmarkFailures = 0;
         } catch (_) {
-          // Optimistic UI remains usable while optional cloud sync recovers.
+          // Retain the newest unsaved snapshot and retry in the background.
+          // A newer queued value always wins over this failed snapshot.
+          _pendingBookmarks ??= next;
+          _bookmarkFailures++;
+          _scheduleBookmarkRetry();
+          break;
         }
       }
     } finally {
@@ -326,16 +344,54 @@ class UserLibraryController extends StateNotifier<UserLibraryState> {
       while (_pendingProgress.isNotEmpty) {
         final values = _pendingProgress.values.toList(growable: false);
         _pendingProgress.clear();
+        var failed = false;
         for (final value in values) {
           try {
             await _store.saveProgress(_uid, value);
+            _progressFailures = 0;
           } catch (_) {
-            // Reading remains uninterrupted while persistence is unavailable.
+            // Do not overwrite newer progress queued while this write was in
+            // flight. The retained value is retried without blocking reading.
+            _pendingProgress.putIfAbsent(value.mangaId, () => value);
+            _progressFailures++;
+            failed = true;
           }
+        }
+        if (failed) {
+          _scheduleProgressRetry();
+          break;
         }
       }
     } finally {
       _progressWriter = null;
     }
+  }
+
+  void _scheduleBookmarkRetry() {
+    _bookmarkRetryTimer?.cancel();
+    _bookmarkRetryTimer = Timer(_retryDelay(_bookmarkFailures), () {
+      if (!mounted || _pendingBookmarks == null) return;
+      unawaited(_bookmarkWriter ??= _flushBookmarks());
+    });
+  }
+
+  void _scheduleProgressRetry() {
+    _progressRetryTimer?.cancel();
+    _progressRetryTimer = Timer(_retryDelay(_progressFailures), () {
+      if (!mounted || _pendingProgress.isEmpty) return;
+      unawaited(_progressWriter ??= _flushProgress());
+    });
+  }
+
+  Duration _retryDelay(int failures) {
+    final seconds = 1 << failures.clamp(0, 5);
+    return Duration(seconds: seconds.clamp(2, 30));
+  }
+
+  @override
+  void dispose() {
+    _bookmarkRetryTimer?.cancel();
+    _progressRetryTimer?.cancel();
+    super.dispose();
   }
 }
