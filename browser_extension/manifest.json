@@ -1,0 +1,79 @@
+{
+  "manifest_version": 3,
+  "name": "Tsuki Migration",
+  "version": "2.4.0",
+  "description": "Collect manga bookmarks for import into Tsuki.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": ["storage", "activeTab", "downloads", "scripting"],
+  "host_permissions": [
+    "https://mangadex.org/*",
+    "https://www.mangadex.org/*",
+    "https://comick.io/*",
+    "https://www.comick.io/*",
+    "https://comick.dev/*",
+    "https://www.comick.dev/*",
+    "https://comick.art/*",
+    "https://www.comick.art/*",
+    "https://comick.live/*",
+    "https://www.comick.live/*",
+    "https://www.mangakakalot.gg/*",
+    "https://mangakakalot.gg/*",
+    "https://www.mangakakalot.com/*",
+    "https://mangakakalot.com/*",
+    "https://demonicscans.org/*",
+    "https://www.demonicscans.org/*",
+    "https://mangakatana.com/*",
+    "https://www.mangakatana.com/*"
+  ],
+  "background": {"service_worker": "background.js", "type": "module"},
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Tsuki Migration",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://mangadex.org/*", "https://www.mangadex.org/*"],
+      "js": ["adapters/core.js", "adapters/mangadex.js"]
+    },
+    {
+      "matches": [
+        "https://comick.io/*",
+        "https://www.comick.io/*",
+        "https://comick.dev/*",
+        "https://www.comick.dev/*",
+        "https://comick.art/*",
+        "https://www.comick.art/*",
+        "https://comick.live/*",
+        "https://www.comick.live/*"
+      ],
+      "js": ["adapters/core.js", "adapters/comick.js"]
+    },
+    {
+      "matches": [
+        "https://www.mangakakalot.gg/*",
+        "https://mangakakalot.gg/*",
+        "https://www.mangakakalot.com/*",
+        "https://mangakakalot.com/*"
+      ],
+      "js": ["adapters/core.js", "adapters/mangakakalot.js"]
+    },
+    {
+      "matches": ["https://demonicscans.org/*", "https://www.demonicscans.org/*"],
+      "js": ["adapters/core.js", "adapters/demonicscans.js"]
+    },
+    {
+      "matches": ["https://mangakatana.com/*", "https://www.mangakatana.com/*"],
+      "js": ["adapters/core.js", "adapters/mangakatana.js"]
+    }
+  ]
+}

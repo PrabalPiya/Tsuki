@@ -6,16 +6,18 @@ import '../../../core/models/chapter.dart';
 import '../../../core/models/manga.dart';
 import '../../../core/network/http_client.dart';
 import '../../../core/network/source_failure.dart';
+import '../../search/data/metadata_provider.dart';
 
 import 'chapter_number_parser.dart';
 import 'manga_source.dart';
 import 'source_matching.dart';
 
-class DemonicScansSource implements MangaSource {
+class DemonicScansSource implements MangaSource, MetadataProvider {
   DemonicScansSource({Dio? client})
     : _client = client ?? createHttpClient(baseUrl: 'https://demonicscans.org');
 
   final Dio _client;
+  final Map<String, Manga> _metadataCache = <String, Manga>{};
 
   @override
   String get id => 'demonicscans';
@@ -35,13 +37,14 @@ class DemonicScansSource implements MangaSource {
   Set<String> get allowedImageHosts => const {'cdn.demoniclibs.com'};
 
   @override
-  Future<List<Manga>> search(String query) async {
+  Future<List<Manga>> search(String query, {CancelToken? cancelToken}) async {
     final cleaned = query.trim();
     if (cleaned.length < 2) return const [];
 
     final document = await _document(
       '/search.php',
       queryParameters: {'manga': cleaned},
+      cancelToken: cancelToken,
     );
     final results = <String, Manga>{};
     for (final anchor in document.querySelectorAll('a[href^="/manga/"]')) {
@@ -56,14 +59,18 @@ class DemonicScansSource implements MangaSource {
               .replaceAll(RegExp(r'\s+'), ' ')
               .trim();
       if (title.isEmpty) continue;
-      results[sourceId] = Manga(
+      final manga = Manga(
         id: '$id:$sourceId',
+        metadataProviderIds: {id: sourceId},
+        sourceMappings: {id: sourceId},
         title: title,
         coverUrl: _absoluteImage(image?.attributes['src'] ?? ''),
         synopsis: '',
         status: MangaStatus.unknown,
         chapterCount: 0,
       );
+      results[sourceId] = manga;
+      _metadataCache[sourceId] = manga;
     }
     return results.values.toList(growable: false);
   }
@@ -73,10 +80,7 @@ class DemonicScansSource implements MangaSource {
       canonical.title,
       ...canonical.aliases,
     }.map(SourceMatching.normalize).where((value) => value.isNotEmpty).toSet();
-    final queries = <String>{
-      canonical.title,
-      ...canonical.aliases,
-    }.map((value) => value.trim()).where((value) => value.length >= 2).take(8);
+    final queries = SourceMatching.searchQueries(canonical, maximum: 8);
 
     for (final query in queries) {
       try {
@@ -104,7 +108,63 @@ class DemonicScansSource implements MangaSource {
   }
 
   @override
-  Future<Manga?> getMangaDetails(String sourceMangaId) async => null;
+  Future<Manga?> getById(String rawId) {
+    final sourceMangaId = rawId
+        .replaceFirst('tsuki:$id:', '')
+        .replaceFirst('$id:', '');
+    return getMangaDetails(sourceMangaId);
+  }
+
+  @override
+  Future<Manga?> getMangaDetails(String sourceMangaId) async {
+    final path = _seriesPathFromId(sourceMangaId);
+    if (path == null) return null;
+
+    final document = await _document(path);
+    final cached = _metadataCache[sourceMangaId];
+    final title = _firstText(document, const [
+      '.manga-title',
+      '.series-title',
+      '.post-title h1',
+      '.infox h1',
+      'main h1',
+      'h1',
+    ]);
+    final synopsis = _firstText(document, const [
+      '.summary__content',
+      '.manga-excerpt',
+      '.description',
+      '.summary',
+    ]);
+    final cover = _firstAttribute(
+      document,
+      const [
+        'meta[property="og:image"]',
+        '.summary_image img',
+        '.manga-poster img',
+        '.poster img',
+      ],
+      const ['content', 'src'],
+    );
+    final resolvedTitle = title.isNotEmpty ? title : cached?.title ?? '';
+    if (resolvedTitle.isEmpty) return null;
+
+    final manga = Manga(
+      id: '$id:$sourceMangaId',
+      metadataProviderIds: {id: sourceMangaId},
+      sourceMappings: {id: sourceMangaId},
+      title: resolvedTitle,
+      aliases: cached?.aliases ?? const <String>[],
+      coverUrl: cover.isNotEmpty
+          ? _absoluteImage(cover)
+          : cached?.coverUrl ?? '',
+      synopsis: synopsis.isNotEmpty ? synopsis : cached?.synopsis ?? '',
+      status: _statusFrom(document.body?.text ?? ''),
+      chapterCount: document.querySelectorAll('a.chplinks').length,
+    );
+    _metadataCache[sourceMangaId] = manga;
+    return manga.isFriendlyContent ? manga : null;
+  }
 
   @override
   Future<List<CanonicalChapter>> getChapters(String sourceMangaId) async {
@@ -236,13 +296,56 @@ class DemonicScansSource implements MangaSource {
         : Uri.parse('https://demonicscans.org').resolveUri(uri).toString();
   }
 
+  String _firstText(Document document, List<String> selectors) {
+    for (final selector in selectors) {
+      final value = document
+          .querySelector(selector)
+          ?.text
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+    return '';
+  }
+
+  String _firstAttribute(
+    Document document,
+    List<String> selectors,
+    List<String> attributes,
+  ) {
+    for (final selector in selectors) {
+      final element = document.querySelector(selector);
+      for (final attribute in attributes) {
+        final value = element?.attributes[attribute]?.trim();
+        if (value != null && value.isNotEmpty) return value;
+      }
+    }
+    return '';
+  }
+
+  MangaStatus _statusFrom(String raw) {
+    final match = RegExp(
+      r'\bstatus\s*:?\s*(ongoing|completed|hiatus|cancelled)\b',
+      caseSensitive: false,
+    ).firstMatch(raw);
+    return switch (match?.group(1)?.toLowerCase()) {
+      'ongoing' => MangaStatus.ongoing,
+      'completed' => MangaStatus.completed,
+      'hiatus' => MangaStatus.hiatus,
+      'cancelled' => MangaStatus.cancelled,
+      _ => MangaStatus.unknown,
+    };
+  }
+
   Future<Document> _document(
     String path, {
     Map<String, dynamic>? queryParameters,
+    CancelToken? cancelToken,
   }) async {
     final response = await _client.get<String>(
       path,
       queryParameters: queryParameters,
+      cancelToken: cancelToken,
       options: Options(
         responseType: ResponseType.plain,
         headers: const {'Referer': 'https://demonicscans.org/'},

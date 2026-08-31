@@ -5,6 +5,7 @@ import '../features/discover/presentation/discover_screen.dart';
 import '../features/home/presentation/home_screen.dart';
 import '../features/library/presentation/library_screen.dart';
 import '../features/manga_details/presentation/manga_details_screen.dart';
+import '../features/migration/presentation/migration_screen.dart';
 import '../features/reader/presentation/reader_screen.dart';
 import '../features/search/presentation/search_screen.dart';
 import 'main_shell.dart';
@@ -44,6 +45,7 @@ final routerProvider = Provider<GoRouter>(
           ),
         ],
       ),
+      GoRoute(path: '/migration', builder: (_, _) => const MigrationScreen()),
       GoRoute(
         path: '/manga/:id',
         builder: (_, state) => MangaDetailsScreen(

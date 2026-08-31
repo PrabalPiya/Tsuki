@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tsuki Migration</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="brand">
+        <div class="brand-mark">
+          <img src="icons/tsuki-logo.png" alt="Tsuki" class="brand-logo">
+        </div>
+        <div class="brand-copy">
+          <span class="eyebrow">Bookmark importer</span>
+          <h1>Tsuki Migration</h1>
+        </div>
+        <span class="mode-pill"><span class="mode-dot"></span>Bookmarks only</span>
+      </header>
+
+      <main>
+        <section class="status-card" aria-live="polite">
+          <span class="status-icon" aria-hidden="true">i</span>
+          <p id="status" data-tone="neutral">Open your manga library page, then collect its bookmarks.</p>
+        </section>
+
+        <section class="collection-card">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">Collection</span>
+              <h2>Saved bookmarks</h2>
+            </div>
+            <div class="total-badge">
+              <strong id="total">0</strong>
+              <span>manga</span>
+            </div>
+          </div>
+          <div id="sites" role="list"></div>
+          <p id="empty-sites" class="empty-state">Nothing collected yet</p>
+        </section>
+
+        <div class="actions">
+          <button id="collect" class="primary">
+            <span class="button-icon" aria-hidden="true">+</span>
+            <span>Collect this page</span>
+          </button>
+          <button id="export" class="accent" disabled>
+            <span class="button-icon download-icon" aria-hidden="true">↓</span>
+            <span>Export to Tsuki</span>
+          </button>
+          <button id="select" class="secondary">Select bookmark list manually</button>
+          <button id="clear" class="quiet" disabled>Clear collected data</button>
+        </div>
+
+        <details id="diagnostics-box" hidden>
+          <summary>Adapter diagnostics</summary>
+          <pre id="diagnostics"></pre>
+        </details>
+      </main>
+
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

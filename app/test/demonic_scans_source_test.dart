@@ -37,6 +37,23 @@ void main() {
       isTrue,
     );
   });
+
+  test('also provides stable, directly mapped metadata', () async {
+    final source = DemonicScansSource(client: _client(_FixtureAdapter()));
+
+    final search = await source.search('MookHyang');
+    final result = search.first;
+    final sourceId = result.sourceMappings['demonicscans'];
+    final details = await source.getById(result.id);
+
+    expect(sourceId, isNotNull);
+    expect(result.metadataProviderIds['demonicscans'], sourceId);
+    expect(details, isNotNull);
+    expect(details!.title, 'MookHyang: Dark Lady');
+    expect(details.status, MangaStatus.ongoing);
+    expect(details.metadataChapterCount, 3);
+    expect(details.sourceMappings['demonicscans'], sourceId);
+  });
 }
 
 Dio _client(HttpClientAdapter adapter) =>
@@ -66,6 +83,12 @@ class _FixtureAdapter implements HttpClientAdapter {
       ''',
       '/manga/MookHyang-%25252D-Dark-Lady' =>
         '''
+        <meta property="og:image" content="https://readermc.org/images/dark-lady.webp">
+        <main>
+          <h1>MookHyang: Dark Lady</h1>
+          <div class="description">A martial artist awakens in another world.</div>
+          <div>Status: Ongoing</div>
+        </main>
         <a href="/chaptered.php?manga=157&chapter=297" class="chplinks">
           Chapter 297 <span>2026-08-25</span>
         </a>

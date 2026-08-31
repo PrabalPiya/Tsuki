@@ -24,10 +24,10 @@ class AniListMetadataProvider implements MetadataProvider {
   static const fields = r'''id idMal title { romaji english native } synonyms
     description(asHtml: false) status format countryOfOrigin startDate { year }
     averageScore popularity coverImage { extraLarge large } chapters volumes
-    genres isAdult''';
+    genres tags { name isAdult } isAdult''';
 
   @override
-  Future<List<Manga>> search(String query) async {
+  Future<List<Manga>> search(String query, {CancelToken? cancelToken}) async {
     final value = query.trim();
     if (value.length < 2) return const <Manga>[];
 
@@ -41,6 +41,7 @@ class AniListMetadataProvider implements MetadataProvider {
 
     final response = await _client.post<Map<String, dynamic>>(
       '',
+      cancelToken: cancelToken,
       data: <String, Object?>{
         'query': document,
         'variables': <String, Object?>{'search': value},
@@ -51,7 +52,9 @@ class AniListMetadataProvider implements MetadataProvider {
 
   @override
   Future<Manga?> getById(String id) async {
-    final value = int.tryParse(id.replaceFirst('anilist:', ''));
+    final value = int.tryParse(
+      id.replaceFirst('tsuki:anilist:', '').replaceFirst('anilist:', ''),
+    );
     if (value == null) return null;
 
     final document =
@@ -136,11 +139,18 @@ class AniListMetadataProvider implements MetadataProvider {
         : const <String, dynamic>{};
     final score = json['averageScore'] as num?;
     final id = (json['id'] as num).toInt();
+    final hasAdultTag = (json['tags'] as List? ?? const <Object>[])
+        .whereType<Map>()
+        .any((tag) => tag['isAdult'] == true);
 
     return Manga(
       id: 'anilist:$id',
       anilistId: id,
       malId: (json['idMal'] as num?)?.toInt(),
+      metadataProviderIds: {
+        'anilist': '$id',
+        if (json['idMal'] is num) 'mal': '${(json['idMal'] as num).toInt()}',
+      },
       title:
           (title['english'] ?? title['romaji'] ?? title['native'] ?? 'Untitled')
               .toString(),
@@ -153,7 +163,7 @@ class AniListMetadataProvider implements MetadataProvider {
       status: _status(json['status']?.toString()),
       rating: score == null ? null : score.toDouble() / 10,
       chapterCount: (json['chapters'] as num?)?.toInt() ?? 0,
-      isAdult: json['isAdult'] as bool? ?? false,
+      isAdult: (json['isAdult'] as bool? ?? false) || hasAdultTag,
       format: _format(json['format']?.toString()),
       countryCode: json['countryOfOrigin']?.toString(),
       startYear: (startDate['year'] as num?)?.toInt(),

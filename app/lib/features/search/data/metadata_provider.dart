@@ -1,8 +1,10 @@
+import 'package:dio/dio.dart';
+
 import '../../../core/models/manga.dart';
 
 abstract interface class MetadataProvider {
   String get id;
-  Future<List<Manga>> search(String query);
+  Future<List<Manga>> search(String query, {CancelToken? cancelToken});
   Future<Manga?> getById(String id);
 }
 

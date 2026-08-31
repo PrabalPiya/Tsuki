@@ -27,7 +27,7 @@ service cloud.firestore {
     function validProgress() {
       return request.resource.data.keys().hasOnly([
         'mangaId','chapterId','pageIndex','relativeOffset','chapterProgress',
-        'openedChapterIds','updatedAt'
+        'openedChapterIds','rawChapter','normalizedChapterNumber','updatedAt'
       ])
         && request.resource.data.mangaId is string
         && request.resource.data.chapterId is string
@@ -41,6 +41,10 @@ service cloud.firestore {
         && request.resource.data.chapterProgress <= 1
         && request.resource.data.openedChapterIds is list
         && request.resource.data.openedChapterIds.size() <= 2000
+        && (request.resource.data.get('rawChapter', null) == null
+          || request.resource.data.get('rawChapter', null) is string)
+        && (request.resource.data.get('normalizedChapterNumber', null) == null
+          || request.resource.data.get('normalizedChapterNumber', null) is number)
         && request.resource.data.updatedAt == request.time;
     }
 

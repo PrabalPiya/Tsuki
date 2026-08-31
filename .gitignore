@@ -15,6 +15,7 @@ app/android/key.properties
 .env
 .env.*
 !.env.example
+app/.firebase-web.local.json
 **/service-account*.json
 **/google-services.json
 !**/google-services.example.json

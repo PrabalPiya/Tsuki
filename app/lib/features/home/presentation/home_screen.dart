@@ -69,10 +69,6 @@ final Provider<void> _homeRefreshProvider = Provider<void>((ref) {
   ref.onDispose(timer.cancel);
 });
 
-final _repositoryChapterUpdatesProvider = StreamProvider<String>((ref) {
-  return ref.watch(catalogProvider).chapterUpdates;
-});
-
 final _homeChaptersProvider = StreamProvider.autoDispose
     .family<List<CanonicalChapter>, Manga>((ref, manga) {
       final repository = ref.watch(catalogProvider);
@@ -84,8 +80,10 @@ final _homeChaptersProvider = StreamProvider.autoDispose
           manga,
           allowAdult: false,
         );
-        if (!controller.isClosed && chapters != null) {
-          controller.add(chapters);
+        if (!controller.isClosed) {
+          // An empty value still refreshes instant catalog/summary metadata
+          // without leaving the card in an AsyncLoading state.
+          controller.add(chapters ?? const <CanonicalChapter>[]);
         }
       }
 
@@ -106,14 +104,19 @@ final _homeChaptersProvider = StreamProvider.autoDispose
       });
 
       scheduleEmit();
-      unawaited(repository.prewarmChapters(manga, allowAdult: false));
+      // Full indexes are discovered through the bounded repository queue so
+      // Home never creates a burst of source requests while scrolling.
+      repository.queueLibraryWarmup([manga]);
       return controller.stream;
     });
 
-final FutureProvider<List<_HomeCatalogEntry>>
-_homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((ref) async {
+final StreamProvider<List<_HomeCatalogEntry>>
+_homeCatalogProvider = StreamProvider<List<_HomeCatalogEntry>>((ref) async* {
   ref.watch(_homeRefreshProvider);
-  ref.watch(_repositoryChapterUpdatesProvider);
+  // Card-level chapter streams update their labels, but tab membership is
+  // computed from this catalog. Rebuild it whenever any verified chapter
+  // index changes so a newly caught-up bookmark moves tabs immediately.
+  ref.watch(chapterSummaryUpdatesProvider);
 
   final state = ref.watch(
     userLibraryProvider.select(
@@ -123,28 +126,61 @@ _homeCatalogProvider = FutureProvider<List<_HomeCatalogEntry>>((ref) async {
   );
 
   final repository = ref.watch(catalogProvider);
-  final entries = <_HomeCatalogEntry>[];
-
+  final manga = <Manga>[];
   for (final id in state.bookmarks) {
     try {
-      final manga = repository.cached(id) ?? state.bookmarkedManga[id];
-      if (manga == null) continue;
-      repository.remember(manga);
+      final item = repository.cached(id) ?? state.bookmarkedManga[id];
+      if (item == null) continue;
+      repository.remember(item);
 
-      if (!manga.isFriendlyContent) continue;
-
-      // Home renders from memory/on-device data only. Missing indexes are
-      // queued below so large libraries cannot start every source at once.
-      final local = await repository.localChapters(manga, allowAdult: false);
-      entries.add((manga: manga, chapters: local ?? const []));
+      if (item.isFriendlyContent) manga.add(item);
     } catch (_) {
       // Keep the rest of Home usable when one title/source is unavailable.
     }
   }
 
-  repository.queueLibraryWarmup(entries.map((entry) => entry.manga));
+  final entries = manga
+      .map(
+        (item) => (
+          manga: item,
+          chapters:
+              repository.memoryChapters(item, allowAdult: false) ?? const [],
+        ),
+      )
+      .toList(growable: false);
 
-  return entries;
+  // Register every bookmark for chapter discovery before the first Home
+  // payload is emitted. The repository starts the queue immediately while
+  // keeping source traffic bounded, so rendering never waits for the network.
+  repository.queueLibraryWarmup(manga);
+
+  // Show the library immediately from memory. On-device chapter indexes are
+  // filled below without holding the first Home frame behind every bookmark.
+  yield entries;
+
+  const batchSize = 6;
+  var changed = false;
+  for (var start = 0; start < entries.length; start += batchSize) {
+    final end = (start + batchSize).clamp(0, entries.length);
+    final loaded = await Future.wait(
+      entries
+          .sublist(start, end)
+          .map(
+            (entry) => repository.localChapters(entry.manga, allowAdult: false),
+          ),
+    );
+    for (var offset = 0; offset < loaded.length; offset++) {
+      final chapters = loaded[offset];
+      if (chapters == null || chapters.isEmpty) continue;
+      entries[start + offset] = (
+        manga: entries[start + offset].manga,
+        chapters: chapters,
+      );
+      changed = true;
+    }
+  }
+
+  if (changed) yield List<_HomeCatalogEntry>.unmodifiable(entries);
 });
 
 final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
@@ -154,12 +190,13 @@ final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
   return ref.watch(_homeCatalogProvider).whenData((catalog) {
     final entries = catalog.where((entry) => entry.manga.isFriendlyContent).map(
       (entry) {
+        final chapters = entry.chapters;
         final mangaProgress = progress[entry.manga.id];
         var current = -1;
         var highest = -1;
 
-        if (mangaProgress != null && entry.chapters.isNotEmpty) {
-          current = entry.chapters.indexWhere(
+        if (mangaProgress != null && chapters.isNotEmpty) {
+          current = chapters.indexWhere(
             (chapter) => chapter.id == mangaProgress.chapterId,
           );
 
@@ -167,8 +204,8 @@ final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
           double? highestNumber;
           var highestUnnumbered = -1;
 
-          for (var i = 0; i < entry.chapters.length; i++) {
-            final chapter = entry.chapters[i];
+          for (var i = 0; i < chapters.length; i++) {
+            final chapter = chapters[i];
             if (!opened.contains(chapter.id)) continue;
 
             final number = chapter.number;
@@ -190,8 +227,8 @@ final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
         double? latestNumber;
         var latestDatedIndex = -1;
         var latestDate = DateTime.fromMillisecondsSinceEpoch(0);
-        for (var i = 0; i < entry.chapters.length; i++) {
-          final chapter = entry.chapters[i];
+        for (var i = 0; i < chapters.length; i++) {
+          final chapter = chapters[i];
           final number = chapter.number;
           if (number != null &&
               (latestNumber == null || number > latestNumber)) {
@@ -205,12 +242,7 @@ final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
         }
         if (latestIndex < 0) latestIndex = latestDatedIndex;
 
-        final latestIsCurrent = current == latestIndex;
-        final caught =
-            latestIndex >= 0 &&
-            highest == latestIndex &&
-            (!latestIsCurrent ||
-                (mangaProgress?.chapterProgress ?? 0.0) >= 0.95);
+        final caught = isReadingCaughtUp(mangaProgress, chapters);
 
         final DateTime sort;
         if (caught) {
@@ -218,7 +250,7 @@ final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
               mangaProgress?.updatedAt ??
               DateTime.fromMillisecondsSinceEpoch(0);
         } else if (latestIndex >= 0) {
-          sort = entry.chapters[latestIndex].publishedAt;
+          sort = chapters[latestIndex].publishedAt;
         } else {
           sort =
               mangaProgress?.updatedAt ??
@@ -227,7 +259,7 @@ final homeEntriesProvider = Provider<AsyncValue<List<HomeEntry>>>((ref) {
 
         return HomeEntry(
           manga: entry.manga,
-          chapters: entry.chapters,
+          chapters: chapters,
           progress: mangaProgress,
           currentIndex: current,
           highestReadIndex: highest,
@@ -545,8 +577,11 @@ class _HomeCard extends ConsumerWidget {
         ? loaded
         : entry.chapters;
     final latest = _latestChapter(chapters);
+    final latestLabel =
+        latest?.numberLabel ?? entry.manga.catalogChapterDisplayLabel;
     final highestRead = _highestReadChapter(chapters, entry.progress);
     final hasChapters = chapters.isNotEmpty;
+    final caughtUp = isReadingCaughtUp(entry.progress, chapters);
     final String lastRead;
     if (highestRead != null) {
       lastRead = highestRead.numberLabel;
@@ -606,15 +641,15 @@ class _HomeCard extends ConsumerWidget {
                       ),
                       const SizedBox(height: 5),
                       _ChapterInfoLine(
-                        label: 'Last Chapter Uploaded',
-                        value: latest?.numberLabel ?? 'Unavailable',
-                        valueColor: latest == null
+                        label: 'Latest Chapter',
+                        value: latestLabel ?? 'Unavailable',
+                        valueColor: latestLabel == null
                             ? AppColors.muted
                             : AppColors.accent,
                       ),
                       const SizedBox(height: 2),
                       _ChapterInfoLine(
-                        label: 'Last Chapter Read',
+                        label: 'Viewed Chapter',
                         value: lastRead,
                         valueColor: highestRead == null
                             ? AppColors.muted
@@ -643,9 +678,15 @@ class _HomeCard extends ConsumerWidget {
                               borderRadius: BorderRadius.circular(buttonRadius),
                             ),
                           ),
-                          onPressed: !hasChapters || entry.caughtUp
+                          onPressed: caughtUp
                               ? null
                               : () {
+                                  if (!hasChapters) {
+                                    context.push(
+                                      '/manga/${Uri.encodeComponent(entry.manga.id)}',
+                                    );
+                                    return;
+                                  }
                                   final chapterId =
                                       entry.progress?.chapterId ??
                                       chapters.first.id;
@@ -655,7 +696,9 @@ class _HomeCard extends ConsumerWidget {
                                 },
                           child: Text(
                             !hasChapters
-                                ? 'Finding chapters…'
+                                ? 'View Chapters'
+                                : caughtUp
+                                ? 'Caught Up'
                                 : entry.progress == null
                                 ? 'Start Reading'
                                 : 'Continue Reading',

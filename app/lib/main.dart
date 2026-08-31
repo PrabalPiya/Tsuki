@@ -28,31 +28,40 @@ Future<void> main() async {
 
   var config = AppConfig.fromEnvironment();
   try {
-    final firebaseApp =
-        await (config.isFirebaseConfigured
-                ? Firebase.initializeApp(options: config.firebaseOptions)
-                : Firebase.initializeApp())
-            .timeout(const Duration(seconds: 6));
+    // Firebase Core reads bundled Android resources locally. Do not turn a
+    // slow cold/debug start into a permanently account-less app by timing this
+    // initialization out.
+    final firebaseApp = await (config.isFirebaseConfigured
+        ? Firebase.initializeApp(options: config.firebaseOptions)
+        : Firebase.initializeApp());
     if (!config.isFirebaseConfigured) {
       config = config.withFirebaseOptions(firebaseApp.options);
     }
-    if (config.isFirebaseConfigured) {
+  } catch (error, stackTrace) {
+    // An absent or invalid sync service must not block the rest of startup.
+    debugPrint('Cloud sync initialization failed: $error\n$stackTrace');
+    config = config.withoutFirebase();
+  }
+
+  if (config.isFirebaseConfigured) {
+    try {
       FirebaseFirestore.instance.settings = const Settings(
         persistenceEnabled: false,
       );
-      unawaited(
-        FirebaseAppCheck.instance
-            .activate(androidProvider: AndroidProvider.playIntegrity)
-            .timeout(const Duration(seconds: 6))
-            .catchError((error) {
-              debugPrint('App Check initialization skipped: $error');
-            }),
-      );
+    } catch (error) {
+      // Settings can already be locked after a hot restart. That does not mean
+      // Firebase Auth or the account service is unavailable.
+      debugPrint('Firestore settings unchanged: $error');
     }
-  } catch (error) {
-    // An absent or partially configured sync service must not block startup.
-    debugPrint('Cloud sync initialization failed: $error');
-    config = config.withoutFirebase();
+
+    unawaited(
+      FirebaseAppCheck.instance
+          .activate(androidProvider: AndroidProvider.playIntegrity)
+          .timeout(const Duration(seconds: 6))
+          .catchError((error) {
+            debugPrint('App Check initialization skipped: $error');
+          }),
+    );
   }
 
   runApp(

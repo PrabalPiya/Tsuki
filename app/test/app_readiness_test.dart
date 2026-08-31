@@ -124,7 +124,7 @@ void main() {
     expect(progress.toJson()['openedChapterIds'], ['chapter-4']);
   });
 
-  testWidgets('demo reader opens a chapter and has no dead overflow action', (
+  testWidgets('demo reader uses continuous flow without chapter buttons', (
     tester,
   ) async {
     const config = AppConfig(
@@ -150,5 +150,7 @@ void main() {
 
     expect(find.text('Synthetic preview page 1'), findsOneWidget);
     expect(find.byIcon(Icons.more_vert), findsNothing);
+    expect(find.text('Previous'), findsNothing);
+    expect(find.text('Next'), findsNothing);
   });
 }

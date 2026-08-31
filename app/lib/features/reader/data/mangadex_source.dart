@@ -7,6 +7,7 @@ import '../../../core/models/manga.dart';
 import '../../../core/network/http_client.dart';
 import '../../../core/network/source_failure.dart';
 import 'manga_source.dart';
+import 'source_matching.dart';
 
 enum _ChapterKind { numbered, special }
 
@@ -170,21 +171,26 @@ class MangaDexSource implements MangaSource {
   Set<String> get allowedImageHosts => const {'uploads.mangadex.org'};
 
   @override
-  Future<List<Manga>> search(String query) => _search(query);
+  Future<List<Manga>> search(String query, {CancelToken? cancelToken}) =>
+      _search(query, cancelToken: cancelToken);
 
-  Future<List<Manga>> _search(String query) async {
-    final resources = await _searchResources(query);
+  Future<List<Manga>> _search(String query, {CancelToken? cancelToken}) async {
+    final resources = await _searchResources(query, cancelToken: cancelToken);
     return resources.map(_manga).toList();
   }
 
-  Future<List<Map<String, dynamic>>> _searchResources(String query) async {
+  Future<List<Map<String, dynamic>>> _searchResources(
+    String query, {
+    CancelToken? cancelToken,
+  }) async {
     final response = await _client.get<Map<String, dynamic>>(
       '/manga',
+      cancelToken: cancelToken,
       queryParameters: {
         'title': query,
         'limit': 20,
         'availableTranslatedLanguage[]': 'en',
-        'contentRating[]': const ['safe'],
+        'contentRating[]': const ['safe', 'suggestive'],
         'includes[]': 'cover_art',
         'order[relevance]': 'desc',
       },
@@ -215,10 +221,7 @@ class MangaDexSource implements MangaSource {
       canonical.title,
       ...canonical.aliases,
     }.map(_normalize).where((title) => title.isNotEmpty).toSet();
-    final queries = <String>{
-      canonical.title,
-      ...canonical.aliases,
-    }.map((title) => title.trim()).where((title) => title.length >= 2).take(8);
+    final queries = SourceMatching.searchQueries(canonical, maximum: 8);
     for (final query in queries) {
       final match = await _findConservativeMatchForQuery(
         query,
@@ -235,8 +238,11 @@ class MangaDexSource implements MangaSource {
     Manga canonical,
     Set<String> expected,
   ) async {
-    for (final resource in await _searchResources(query)) {
+    final resources = await _searchResources(query);
+    final candidates = <Manga>[];
+    for (final resource in resources) {
       final candidate = _manga(resource);
+      candidates.add(candidate);
       final attrs = resource['attributes'] as Map<String, dynamic>? ?? const {};
       final contentRating = attrs['contentRating'] as String?;
       final originalLanguage = attrs['originalLanguage'] as String?;
@@ -275,6 +281,28 @@ class MangaDexSource implements MangaSource {
           score: 80,
         );
       }
+    }
+    final fuzzyId = SourceMatching.bestMatchId(
+      canonical,
+      candidates,
+      sourcePrefix: 'mangadex:',
+      minimumScore: .9,
+      ambiguityMargin: .04,
+    );
+    if (fuzzyId != null) {
+      final resource = resources.firstWhere(
+        (value) => value['id']?.toString() == fuzzyId,
+      );
+      final attrs = resource['attributes'] as Map<String, dynamic>? ?? const {};
+      final candidate = _manga(resource);
+      return _MangaDexMatch(
+        id: fuzzyId,
+        title: candidate.title,
+        contentRating: attrs['contentRating'] as String?,
+        originalLanguage: attrs['originalLanguage'] as String?,
+        reason: 'conservative title variation',
+        score: 70,
+      );
     }
     return null;
   }

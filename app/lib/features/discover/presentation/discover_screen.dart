@@ -1231,18 +1231,18 @@ class _BookmarkButtonState extends State<_BookmarkButton> {
 
     return RepaintBoundary(
       child: Transform.scale(
-        scale: bookmarked ? 1.035 : 1.0,
+        scale: bookmarked ? 1.02 : 1.0,
         child: Container(
           width: double.infinity,
           height: 50,
           decoration: BoxDecoration(
             color: bookmarked
-                ? AppColors.accent.withValues(alpha: .30)
+                ? AppColors.accent.withValues(alpha: .14)
                 : AppColors.raised.withValues(alpha: .72),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: bookmarked
-                  ? AppColors.accent.withValues(alpha: .65)
+                  ? AppColors.accent.withValues(alpha: .58)
                   : AppColors.outline,
               width: bookmarked ? 1.2 : 1,
             ),
@@ -1259,8 +1259,8 @@ class _BookmarkButtonState extends State<_BookmarkButton> {
             ),
             icon: Icon(
               bookmarked
-                  ? Icons.favorite_rounded
-                  : Icons.favorite_border_rounded,
+                  ? Icons.bookmark_rounded
+                  : Icons.bookmark_border_rounded,
               key: ValueKey<bool>(bookmarked),
               size: 22,
             ),

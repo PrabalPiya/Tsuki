@@ -1,6 +1,10 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
+
 import '../config/app_config.dart';
+import '../identity/manga_identity_resolver.dart';
+import '../identity/chapter_identity.dart';
 import '../models/chapter.dart';
 import '../models/manga.dart';
 import '../storage/chapter_index_cache.dart';
@@ -8,22 +12,50 @@ import '../storage/chapter_index_cache.dart';
 import '../../features/reader/data/asura_source.dart';
 import '../../features/reader/data/demonic_scans_source.dart';
 import '../../features/reader/data/mangadex_source.dart';
-import '../../features/reader/data/manganato_source.dart';
+import '../../features/reader/data/mangakakalot_source.dart';
+import '../../features/reader/data/mangakatana_source.dart';
+import '../../features/reader/data/weebcentral_source.dart';
 import '../../features/search/data/metadata_provider.dart';
 import '../../shared/demo_catalog.dart';
+
+class SourceHealthSnapshot {
+  const SourceHealthSnapshot({
+    required this.sourceId,
+    required this.consecutiveFailures,
+    required this.lastLatency,
+    required this.lastCheckedAt,
+    this.lastError,
+  });
+
+  final String sourceId;
+  final int consecutiveFailures;
+  final Duration lastLatency;
+  final DateTime lastCheckedAt;
+  final String? lastError;
+
+  bool get isDegraded => consecutiveFailures >= 2;
+}
 
 class CatalogRepository {
   CatalogRepository({
     required this.config,
     required this.metadata,
+    List<MetadataProvider>? metadataProviders,
     required this.mangaDex,
     DemonicScansSource? demonicScans,
-    ManganatoSource? manganato,
+    MangakakalotSource? mangakakalot,
+    MangaKatanaSource? mangaKatana,
     AsuraSource? asura,
+    WeebCentralSource? weebCentral,
     ChapterIndexCache? chapterIndexCache,
-  }) : _demonicScans = demonicScans ?? DemonicScansSource(),
-       _manganato = manganato ?? ManganatoSource(),
+  }) : _metadataProviders = List.unmodifiable(
+         metadataProviders ?? <MetadataProvider>[metadata],
+       ),
+       _demonicScans = demonicScans ?? DemonicScansSource(),
+       _mangakakalot = mangakakalot ?? MangakakalotSource(),
+       _mangaKatana = mangaKatana ?? MangaKatanaSource(),
        _asura = asura ?? AsuraSource(),
+       _weebCentral = weebCentral ?? WeebCentralSource(),
        _indexCache = chapterIndexCache ?? ChapterIndexCache() {
     if (config.useDemoData) {
       for (final manga in demoCatalog) {
@@ -34,13 +66,18 @@ class CatalogRepository {
 
   final AppConfig config;
   final MetadataProvider metadata;
+  final List<MetadataProvider> _metadataProviders;
+  final MangaIdentityResolver _identityResolver = const MangaIdentityResolver();
   final MangaDexSource mangaDex;
   final DemonicScansSource _demonicScans;
-  final ManganatoSource _manganato;
+  final MangakakalotSource _mangakakalot;
+  final MangaKatanaSource _mangaKatana;
   final AsuraSource _asura;
+  final WeebCentralSource _weebCentral;
   final ChapterIndexCache _indexCache;
 
   final Map<String, Manga> _cache = {};
+  final Map<String, Manga> _bookmarkedCanonicals = {};
   final Map<String, Future<Manga?>> _detailsLoading = {};
   final Map<String, List<CanonicalChapter>> _chapterCache = {};
   final Map<String, String> _sourceMatchCache = {};
@@ -57,6 +94,9 @@ class CatalogRepository {
   Future<void>? _summaryWarmup;
   final StreamController<String> _chapterUpdateController =
       StreamController<String>.broadcast();
+  final StreamController<SourceHealthSnapshot> _sourceHealthController =
+      StreamController<SourceHealthSnapshot>.broadcast();
+  final Map<String, SourceHealthSnapshot> _sourceHealth = {};
 
   static const _primaryTimeout = Duration(seconds: 14);
   static const _fallbackTimeout = Duration(seconds: 22);
@@ -68,39 +108,349 @@ class CatalogRepository {
     'mangadex',
     'asura',
     'demonicscans',
-    'manganato',
+    'mangakakalot',
+    'mangakatana',
+    'weebcentral',
   };
 
   Stream<String> get chapterUpdates => _chapterUpdateController.stream;
+  Stream<SourceHealthSnapshot> get sourceHealthUpdates =>
+      _sourceHealthController.stream;
+  List<SourceHealthSnapshot> get sourceHealth {
+    final values = _sourceHealth.values.toList(growable: false)
+      ..sort((left, right) => left.sourceId.compareTo(right.sourceId));
+    return values;
+  }
 
   List<Manga> get demoRankings =>
       config.useDemoData ? demoCatalog : const <Manga>[];
 
   bool isFriendly(Manga manga) => manga.isFriendlyContent;
 
+  /// Rejects stale source-only search records saved before the current
+  /// metadata provider set was configured. Canonical records may retain
+  /// chapter mappings without being treated as metadata from those sources.
+  bool isEnabledMetadataResult(Manga manga) {
+    if (manga.id.startsWith('demo:')) return true;
+    final metadataIds = manga.allMetadataProviderIds;
+    final sourceIds = manga.allSourceMappings;
+    if (metadataIds.isEmpty && sourceIds.isEmpty) return true;
+    final enabledIds = _metadataProviders
+        .map((provider) => provider.id)
+        .toSet();
+    if (metadataIds.keys.any(enabledIds.contains)) return true;
+    return !metadataIds.keys.any(_enabledSourceIds.contains);
+  }
+
   bool isFriendlySearchQuery(String query) => Manga.isFriendlySearchText(query);
+
+  /// Resolves an imported bookmark through its exact reader source before
+  /// falling back to title search. This is both faster and more reliable for
+  /// source titles whose display name differs from canonical metadata.
+  Future<Manga?> resolveImportedSource({
+    required String source,
+    required String sourceMangaId,
+    String? sourceUrl,
+  }) async {
+    final coordinates = _importSourceCoordinates(
+      source,
+      sourceMangaId,
+      sourceUrl,
+    );
+    if (coordinates == null) return null;
+    final (:sourceId, :mangaId) = coordinates;
+    final startedAt = DateTime.now();
+    try {
+      final Manga? loaded = await switch (sourceId) {
+        'mangadex' => mangaDex.getMangaDetails(mangaId),
+        'demonicscans' => _demonicScans.getMangaDetails(mangaId),
+        'mangakakalot' => _mangakakalot.getMangaDetails(mangaId),
+        'mangakatana' => _mangaKatana.getMangaDetails(mangaId),
+        'asura' => _asura.getMangaDetails(mangaId),
+        'weebcentral' => _weebCentral.getMangaDetails(mangaId),
+        _ => Future<Manga?>.value(),
+      }.timeout(_primaryTimeout);
+      _recordSourceHealth(sourceId, startedAt: startedAt);
+      if (loaded == null || !isFriendly(loaded)) return null;
+      final hasSafetyEvidence =
+          loaded.hasTrustedSafetyMetadata ||
+          loaded.synopsis.trim().isNotEmpty ||
+          loaded.genres.isNotEmpty;
+      if (!hasSafetyEvidence) return null;
+      final isMetadataSource = _metadataProviders.any(
+        (provider) => provider.id == sourceId,
+      );
+      final mapped = loaded.copyWith(
+        metadataProviderIds: {
+          ...loaded.metadataProviderIds,
+          if (isMetadataSource) sourceId: mangaId,
+        },
+        sourceMappings: {...loaded.sourceMappings, sourceId: mangaId},
+      );
+      remember(mapped);
+      return canonicalizeForLibrary(mapped);
+    } catch (error) {
+      if (!_isCancellation(error)) {
+        _recordSourceHealth(sourceId, startedAt: startedAt, error: error);
+      }
+      return null;
+    }
+  }
+
+  ({String sourceId, String mangaId})? _importSourceCoordinates(
+    String rawSource,
+    String rawId,
+    String? rawUrl,
+  ) {
+    final source = rawSource.trim().toLowerCase();
+    final uri = Uri.tryParse(rawUrl ?? '');
+    final host = uri?.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    final sourceId = switch (source) {
+      'mangadex' => 'mangadex',
+      'demonicscans' => 'demonicscans',
+      'mangakakalot' => 'mangakakalot',
+      'mangakatana' => 'mangakatana',
+      'asura' => 'asura',
+      'weebcentral' => 'weebcentral',
+      _ when host == 'mangadex.org' => 'mangadex',
+      _ when host == 'demonicscans.org' => 'demonicscans',
+      _ when host == 'mangakakalot.gg' => 'mangakakalot',
+      _ when host == 'mangakatana.com' => 'mangakatana',
+      _ when host == 'weebcentral.com' => 'weebcentral',
+      _ when host?.contains('asura') == true => 'asura',
+      _ => '',
+    };
+    if (sourceId.isEmpty) return null;
+
+    final path = uri?.path ?? '';
+    String? fromUrl;
+    switch (sourceId) {
+      case 'mangadex':
+        fromUrl = RegExp(
+          r'/title/([0-9a-f-]{36})',
+          caseSensitive: false,
+        ).firstMatch(path)?.group(1);
+      case 'demonicscans':
+        if (RegExp(r'^/manga/[^/?#]+/?$').hasMatch(path)) {
+          fromUrl = Uri.encodeComponent(path.replaceFirst(RegExp(r'/$'), ''));
+        }
+      case 'mangakakalot':
+        fromUrl = RegExp(
+          r'^/manga/([a-z0-9]+(?:-[a-z0-9]+)*)/?$',
+          caseSensitive: false,
+        ).firstMatch(path)?.group(1)?.toLowerCase();
+      case 'mangakatana':
+        fromUrl = RegExp(
+          r'^/manga/([^/?#\s]+\.\d+)/?$',
+          caseSensitive: false,
+        ).firstMatch(path)?.group(1)?.toLowerCase();
+      case 'asura':
+        final clean = path
+            .replaceFirst(RegExp(r'^/'), '')
+            .replaceFirst(RegExp(r'/$'), '');
+        if (clean.startsWith('comics/')) fromUrl = Uri.encodeComponent(clean);
+      case 'weebcentral':
+        fromUrl = RegExp(r'^/series/([A-Za-z0-9]+)').firstMatch(path)?.group(1);
+    }
+    final mangaId = (fromUrl ?? rawId).trim();
+    if (mangaId.isEmpty || mangaId.length > 500) return null;
+    return (sourceId: sourceId, mangaId: mangaId);
+  }
 
   Manga? cached(String id) {
     final value = _cache[id];
     return value == null || !isFriendly(value) ? null : value;
   }
 
-  void remember(Manga manga) {
-    if (isFriendly(manga)) _cache[manga.id] = manga;
+  /// Keeps imported/native bookmarks as the canonical app identity. Results
+  /// arriving later from another metadata provider are enriched with their
+  /// IDs, but retain the bookmarked ID used by progress and chapter caches.
+  void syncBookmarkedManga(Iterable<Manga> values) {
+    _bookmarkedCanonicals
+      ..clear()
+      ..addEntries(
+        values.where(isFriendly).map((manga) => MapEntry(manga.id, manga)),
+      );
+    for (final manga in _bookmarkedCanonicals.values) {
+      _cache[manga.id] = manga;
+      _cache[manga.tsukiId] = manga;
+    }
   }
 
-  Future<List<Manga>> searchMetadataOnly(String query) async {
+  Manga canonicalizeForLibrary(Manga manga) {
+    if (!isFriendly(manga)) return manga;
+    for (final bookmarked in _bookmarkedCanonicals.values) {
+      final comparison = _identityResolver.compare(bookmarked, manga);
+      if (!comparison.canMerge) continue;
+      final merged = _identityResolver
+          .merge(bookmarked, manga)
+          .copyWith(id: bookmarked.id);
+      _cache[manga.id] = merged;
+      _cache[manga.tsukiId] = merged;
+      _cache[bookmarked.id] = merged;
+      _cache[bookmarked.tsukiId] = merged;
+      return merged;
+    }
+    return manga;
+  }
+
+  void remember(Manga manga) {
+    if (!isFriendly(manga)) return;
+    final resolved = canonicalizeForLibrary(manga);
+    _cache[manga.id] = resolved;
+    _cache[manga.tsukiId] = resolved;
+    _cache[resolved.id] = resolved;
+    _cache[resolved.tsukiId] = resolved;
+  }
+
+  /// Source-only autocomplete stays broad, but chapters/imports require a
+  /// second safety pass over full source details. Canonical providers already
+  /// expose explicit adult/rating signals and do not need this extra request.
+  Future<Manga?> verifyForOpen(Manga manga) async {
+    if (!isFriendly(manga)) return null;
+    if (manga.hasTrustedSafetyMetadata || manga.id.startsWith('demo:')) {
+      return manga;
+    }
+
+    final verificationMappings = <String, String>{
+      ...manga.allMetadataProviderIds,
+      ...manga.allSourceMappings,
+    };
+    for (final mapping in verificationMappings.entries) {
+      final provider = _metadataProviders
+          .where((candidate) => candidate.id == mapping.key)
+          .firstOrNull;
+      if (provider == null) continue;
+      try {
+        final details = await provider.getById(
+          '${mapping.key}:${mapping.value}',
+        );
+        if (details == null) continue;
+        if (!isFriendly(details)) return null;
+        final hasSafetyEvidence =
+            details.synopsis.trim().isNotEmpty || details.genres.isNotEmpty;
+        if (!hasSafetyEvidence) continue;
+        final comparison = _identityResolver.compare(manga, details);
+        if (!comparison.canMerge) continue;
+        final verified = _identityResolver.merge(manga, details);
+        if (!isFriendly(verified)) return null;
+        remember(verified);
+        return canonicalizeForLibrary(verified);
+      } catch (_) {
+        // Try another known mapping, then canonical metadata search below.
+      }
+    }
+
+    // A source page may be temporarily unavailable or too sparse for a safety
+    // decision. Resolve the same title through the canonical metadata set
+    // before giving up, so normal browsing is not blocked by one scraper.
+    final fallbackQueries = <String>{
+      manga.title,
+      ...manga.aliases,
+    }.map((value) => value.trim()).where((value) => value.length >= 2).take(3);
+    for (final query in fallbackQueries) {
+      try {
+        final candidates = await searchMetadataOnly(query);
+        for (final candidate in candidates) {
+          if (!candidate.hasTrustedSafetyMetadata || !isFriendly(candidate)) {
+            continue;
+          }
+          if (!_identityResolver.compare(manga, candidate).canMerge) continue;
+          final verified = _identityResolver.merge(candidate, manga);
+          if (!isFriendly(verified)) return null;
+          remember(verified);
+          return canonicalizeForLibrary(verified);
+        }
+      } catch (_) {
+        // Other spellings and already-loaded results remain available.
+      }
+    }
+    return null;
+  }
+
+  Future<List<Manga>> searchMetadataOnly(
+    String query, {
+    CancelToken? cancelToken,
+  }) async {
     final trimmed = query.trim();
     if (trimmed.length < 2 || !isFriendlySearchQuery(trimmed)) {
       return const [];
     }
 
-    final values = await metadata.search(trimmed);
-    final safe = _dedupe(values).where(isFriendly).toList(growable: false);
+    final batches = await searchMetadataProgressive(
+      trimmed,
+      cancelToken: cancelToken,
+    ).toList();
+    final safe = batches.isEmpty ? const <Manga>[] : batches.last;
     for (final value in safe) {
       _cache[value.id] = value;
     }
     return _rankSearchResults(query, safe);
+  }
+
+  /// Emits a merged result after each provider completes. Provider failures
+  /// and timeouts are isolated, so a slow fallback never blocks useful data.
+  Stream<List<Manga>> searchMetadataProgressive(
+    String query, {
+    CancelToken? cancelToken,
+  }) async* {
+    final trimmed = query.trim();
+    if (trimmed.length < 2 || !isFriendlySearchQuery(trimmed)) return;
+
+    final controller = StreamController<List<Manga>>();
+    final merged = <Manga>[];
+    var remaining = _metadataProviders.length;
+
+    void completeOne() {
+      remaining--;
+      if (remaining == 0) unawaited(controller.close());
+    }
+
+    for (var index = 0; index < _metadataProviders.length; index++) {
+      final provider = _metadataProviders[index];
+      final startedAt = DateTime.now();
+      unawaited(
+        provider
+            .search(trimmed, cancelToken: cancelToken)
+            .timeout(Duration(seconds: index == 0 ? 8 : 10))
+            .then((values) {
+              _recordSourceHealth(provider.id, startedAt: startedAt);
+              for (final rawCandidate in values.where(isFriendly)) {
+                final candidate = canonicalizeForLibrary(rawCandidate);
+                final matchIndex = merged.indexWhere(
+                  (current) =>
+                      _identityResolver.compare(current, candidate).canMerge,
+                );
+                if (matchIndex < 0) {
+                  merged.add(candidate);
+                } else {
+                  merged[matchIndex] = _identityResolver.merge(
+                    merged[matchIndex],
+                    candidate,
+                  );
+                }
+              }
+              final ranked = _rankSearchResults(trimmed, [...merged]);
+              for (final manga in ranked) {
+                _cache[manga.id] = manga;
+                _cache[manga.tsukiId] = manga;
+              }
+              if (!controller.isClosed) controller.add(ranked);
+            })
+            .catchError((error) {
+              if (!_isCancellation(error)) {
+                _recordSourceHealth(
+                  provider.id,
+                  startedAt: startedAt,
+                  error: error,
+                );
+              }
+            })
+            .whenComplete(completeOne),
+      );
+    }
+
+    yield* controller.stream;
   }
 
   List<Manga> _rankSearchResults(String query, List<Manga> values) {
@@ -162,7 +512,12 @@ class CatalogRepository {
     final active = _detailsLoading[id];
     if (active != null) return active;
 
-    final future = metadata.getById(id).then((loaded) {
+    final selected = _metadataProviders.where((provider) {
+      if (id.contains(':${provider.id}:')) return true;
+      return id.startsWith('${provider.id}:');
+    }).firstOrNull;
+    final provider = selected ?? metadata;
+    final future = provider.getById(id).then((loaded) {
       if (loaded == null || !isFriendly(loaded)) return null;
       _cache[id] = loaded;
       return loaded;
@@ -195,6 +550,38 @@ class CatalogRepository {
     } catch (_) {
       // Card rendering must never fail because an optional source is down.
     }
+  }
+
+  /// Fast import path: an exported bookmark already identifies its source,
+  /// so load that exact index instead of searching every provider first.
+  Future<void> prewarmImportedChapters(
+    Manga manga, {
+    required String preferredSource,
+  }) async {
+    if (config.useDemoData || !isFriendly(manga)) return;
+    final source = preferredSource.trim().toLowerCase();
+    if (!_enabledSourceIds.contains(source) || source == 'demo') {
+      await prewarmChapters(manga, allowAdult: false);
+      return;
+    }
+
+    final chapters = await _safe(
+      () => _loadSourceByName(manga, source, allowAdult: false),
+      timeout: _firstChapterDeadline,
+    );
+    if (chapters.isEmpty) {
+      // Do not hold the import screen for a second provider sweep. Home's
+      // bounded queue will retry the uncommon failed/unsupported title.
+      queueLibraryWarmup([manga]);
+      return;
+    }
+
+    await _storeChapterIndex(
+      manga,
+      _chapterCacheKey(manga, false),
+      _mergeChapters(chapters),
+      markChecked: true,
+    );
   }
 
   /// Queues a lightweight latest-chapter probe when a card becomes visible.
@@ -315,9 +702,10 @@ class CatalogRepository {
   void queueLibraryWarmup(Iterable<Manga> manga) {
     if (config.useDemoData) return;
     for (final item in manga) {
+      final cached = _chapterCache[_chapterCacheKey(item, false)];
       if (!isFriendly(item) ||
           _libraryWarmupActive.contains(item.id) ||
-          _chapterCache.containsKey(_chapterCacheKey(item, false))) {
+          (cached != null && cached.isNotEmpty)) {
         continue;
       }
       _libraryWarmupQueue[item.id] = item;
@@ -442,11 +830,57 @@ class CatalogRepository {
       return const <Future<List<CanonicalChapter>> Function()>[];
     }
     return <Future<List<CanonicalChapter>> Function()>[
-      () => _loadDemonicScans(manga),
-      () => _loadManganato(manga),
-      () => _loadMangaDex(manga, allowAdult: false),
-      () => _loadAsura(manga),
+      () => _trackChapterSource('demonicscans', () => _loadDemonicScans(manga)),
+      () => _trackChapterSource('mangakakalot', () => _loadMangakakalot(manga)),
+      () => _trackChapterSource('mangakatana', () => _loadMangaKatana(manga)),
+      () => _trackChapterSource(
+        'mangadex',
+        () => _loadMangaDex(manga, allowAdult: false),
+      ),
+      () => _trackChapterSource('asura', () => _loadAsura(manga)),
+      () => _trackChapterSource('weebcentral', () => _loadWeebCentral(manga)),
     ];
+  }
+
+  Future<List<CanonicalChapter>> _trackChapterSource(
+    String sourceId,
+    Future<List<CanonicalChapter>> Function() operation,
+  ) async {
+    final startedAt = DateTime.now();
+    try {
+      final values = await operation();
+      _recordSourceHealth(sourceId, startedAt: startedAt);
+      return values;
+    } catch (error) {
+      if (!_isCancellation(error)) {
+        _recordSourceHealth(sourceId, startedAt: startedAt, error: error);
+      }
+      rethrow;
+    }
+  }
+
+  bool _isCancellation(Object error) =>
+      error is DioException && CancelToken.isCancel(error);
+
+  void _recordSourceHealth(
+    String sourceId, {
+    required DateTime startedAt,
+    Object? error,
+  }) {
+    final previous = _sourceHealth[sourceId];
+    final snapshot = SourceHealthSnapshot(
+      sourceId: sourceId,
+      consecutiveFailures: error == null
+          ? 0
+          : (previous?.consecutiveFailures ?? 0) + 1,
+      lastLatency: DateTime.now().difference(startedAt),
+      lastCheckedAt: DateTime.now(),
+      lastError: error?.toString(),
+    );
+    _sourceHealth[sourceId] = snapshot;
+    if (!_sourceHealthController.isClosed) {
+      _sourceHealthController.add(snapshot);
+    }
   }
 
   Future<List<CanonicalChapter>> _loadInitialProgressively(
@@ -667,9 +1101,11 @@ class CatalogRepository {
   _safeLatestPrimaries(Manga manga, {required bool allowAdult}) async {
     const sourceOrder = <String>[
       'demonicscans',
-      'manganato',
+      'mangakakalot',
+      'mangakatana',
       'mangadex',
       'asura',
+      'weebcentral',
     ];
 
     final probes = await Future.wait(
@@ -745,14 +1181,24 @@ class CatalogRepository {
       return await _demonicScans.getLatestChapter(sourceId);
     }
 
-    if (sourceName == 'manganato') {
+    if (sourceName == 'mangakakalot') {
       final sourceId = await _resolveMapped(
         manga,
-        sourceName: 'manganato',
-        resolver: () => _manganato.findConservativeMatch(manga),
+        sourceName: 'mangakakalot',
+        resolver: () => _mangakakalot.findConservativeMatch(manga),
       );
       if (sourceId == null) return null;
-      return await _manganato.getLatestChapter(sourceId);
+      return await _mangakakalot.getLatestChapter(sourceId);
+    }
+
+    if (sourceName == 'mangakatana') {
+      final sourceId = await _resolveMapped(
+        manga,
+        sourceName: 'mangakatana',
+        resolver: () => _mangaKatana.findConservativeMatch(manga),
+      );
+      if (sourceId == null) return null;
+      return await _mangaKatana.getLatestChapter(sourceId);
     }
 
     if (sourceName == 'asura') {
@@ -763,6 +1209,16 @@ class CatalogRepository {
       );
       if (sourceId == null) return null;
       return await _asura.getLatestChapter(sourceId);
+    }
+
+    if (sourceName == 'weebcentral') {
+      final sourceId = await _resolveMapped(
+        manga,
+        sourceName: 'weebcentral',
+        resolver: () => _weebCentral.findConservativeMatch(manga),
+      );
+      if (sourceId == null) return null;
+      return await _weebCentral.getLatestChapter(sourceId);
     }
     return null;
   }
@@ -775,9 +1231,11 @@ class CatalogRepository {
     if (!isFriendly(manga)) return Future.value(const <CanonicalChapter>[]);
     return switch (sourceName) {
       'demonicscans' => _loadDemonicScans(manga),
-      'manganato' => _loadManganato(manga),
+      'mangakakalot' => _loadMangakakalot(manga),
+      'mangakatana' => _loadMangaKatana(manga),
       'mangadex' => _loadMangaDex(manga, allowAdult: false),
       'asura' => _loadAsura(manga),
+      'weebcentral' => _loadWeebCentral(manga),
       _ => Future.value(const <CanonicalChapter>[]),
     };
   }
@@ -851,7 +1309,7 @@ class CatalogRepository {
     required bool allowAdult,
   }) async {
     final key = _mappingKey(manga, 'mangadex');
-    final directId = manga.mangaDexId;
+    final directId = manga.allSourceMappings['mangadex'];
 
     if (directId != null && directId.isNotEmpty) {
       try {
@@ -895,12 +1353,20 @@ class CatalogRepository {
         fetch: _demonicScans.getChapters,
       );
 
-  Future<List<CanonicalChapter>> _loadManganato(Manga manga) =>
+  Future<List<CanonicalChapter>> _loadMangakakalot(Manga manga) =>
       _loadMappedSource(
         manga,
-        sourceName: 'manganato',
-        resolver: () => _manganato.findConservativeMatch(manga),
-        fetch: _manganato.getChapters,
+        sourceName: 'mangakakalot',
+        resolver: () => _mangakakalot.findConservativeMatch(manga),
+        fetch: _mangakakalot.getChapters,
+      );
+
+  Future<List<CanonicalChapter>> _loadMangaKatana(Manga manga) =>
+      _loadMappedSource(
+        manga,
+        sourceName: 'mangakatana',
+        resolver: () => _mangaKatana.findConservativeMatch(manga),
+        fetch: _mangaKatana.getChapters,
       );
 
   Future<List<CanonicalChapter>> _loadAsura(Manga manga) => _loadMappedSource(
@@ -909,6 +1375,14 @@ class CatalogRepository {
     resolver: () => _asura.findConservativeMatch(manga),
     fetch: _asura.getChapters,
   );
+
+  Future<List<CanonicalChapter>> _loadWeebCentral(Manga manga) =>
+      _loadMappedSource(
+        manga,
+        sourceName: 'weebcentral',
+        resolver: () => _weebCentral.findConservativeMatch(manga),
+        fetch: _weebCentral.getChapters,
+      );
 
   Future<List<CanonicalChapter>> _loadMappedSource(
     Manga manga, {
@@ -962,6 +1436,13 @@ class CatalogRepository {
     final key = _mappingKey(manga, sourceName);
     final memory = _sourceMatchCache[key];
     if (memory != null) return memory;
+
+    final direct = manga.allSourceMappings[sourceName]?.trim();
+    if (direct != null && direct.isNotEmpty) {
+      _sourceMatchCache[key] = direct;
+      await _indexCache.writeMapping(key, direct);
+      return direct;
+    }
 
     final stored = await _indexCache.readMapping(key);
     if (stored != null) {
@@ -1078,11 +1559,8 @@ class CatalogRepository {
         continue;
       }
 
-      final normalizedTitle = _normalize(chapter.title);
-      final key = number == null
-          ? 'special:$normalizedTitle'
-          : 'number:${_numberLabel(number)}';
-      if (number == null && normalizedTitle.isEmpty) continue;
+      final key = ChapterIdentity.canonicalKey(number, chapter.title);
+      if (key == null) continue;
 
       final existing = merged[key];
       if (existing == null) {
@@ -1176,9 +1654,15 @@ class CatalogRepository {
   Future<ChapterPages> pages(
     CanonicalChapter chapter, {
     Set<String> skipSourceIds = const <String>{},
+    String? preferredSourceId,
   }) async {
     final copies = [...chapter.sourceCopies]
-      ..sort((a, b) => b.reliability.compareTo(a.reliability));
+      ..sort((a, b) {
+        final aPreferred = a.sourceId == preferredSourceId;
+        final bPreferred = b.sourceId == preferredSourceId;
+        if (aPreferred != bPreferred) return aPreferred ? -1 : 1;
+        return b.reliability.compareTo(a.reliability);
+      });
 
     Object? lastError;
     for (final copy in copies) {
@@ -1193,11 +1677,17 @@ class CatalogRepository {
         if (copy.sourceId == _demonicScans.id) {
           return await _demonicScans.getChapterPages(copy.chapterId);
         }
-        if (copy.sourceId == _manganato.id) {
-          return await _manganato.getChapterPages(copy.chapterId);
+        if (copy.sourceId == _mangakakalot.id) {
+          return await _mangakakalot.getChapterPages(copy.chapterId);
+        }
+        if (copy.sourceId == _mangaKatana.id) {
+          return await _mangaKatana.getChapterPages(copy.chapterId);
         }
         if (copy.sourceId == _asura.id) {
           return await _asura.getChapterPages(copy.chapterId);
+        }
+        if (copy.sourceId == _weebCentral.id) {
+          return await _weebCentral.getChapterPages(copy.chapterId);
         }
       } catch (error) {
         lastError = error;
@@ -1207,23 +1697,8 @@ class CatalogRepository {
     throw lastError ?? StateError('Chapter unavailable right now.');
   }
 
-  List<Manga> _dedupe(List<Manga> values) {
-    final map = <String, Manga>{};
-    for (final manga in values) {
-      final key = manga.anilistId?.toString() ?? _normalize(manga.title);
-      map.putIfAbsent(key, () => manga);
-    }
-    return map.values.toList();
-  }
-
-  String _normalize(String value) =>
-      value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-
-  String _numberLabel(double value) => value == value.roundToDouble()
-      ? value.toInt().toString()
-      : value.toString();
-
   void dispose() {
     unawaited(_chapterUpdateController.close());
+    unawaited(_sourceHealthController.close());
   }
 }

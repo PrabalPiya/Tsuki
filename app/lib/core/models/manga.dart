@@ -80,7 +80,11 @@ class Manga {
     required int chapterCount,
     this.anilistId,
     this.malId,
+    this.kitsuId,
     this.mangaDexId,
+    this.metadataProviderIds = const {},
+    this.sourceMappings = const {},
+    this.authors = const [],
     this.rating,
     this.isAdult = false,
     this.aliases = const [],
@@ -95,7 +99,11 @@ class Manga {
   final String id;
   final int? anilistId;
   final int? malId;
+  final String? kitsuId;
   final String? mangaDexId;
+  final Map<String, String> metadataProviderIds;
+  final Map<String, String> sourceMappings;
+  final List<String> authors;
   final String title;
   final List<String> aliases;
   final String coverUrl;
@@ -112,16 +120,21 @@ class Manga {
   final int? popularity;
 
   static final RegExp _unsafeContentPattern = RegExp(
-    r'(^|[^a-z0-9])(?:18\s*(?:\+|plus)|r\s*18|adult|ahegao|doujin|doujinshi|erotic|erotica|hentai|incest|lewd|milf|naked|netorare|ntr|nude|nudity|porn|pornographic|pornography|rape|rapist|sex|sexual|smut|uncensored)(?=$|[^a-z0-9])',
+    r'(^|[^a-z0-9])(?:18\s*(?:\+|plus)|r\s*18|adult|ahegao|doujin|doujinshi|ecchi|erotic|erotica|explicit|hentai|incest|lewd|milf|naked|netorare|nsfw|ntr|nude|nudity|porn|pornographic|pornography|rape|rapist|sex|sexual|smut|uncensored)(?=$|[^a-z0-9])',
   );
 
   static const Set<String> _unsafeGenreKeys = {
     'adult',
     'doujinshi',
+    'ecchi',
     'erotica',
     'hentai',
+    'mature',
+    'mature themes',
+    'nsfw',
     'pornographic',
     'pornography',
+    'sexual content',
     'smut',
   };
 
@@ -143,9 +156,18 @@ class Manga {
     return !_unsafeContentPattern.hasMatch(searchableText);
   }
 
+  bool get hasTrustedSafetyMetadata =>
+      anilistId != null ||
+      (kitsuId != null && kitsuId!.isNotEmpty) ||
+      (mangaDexId != null && mangaDexId!.isNotEmpty);
+
   static bool isFriendlySearchText(String value) {
+    if (value.trim().isEmpty) return false;
     final key = _contentSafetyKey(value);
-    return key.isNotEmpty && !_unsafeContentPattern.hasMatch(key);
+    // The safety matcher is intentionally ASCII-normalized, but titles can be
+    // entered in Japanese, Korean, Chinese, and other scripts. An empty ASCII
+    // projection is therefore not an invalid search.
+    return key.isEmpty || !_unsafeContentPattern.hasMatch(key);
   }
 
   int get chapterCount =>
@@ -281,34 +303,88 @@ class Manga {
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
 
-  Manga copyWith({String? mangaDexId, int? chapterCount}) => Manga(
-    id: id,
-    anilistId: anilistId,
-    malId: malId,
+  /// Stable Tsuki-owned identity. Existing AniList-keyed records keep their
+  /// original [id], while new code can use this deterministic compatibility
+  /// key without depending on a provider being online.
+  String get tsukiId {
+    if (id.startsWith('tsuki:')) return id;
+    if (anilistId != null) return 'tsuki:anilist:$anilistId';
+    if (malId != null) return 'tsuki:mal:$malId';
+    if (kitsuId != null && kitsuId!.isNotEmpty) return 'tsuki:kitsu:$kitsuId';
+    return 'tsuki:legacy:$id';
+  }
+
+  Map<String, String> get allMetadataProviderIds => {
+    ...metadataProviderIds,
+    if (anilistId != null) 'anilist': '$anilistId',
+    if (malId != null) 'mal': '$malId',
+    if (kitsuId != null && kitsuId!.isNotEmpty) 'kitsu': kitsuId!,
+  };
+
+  Map<String, String> get allSourceMappings => {
+    ...sourceMappings,
+    if (mangaDexId != null && mangaDexId!.isNotEmpty) 'mangadex': mangaDexId!,
+  };
+
+  Manga copyWith({
+    String? id,
+    int? anilistId,
+    int? malId,
+    String? kitsuId,
+    String? mangaDexId,
+    Map<String, String>? metadataProviderIds,
+    Map<String, String>? sourceMappings,
+    List<String>? aliases,
+    List<String>? authors,
+    String? title,
+    String? coverUrl,
+    String? synopsis,
+    MangaStatus? status,
+    double? rating,
+    int? chapterCount,
+    bool? isAdult,
+    MangaFormat? format,
+    String? countryCode,
+    int? startYear,
+    int? volumeCount,
+    List<String>? genres,
+    int? popularity,
+  }) => Manga(
+    id: id ?? this.id,
+    anilistId: anilistId ?? this.anilistId,
+    malId: malId ?? this.malId,
+    kitsuId: kitsuId ?? this.kitsuId,
     mangaDexId: mangaDexId ?? this.mangaDexId,
-    title: title,
-    aliases: aliases,
-    coverUrl: coverUrl,
-    synopsis: synopsis,
-    status: status,
-    rating: rating,
+    metadataProviderIds: metadataProviderIds ?? this.metadataProviderIds,
+    sourceMappings: sourceMappings ?? this.sourceMappings,
+    title: title ?? this.title,
+    aliases: aliases ?? this.aliases,
+    authors: authors ?? this.authors,
+    coverUrl: coverUrl ?? this.coverUrl,
+    synopsis: synopsis ?? this.synopsis,
+    status: status ?? this.status,
+    rating: rating ?? this.rating,
     chapterCount: chapterCount ?? _metadataChapterCount,
-    isAdult: isAdult,
-    format: format,
-    countryCode: countryCode,
-    startYear: startYear,
-    volumeCount: volumeCount,
-    genres: genres,
-    popularity: popularity,
+    isAdult: isAdult ?? this.isAdult,
+    format: format ?? this.format,
+    countryCode: countryCode ?? this.countryCode,
+    startYear: startYear ?? this.startYear,
+    volumeCount: volumeCount ?? this.volumeCount,
+    genres: genres ?? this.genres,
+    popularity: popularity ?? this.popularity,
   );
 
   Map<String, Object?> toJson() => {
     'id': id,
     'anilistId': anilistId,
     'malId': malId,
+    'kitsuId': kitsuId,
     'mangaDexId': mangaDexId,
+    'metadataProviderIds': metadataProviderIds,
+    'sourceMappings': sourceMappings,
     'title': title,
     'aliases': aliases,
+    'authors': authors,
     'coverUrl': coverUrl,
     'synopsis': synopsis,
     'status': status.name,
@@ -327,9 +403,17 @@ class Manga {
     id: json['id'] as String,
     anilistId: json['anilistId'] as int?,
     malId: json['malId'] as int?,
+    kitsuId: json['kitsuId']?.toString(),
     mangaDexId: json['mangaDexId'] as String?,
+    metadataProviderIds: Map<String, String>.from(
+      json['metadataProviderIds'] as Map? ?? const {},
+    ),
+    sourceMappings: Map<String, String>.from(
+      json['sourceMappings'] as Map? ?? const {},
+    ),
     title: json['title'] as String,
     aliases: List<String>.from(json['aliases'] as List? ?? const []),
+    authors: List<String>.from(json['authors'] as List? ?? const []),
     coverUrl: json['coverUrl'] as String? ?? '',
     synopsis: json['synopsis'] as String? ?? '',
     status: MangaStatus.values.firstWhere(

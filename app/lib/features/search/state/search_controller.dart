@@ -1,9 +1,12 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
 import '../../../core/data/catalog_repository.dart';
+import '../../../core/identity/manga_identity_resolver.dart';
 import '../../../core/models/manga.dart';
+import '../../../core/storage/canonical_alias_index.dart';
 import '../../../core/storage/manga_metadata_cache.dart';
 
 class SearchState {
@@ -42,26 +45,39 @@ class SearchState {
 }
 
 class SearchController extends StateNotifier<SearchState> {
-  SearchController(this._repository, this._cache) : super(const SearchState()) {
+  SearchController(
+    this._repository,
+    this._cache, [
+    CanonicalAliasIndex? aliases,
+  ]) : _aliases = aliases ?? CanonicalAliasIndex(),
+       super(const SearchState()) {
     unawaited(_cache.warmSearchIndex());
   }
 
   final CatalogRepository _repository;
   final MangaMetadataCache _cache;
+  final CanonicalAliasIndex _aliases;
+  final MangaIdentityResolver _identityResolver = const MangaIdentityResolver();
   Timer? _remoteTimer;
+  CancelToken? _remoteCancellation;
   int _generation = 0;
-  static const _remoteSearchDelay = Duration(milliseconds: 300);
+  // All configured metadata providers participate in autocomplete.
+  // Wait for a deliberate typing pause so a six-letter query does not launch
+  // six complete provider sweeps before the user finishes typing it.
+  static const _remoteSearchDelay = Duration(milliseconds: 350);
   static const _suggestionLimit = 50;
   static const _resultLimit = 50;
 
   void reset() {
     _remoteTimer?.cancel();
+    _cancelRemoteSearch();
     _generation++;
     state = const SearchState();
   }
 
   void updateQuery(String value) {
     _remoteTimer?.cancel();
+    _cancelRemoteSearch();
     final generation = ++_generation;
     final trimmed = value.trim();
 
@@ -72,8 +88,9 @@ class SearchController extends StateNotifier<SearchState> {
 
     state = SearchState(
       query: value,
-      results: state.results,
-      loading: state.results.isEmpty,
+      // Results belong to the previous query until the local index finishes.
+      // Clearing them prevents a fast tap from opening the wrong manga.
+      loading: true,
     );
     unawaited(_showLocalResults(value, generation, submitted: false));
 
@@ -87,6 +104,7 @@ class SearchController extends StateNotifier<SearchState> {
 
   Future<void> submit([String? value]) async {
     _remoteTimer?.cancel();
+    _cancelRemoteSearch();
     final query = value ?? state.query;
     final generation = ++_generation;
     final trimmed = query.trim();
@@ -127,22 +145,38 @@ class SearchController extends StateNotifier<SearchState> {
       );
     } catch (_) {
       if (generation == _generation) {
+        final remoteWillRun = query.trim().length >= 2;
         state = state.copyWith(
           results: const <Manga>[],
-          loading: false,
-          error: 'The local manga catalogue could not be searched.',
+          loading: remoteWillRun,
+          error: remoteWillRun
+              ? null
+              : 'Search could not be completed. Please try again.',
+          clearError: remoteWillRun,
         );
       }
     }
   }
 
   List<Manga> _dedupeLocal(Iterable<Manga> values, int limit) {
-    final seen = <String>{};
     final results = <Manga>[];
-    for (final manga in values) {
-      if (!seen.add(manga.id)) continue;
-      results.add(manga);
-      if (results.length == limit) break;
+    for (final raw in values) {
+      if (!_repository.isFriendly(raw) ||
+          !_repository.isEnabledMetadataResult(raw)) {
+        continue;
+      }
+      final manga = _repository.canonicalizeForLibrary(raw);
+      final match = results.indexWhere(
+        (current) => _identityResolver.compare(current, manga).canMerge,
+      );
+      if (match < 0) {
+        if (results.length < limit) results.add(manga);
+      } else {
+        final existing = results[match];
+        results[match] = _identityResolver
+            .merge(existing, manga)
+            .copyWith(id: existing.id);
+      }
     }
     return results;
   }
@@ -152,25 +186,62 @@ class SearchController extends StateNotifier<SearchState> {
     int generation, {
     required bool submitted,
   }) async {
+    final cancellation = CancelToken();
+    _remoteCancellation = cancellation;
     try {
-      final values = await _repository.searchMetadataOnly(query);
-      if (generation != _generation) return;
-
-      final remote = _rememberFriendly(values);
-      final merged = _mergeResults(
-        state.results,
-        remote,
-        limit: submitted ? _resultLimit : _suggestionLimit,
-      );
-      for (final manga in merged) {
-        _repository.remember(manga);
+      var emitted = false;
+      var finalResults = state.results;
+      await for (final values in _repository.searchMetadataProgressive(
+        query,
+        cancelToken: cancellation,
+      )) {
+        if (generation != _generation) return;
+        emitted = true;
+        final merged = _mergeResults(
+          state.results,
+          _rememberFriendly(values),
+          limit: submitted ? _resultLimit : _suggestionLimit,
+        );
+        for (final manga in merged) {
+          _repository.remember(manga);
+          unawaited(_aliases.learn(manga).catchError((_) {}));
+        }
+        finalResults = merged;
+        state = state.copyWith(
+          results: merged,
+          loading: true,
+          submitted: submitted,
+          clearError: true,
+        );
       }
-      unawaited(_cache.saveSearch(query, merged).catchError((_) {}));
+      if (generation != _generation) return;
+      // Persist only the complete provider merge. Saving every progressive
+      // batch can race and leave a smaller, older batch in the cache.
+      if (finalResults.isNotEmpty) {
+        try {
+          await _cache.saveSearch(query, finalResults);
+        } catch (_) {
+          // Search remains usable when its opportunistic cache write fails.
+        }
+      }
+      if (generation != _generation) return;
       state = state.copyWith(
-        results: merged,
         loading: false,
         submitted: submitted,
-        clearError: true,
+        error: !emitted && state.results.isEmpty
+            ? 'More manga could not be loaded. Try again.'
+            : null,
+        clearError: emitted || state.results.isNotEmpty,
+      );
+    } on DioException catch (error) {
+      if (CancelToken.isCancel(error)) return;
+      if (generation != _generation) return;
+      state = state.copyWith(
+        loading: false,
+        error: state.results.isEmpty
+            ? 'More manga could not be loaded. Try again.'
+            : null,
+        clearError: state.results.isNotEmpty,
       );
     } catch (_) {
       if (generation != _generation) return;
@@ -181,7 +252,19 @@ class SearchController extends StateNotifier<SearchState> {
             : null,
         clearError: state.results.isNotEmpty,
       );
+    } finally {
+      if (identical(_remoteCancellation, cancellation)) {
+        _remoteCancellation = null;
+      }
     }
+  }
+
+  void _cancelRemoteSearch() {
+    final active = _remoteCancellation;
+    if (active != null && !active.isCancelled) {
+      active.cancel('Search query changed.');
+    }
+    _remoteCancellation = null;
   }
 
   List<Manga> _mergeResults(
@@ -189,8 +272,6 @@ class SearchController extends StateNotifier<SearchState> {
     List<Manga> remote, {
     required int limit,
   }) {
-    final seenIds = <String>{};
-    final seenTitles = <String>{};
     final merged = <Manga>[];
 
     final localById = {for (final manga in local) manga.id: manga};
@@ -204,16 +285,24 @@ class SearchController extends StateNotifier<SearchState> {
               (localMatch?.metadataChapterCount ?? 0) > 0
           ? raw.copyWith(chapterCount: localMatch!.metadataChapterCount)
           : raw;
-      final title = manga.title.trim().toLowerCase();
-      if (!seenIds.add(manga.id) || !seenTitles.add(title)) continue;
-      merged.add(manga);
-      if (merged.length == limit) break;
+      final match = merged.indexWhere(
+        (current) => _identityResolver.compare(current, manga).canMerge,
+      );
+      if (match < 0) {
+        if (merged.length < limit) merged.add(manga);
+      } else {
+        merged[match] = _identityResolver.merge(merged[match], manga);
+      }
     }
     return merged;
   }
 
   List<Manga> _rememberFriendly(List<Manga> values) {
-    final safe = values.where(_repository.isFriendly).toList(growable: false);
+    final safe = values
+        .where(_repository.isFriendly)
+        .where(_repository.isEnabledMetadataResult)
+        .map(_repository.canonicalizeForLibrary)
+        .toList(growable: false);
     for (final manga in safe) {
       _repository.remember(manga);
     }
@@ -223,6 +312,7 @@ class SearchController extends StateNotifier<SearchState> {
   @override
   void dispose() {
     _remoteTimer?.cancel();
+    _cancelRemoteSearch();
     super.dispose();
   }
 }

@@ -13,7 +13,7 @@ allow installation from your browser or file manager.
 
 ## Features
 
-- Search and discover manga using AniList metadata and rankings.
+- Search manga using AniList, Kitsu, WEBTOON, Asura, Mangakakalot, and Demonic Scans metadata, with AniList rankings.
 - View manga details, ratings, descriptions, and merged chapter lists.
 - Bookmark manga in a personal library.
 - Sync bookmarks and reading progress per Firebase account.
@@ -23,8 +23,14 @@ allow installation from your browser or file manager.
 
 ## Sources
 
-- Metadata and rankings: AniList
-- Chapters and pages: MangaDex, Demonic Scans, Manganato, and Asura Scans
+- Metadata: AniList, Kitsu, WEBTOON, Asura Scans, Mangakakalot, and Demonic Scans
+- Rankings: AniList
+- Chapters and pages: MangaDex, Demonic Scans, Mangakakalot, Asura Scans, Weeb Central, and MangaKatana
+
+Developer details for canonical identity, progressive metadata search,
+browser migration, and the continuous reader are in
+[`docs/architecture.md`](docs/architecture.md). The unpacked Manifest V3
+migration extension lives in [`browser_extension/`](browser_extension/).
 
 Tsuki does not host manga content. Covers, metadata, chapters, and pages remain
 the property of their respective providers and creators.

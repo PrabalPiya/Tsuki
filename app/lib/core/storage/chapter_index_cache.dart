@@ -28,8 +28,10 @@ class ChapterIndexCache {
   static const _version = 6;
   static const _chapterPrefix = 'tsuki.chapterIndex.v6.';
   static const _mappingPrefix = 'tsuki.sourceMapping.release1.';
-  static const _checkedPrefix = 'tsuki.chapterChecked.v6.';
-  static const _deepCheckedPrefix = 'tsuki.chapterDeepChecked.v6.';
+  // Matching revision 7 retries titles that an older exact-title resolver
+  // recently marked as checked-but-missing, without discarding valid indexes.
+  static const _checkedPrefix = 'tsuki.chapterChecked.v7.';
+  static const _deepCheckedPrefix = 'tsuki.chapterDeepChecked.v7.';
   static const _summaryPrefix = 'tsuki.chapterSummary.v6.';
   static Future<void>? _globalSummaryWarmup;
 

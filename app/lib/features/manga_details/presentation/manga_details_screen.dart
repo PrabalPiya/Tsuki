@@ -133,19 +133,24 @@ class _Details extends ConsumerWidget {
     final readableChapters = loadedChapters
         .where((chapter) => chapter.hasDirectlyReadableCopy)
         .toList(growable: false);
-    final startReadingLabel = progress == null
+    final caughtUp = isReadingCaughtUp(progress, readableChapters);
+    final startReadingLabel = caughtUp
+        ? 'Caught Up'
+        : progress == null
         ? 'Start Reading'
         : 'Continue Reading';
 
     VoidCallback? onStartReading;
-    if (readableChapters.isNotEmpty) {
+    if (readableChapters.isNotEmpty && !caughtUp) {
       onStartReading = () {
         CanonicalChapter selected = readableChapters.first;
         final currentId = progress?.chapterId;
 
         if (currentId != null && currentId.isNotEmpty) {
           for (final chapter in readableChapters) {
-            if (chapter.id == currentId) {
+            if (chapter.id == currentId ||
+                (progress?.normalizedChapterNumber != null &&
+                    chapter.number == progress!.normalizedChapterNumber)) {
               selected = chapter;
               break;
             }
@@ -1086,18 +1091,18 @@ class _BookmarkButtonState extends State<_BookmarkButton> {
 
     return RepaintBoundary(
       child: Transform.scale(
-        scale: bookmarked ? 1.035 : 1.0,
+        scale: bookmarked ? 1.02 : 1.0,
         child: Container(
           width: double.infinity,
           height: 50,
           decoration: BoxDecoration(
             color: bookmarked
-                ? AppColors.accent.withValues(alpha: 0.30)
+                ? AppColors.accent.withValues(alpha: 0.14)
                 : AppColors.raised.withValues(alpha: 0.72),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: bookmarked
-                  ? AppColors.accent.withValues(alpha: 0.65)
+                  ? AppColors.accent.withValues(alpha: 0.58)
                   : AppColors.outline,
               width: bookmarked ? 1.2 : 1,
             ),
@@ -1114,8 +1119,8 @@ class _BookmarkButtonState extends State<_BookmarkButton> {
             ),
             icon: Icon(
               bookmarked
-                  ? Icons.favorite_rounded
-                  : Icons.favorite_border_rounded,
+                  ? Icons.bookmark_rounded
+                  : Icons.bookmark_border_rounded,
               key: ValueKey<bool>(bookmarked),
               size: 22,
             ),

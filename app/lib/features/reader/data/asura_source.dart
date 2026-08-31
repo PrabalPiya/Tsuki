@@ -40,7 +40,7 @@ class AsuraSource implements MangaSource {
   Set<String> get allowedImageHosts => const {};
 
   @override
-  Future<List<Manga>> search(String query) async {
+  Future<List<Manga>> search(String query, {CancelToken? cancelToken}) async {
     final cleaned = query.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (cleaned.length < 2) return const [];
 
@@ -48,6 +48,7 @@ class AsuraSource implements MangaSource {
     // far faster and less fragile than crawling every /browse page.
     final response = await _client.get<dynamic>(
       _apiSeries,
+      cancelToken: cancelToken,
       queryParameters: {'offset': 0, 'limit': 20, 'search': cleaned},
       options: Options(headers: const {'Referer': 'https://asurascans.com/'}),
     );
@@ -87,10 +88,7 @@ class AsuraSource implements MangaSource {
   }
 
   Future<String?> findConservativeMatch(Manga canonical) async {
-    final queries = <String>{
-      canonical.title,
-      ...canonical.aliases,
-    }.map((value) => value.trim()).where((value) => value.length >= 2).take(8);
+    final queries = SourceMatching.searchQueries(canonical, maximum: 8);
 
     for (final query in queries) {
       try {

@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,18 +17,43 @@ class _Metadata implements MetadataProvider {
   @override
   Future<Manga?> getById(String id) async => null;
   @override
-  Future<List<Manga>> search(String query) async => const [
-    Manga(
-      id: 'anilist:1',
-      anilistId: 1,
-      title: 'Paper Moon',
-      coverUrl: '',
-      synopsis: 'Test synopsis.',
-      status: MangaStatus.ongoing,
-      chapterCount: 4,
-      rating: 8.4,
-    ),
-  ];
+  Future<List<Manga>> search(String query, {CancelToken? cancelToken}) async {
+    if (query == 'missing') return const [];
+    if (query == 'ダンダダン') {
+      return const [
+        Manga(
+          id: 'anilist:2',
+          anilistId: 2,
+          title: 'ダンダダン',
+          coverUrl: '',
+          synopsis: 'A supernatural adventure.',
+          status: MangaStatus.ongoing,
+          chapterCount: 1,
+        ),
+      ];
+    }
+    return const [
+      Manga(
+        id: 'anilist:1',
+        anilistId: 1,
+        title: 'Paper Moon',
+        coverUrl: '',
+        synopsis: 'Test synopsis.',
+        status: MangaStatus.ongoing,
+        chapterCount: 4,
+        rating: 8.4,
+      ),
+      Manga(
+        id: 'test:paper-moon',
+        metadataProviderIds: {'test': 'paper-moon'},
+        title: 'Read Paper Moon Manga Online',
+        coverUrl: '',
+        synopsis: 'The same test manga from a reader source.',
+        status: MangaStatus.ongoing,
+        chapterCount: 4,
+      ),
+    ];
+  }
 }
 
 void main() {
@@ -60,7 +86,7 @@ void main() {
         ),
       );
       await tester.enterText(find.byType(TextField), 'paper');
-      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump(const Duration(milliseconds: 600));
       await tester.pump();
       expect(find.byType(ListTile), findsOneWidget);
       expect(find.text('Bookmark'), findsNothing);
@@ -69,6 +95,20 @@ void main() {
       expect(find.byType(GridView), findsOneWidget);
       expect(find.text('Paper Moon'), findsWidgets);
       expect(find.text('Bookmark'), findsNothing);
+
+      await tester.enterText(find.byType(TextField), 'missing');
+      await tester.pump();
+      expect(find.text('Paper Moon'), findsNothing);
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump();
+      expect(find.text('No manga match this search.'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), 'ダンダダン');
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump();
+      expect(find.byType(ListTile), findsOneWidget);
+      expect(find.text('ダンダダン'), findsWidgets);
     },
   );
 }

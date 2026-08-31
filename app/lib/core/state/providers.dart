@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth/auth_controller.dart';
 import '../config/app_config.dart';
@@ -9,15 +10,24 @@ import '../data/catalog_repository.dart';
 import '../models/chapter.dart';
 import '../models/manga.dart';
 import '../storage/firestore_user_store.dart';
+import '../storage/canonical_alias_index.dart';
+import '../storage/chapter_index_cache.dart';
 import '../storage/manga_metadata_cache.dart';
 import '../storage/user_store.dart';
 
 import '../../features/discover/data/ranking_provider.dart';
+import '../../features/migration/data/migration_service.dart';
+import '../../features/migration/data/import_session_repository.dart';
 import '../../features/reader/data/asura_source.dart';
 import '../../features/reader/data/demonic_scans_source.dart';
 import '../../features/reader/data/mangadex_source.dart';
-import '../../features/reader/data/manganato_source.dart';
+import '../../features/reader/data/mangakakalot_source.dart';
+import '../../features/reader/data/mangakatana_source.dart';
+import '../../features/reader/data/weebcentral_source.dart';
 import '../../features/search/data/anilist_metadata_provider.dart';
+import '../../features/search/data/kitsu_metadata_provider.dart';
+import '../../features/search/data/manga_source_metadata_provider.dart';
+import '../../features/search/data/webtoon_metadata_provider.dart';
 import '../../features/search/state/search_controller.dart';
 
 import 'app_state.dart';
@@ -47,6 +57,10 @@ final mangaMetadataCacheProvider = Provider<MangaMetadataCache>((ref) {
   return cache;
 });
 
+final canonicalAliasIndexProvider = Provider<CanonicalAliasIndex>(
+  (ref) => CanonicalAliasIndex(preferences: SharedPreferences.getInstance()),
+);
+
 final userLibraryProvider =
     StateNotifierProvider<UserLibraryController, UserLibraryState>((ref) {
       final uid = ref.watch(authProvider.select((session) => session.uid));
@@ -59,6 +73,9 @@ final userLibraryProvider =
           .map((next) => next.bookmarkedManga)
           .distinct(identical)
           .listen((bookmarkedManga) {
+            ref
+                .read(catalogProvider)
+                .syncBookmarkedManga(bookmarkedManga.values);
             if (bookmarkedManga.isEmpty) return;
             unawaited(
               ref
@@ -78,20 +95,47 @@ final mangaDexProvider = Provider<MangaDexSource>((ref) => MangaDexSource());
 final demonicScansProvider = Provider<DemonicScansSource>(
   (ref) => DemonicScansSource(),
 );
-final manganatoProvider = Provider<ManganatoSource>((ref) => ManganatoSource());
+final mangakakalotProvider = Provider<MangakakalotSource>(
+  (ref) => MangakakalotSource(),
+);
+final mangaKatanaProvider = Provider<MangaKatanaSource>(
+  (ref) => MangaKatanaSource(),
+);
 final asuraProvider = Provider<AsuraSource>((ref) => AsuraSource());
+final weebCentralProvider = Provider<WeebCentralSource>(
+  (ref) => WeebCentralSource(),
+);
 final anilistProvider = Provider<AniListMetadataProvider>(
   (ref) => AniListMetadataProvider(),
+);
+final kitsuProvider = Provider<KitsuMetadataProvider>(
+  (ref) => KitsuMetadataProvider(),
+);
+final webtoonProvider = Provider<WebtoonMetadataProvider>(
+  (ref) => WebtoonMetadataProvider(),
 );
 
 final catalogProvider = Provider<CatalogRepository>((ref) {
   final repository = CatalogRepository(
     config: ref.watch(appConfigProvider),
     metadata: ref.watch(anilistProvider),
+    metadataProviders: [
+      ref.watch(anilistProvider),
+      ref.watch(kitsuProvider),
+      ref.watch(webtoonProvider),
+      MangaSourceMetadataProvider(ref.watch(asuraProvider)),
+      MangaSourceMetadataProvider(ref.watch(mangakakalotProvider)),
+      MangaSourceMetadataProvider(ref.watch(demonicScansProvider)),
+    ],
     mangaDex: ref.watch(mangaDexProvider),
     demonicScans: ref.watch(demonicScansProvider),
-    manganato: ref.watch(manganatoProvider),
+    mangakakalot: ref.watch(mangakakalotProvider),
+    mangaKatana: ref.watch(mangaKatanaProvider),
     asura: ref.watch(asuraProvider),
+    weebCentral: ref.watch(weebCentralProvider),
+    chapterIndexCache: ChapterIndexCache(
+      preferences: SharedPreferences.getInstance(),
+    ),
   );
   ref.onDispose(repository.dispose);
   return repository;
@@ -100,6 +144,16 @@ final catalogProvider = Provider<CatalogRepository>((ref) {
 final chapterSummaryUpdatesProvider = StreamProvider<String>(
   (ref) => ref.watch(catalogProvider).chapterUpdates,
 );
+
+final sourceHealthProvider = StreamProvider<List<SourceHealthSnapshot>>((
+  ref,
+) async* {
+  final catalog = ref.watch(catalogProvider);
+  yield catalog.sourceHealth;
+  await for (final _ in catalog.sourceHealthUpdates) {
+    yield catalog.sourceHealth;
+  }
+});
 
 final chapterSummaryLabelProvider = StreamProvider.autoDispose
     .family<String?, Manga>((ref, manga) async* {
@@ -120,8 +174,20 @@ final searchProvider =
       return SearchController(
         ref.watch(catalogProvider),
         ref.watch(mangaMetadataCacheProvider),
+        ref.watch(canonicalAliasIndexProvider),
       );
     });
+
+final migrationServiceProvider = Provider<MigrationService>(
+  (ref) => MigrationService(
+    catalog: ref.watch(catalogProvider),
+    cache: ref.watch(mangaMetadataCacheProvider),
+    aliases: ref.watch(canonicalAliasIndexProvider),
+    sessions: ImportSessionRepository(
+      preferences: SharedPreferences.getInstance(),
+    ),
+  ),
+);
 
 final chapterProvider = StreamProvider.autoDispose
     .family<List<CanonicalChapter>, Manga>((ref, manga) {

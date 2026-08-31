@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:tsuki/core/config/app_config.dart';
@@ -8,7 +9,7 @@ import 'package:tsuki/core/storage/chapter_index_cache.dart';
 import 'package:tsuki/features/reader/data/asura_source.dart';
 import 'package:tsuki/features/reader/data/demonic_scans_source.dart';
 import 'package:tsuki/features/reader/data/mangadex_source.dart';
-import 'package:tsuki/features/reader/data/manganato_source.dart';
+import 'package:tsuki/features/reader/data/mangakakalot_source.dart';
 import 'package:tsuki/features/search/data/metadata_provider.dart';
 
 void main() {
@@ -25,7 +26,7 @@ void main() {
         metadata: _Metadata(),
         mangaDex: mangaDex,
         demonicScans: demonicScans,
-        manganato: _NoManganato(),
+        mangakakalot: _NoMangakakalot(),
         asura: _NoAsura(),
         chapterIndexCache: cache,
       );
@@ -56,7 +57,7 @@ void main() {
       metadata: _Metadata(),
       mangaDex: mangaDex,
       demonicScans: _DemonicScansAt100(),
-      manganato: _NoManganato(),
+      mangakakalot: _NoMangakakalot(),
       asura: _NoAsura(),
       chapterIndexCache: cache,
     );
@@ -90,7 +91,7 @@ void main() {
         metadata: _Metadata(),
         mangaDex: mangaDex,
         demonicScans: _DemonicScansAt100(),
-        manganato: _NoManganato(),
+        mangakakalot: _NoMangakakalot(),
         asura: _NoAsura(),
         chapterIndexCache: cache,
       );
@@ -127,7 +128,7 @@ void main() {
         metadata: _Metadata(),
         mangaDex: mangaDex,
         demonicScans: _DemonicScansAt100(),
-        manganato: _NoManganato(),
+        mangakakalot: _NoMangakakalot(),
         asura: _NoAsura(),
         chapterIndexCache: cache,
       );
@@ -156,6 +157,33 @@ void main() {
       expect(mangaDex.fullIndexLoads, 1);
     },
   );
+
+  test('an imported direct source mapping bypasses fuzzy matching', () async {
+    final mappedSource = _MappedMangakakalot();
+    final repository = CatalogRepository(
+      config: _config,
+      metadata: _Metadata(),
+      mangaDex: _MangaDexAt150(),
+      demonicScans: _DemonicScansAt100(),
+      mangakakalot: mappedSource,
+      asura: _NoAsura(),
+      chapterIndexCache: _StaleChapterCache(const []),
+    );
+    const manga = Manga(
+      id: 'anilist:imported-mapping',
+      sourceMappings: {'mangakakalot': 'direct-imported-id'},
+      title: 'Imported mapping',
+      coverUrl: '',
+      synopsis: '',
+      status: MangaStatus.ongoing,
+      chapterCount: 0,
+    );
+
+    await repository.refreshChapters(manga, force: true);
+
+    expect(mappedSource.loadedId, 'direct-imported-id');
+    expect(mappedSource.matchCalls, 0);
+  });
 }
 
 const _config = AppConfig(
@@ -233,7 +261,8 @@ class _Metadata implements MetadataProvider {
   Future<Manga?> getById(String id) async => null;
 
   @override
-  Future<List<Manga>> search(String query) async => const [];
+  Future<List<Manga>> search(String query, {CancelToken? cancelToken}) async =>
+      const [];
 }
 
 class _MangaDexAt150 extends MangaDexSource {
@@ -274,7 +303,24 @@ class _NoAsura extends AsuraSource {
   Future<String?> findConservativeMatch(Manga canonical) async => null;
 }
 
-class _NoManganato extends ManganatoSource {
+class _NoMangakakalot extends MangakakalotSource {
   @override
   Future<String?> findConservativeMatch(Manga canonical) async => null;
+}
+
+class _MappedMangakakalot extends MangakakalotSource {
+  String? loadedId;
+  int matchCalls = 0;
+
+  @override
+  Future<String?> findConservativeMatch(Manga canonical) async {
+    matchCalls++;
+    return null;
+  }
+
+  @override
+  Future<List<CanonicalChapter>> getChapters(String sourceMangaId) async {
+    loadedId = sourceMangaId;
+    return [_chapter(1, id)];
+  }
 }

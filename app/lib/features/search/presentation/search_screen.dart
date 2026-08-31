@@ -21,6 +21,7 @@ class SearchScreen extends ConsumerStatefulWidget {
 class _SearchScreenState extends ConsumerState<SearchScreen> {
   final _controller = TextEditingController();
   final _focus = FocusNode();
+  String? _openingMangaId;
 
   @override
   void initState() {
@@ -38,18 +39,30 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   Future<void> _openManga(Manga manga) async {
-    if (!manga.isFriendlyContent) return;
-    unawaited(
-      ref.read(catalogProvider).prewarmChapters(manga, allowAdult: false),
-    );
-    if (!mounted) return;
-    context.push('/manga/${Uri.encodeComponent(manga.id)}');
+    if (!manga.isFriendlyContent || _openingMangaId != null) return;
+    setState(() => _openingMangaId = manga.id);
+    try {
+      final repository = ref.read(catalogProvider);
+      final verified = await repository.verifyForOpen(manga);
+      if (!mounted) return;
+      if (verified == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Manga details are unavailable. Please try again.'),
+          ),
+        );
+        return;
+      }
+      unawaited(repository.prewarmChapters(verified, allowAdult: false));
+      await context.push('/manga/${Uri.encodeComponent(verified.id)}');
+    } finally {
+      if (mounted) setState(() => _openingMangaId = null);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final notifier = ref.read(searchProvider.notifier);
-
     ref.listen<SearchState>(searchProvider, (previous, next) {
       if (_controller.text == next.query) return;
 
@@ -99,8 +112,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             ),
           ),
           const _SearchProgress(),
-          _SearchErrorBanner(onRetry: () => notifier.submit()),
-          Expanded(child: _SearchResults(openManga: _openManga)),
+          Expanded(
+            child: _SearchResults(
+              openManga: _openManga,
+              onRetry: () => notifier.submit(),
+              openingMangaId: _openingMangaId,
+            ),
+          ),
         ],
       ),
     );
@@ -126,62 +144,56 @@ class _SearchProgress extends ConsumerWidget {
   }
 }
 
-class _SearchErrorBanner extends ConsumerWidget {
-  const _SearchErrorBanner({required this.onRetry});
-
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final error = ref.watch(searchProvider.select((state) => state.error));
-    if (error == null) return const SizedBox.shrink();
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 10, 18, 2),
-      child: Row(
-        children: [
-          const Icon(Icons.cloud_off_rounded, color: AppColors.muted, size: 17),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              error,
-              style: const TextStyle(color: AppColors.muted, fontSize: 12),
-            ),
-          ),
-          TextButton(onPressed: onRetry, child: const Text('Retry')),
-        ],
-      ),
-    );
-  }
-}
-
 class _SearchResults extends ConsumerWidget {
-  const _SearchResults({required this.openManga});
+  const _SearchResults({
+    required this.openManga,
+    required this.onRetry,
+    required this.openingMangaId,
+  });
 
   final Future<void> Function(Manga manga) openManga;
+  final VoidCallback onRetry;
+  final String? openingMangaId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(searchProvider);
 
     if (!state.hasBrowseRequest) return const _SearchHint();
+    if (state.results.isEmpty && !state.loading && state.error != null) {
+      return _SearchFailure(message: state.error!, onRetry: onRetry);
+    }
     if (state.results.isEmpty && !state.loading) return const _NoResults();
     if (state.submitted) {
-      return _SearchResultGrid(items: state.results, openManga: openManga);
+      return _SearchResultGrid(
+        items: state.results,
+        openManga: openManga,
+        openingMangaId: openingMangaId,
+      );
     }
-    return _SearchSuggestionList(items: state.results, openManga: openManga);
+    return _SearchSuggestionList(
+      items: state.results,
+      openManga: openManga,
+      openingMangaId: openingMangaId,
+    );
   }
 }
 
-class _SearchSuggestionList extends ConsumerWidget {
-  const _SearchSuggestionList({required this.items, required this.openManga});
+class _SearchSuggestionList extends StatelessWidget {
+  const _SearchSuggestionList({
+    required this.items,
+    required this.openManga,
+    required this.openingMangaId,
+  });
 
   final List<Manga> items;
   final Future<void> Function(Manga manga) openManga;
+  final String? openingMangaId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     return ListView.separated(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
       itemCount: items.length,
       separatorBuilder: (_, _) => const Divider(height: 1),
@@ -208,54 +220,86 @@ class _SearchSuggestionList extends ConsumerWidget {
             padding: const EdgeInsets.only(top: 8),
             child: _MetaStrip(manga: manga, mode: _MetaStripMode.suggestion),
           ),
-          trailing: const Icon(Icons.chevron_right_rounded),
-          onTap: () => openManga(manga),
+          trailing: openingMangaId == manga.id
+              ? const SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.chevron_right_rounded),
+          onTap: openingMangaId == null ? () => openManga(manga) : null,
         );
       },
     );
   }
 }
 
-class _SearchResultGrid extends ConsumerWidget {
-  const _SearchResultGrid({required this.items, required this.openManga});
+class _SearchResultGrid extends StatelessWidget {
+  const _SearchResultGrid({
+    required this.items,
+    required this.openManga,
+    required this.openingMangaId,
+  });
 
   final List<Manga> items;
   final Future<void> Function(Manga manga) openManga;
+  final String? openingMangaId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 22),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        mainAxisExtent: 384,
-        crossAxisSpacing: 14,
-        mainAxisSpacing: 18,
-      ),
-      itemCount: items.length,
-      itemBuilder: (context, index) {
-        final manga = items[index];
-
-        return InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: () => openManga(manga),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: CoverArt(url: manga.coverUrl, title: manga.title),
-              ),
-              const SizedBox(height: 9),
-              Text(
-                manga.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              _MetaStrip(manga: manga, mode: _MetaStripMode.result),
-            ],
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = switch (constraints.maxWidth) {
+          >= 900 => 5,
+          >= 700 => 4,
+          >= 520 => 3,
+          >= 330 => 2,
+          _ => 1,
+        };
+        return GridView.builder(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 22),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            mainAxisExtent: 352,
+            crossAxisSpacing: 14,
+            mainAxisSpacing: 18,
           ),
+          itemCount: items.length,
+          itemBuilder: (context, index) {
+            final manga = items[index];
+
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                InkWell(
+                  borderRadius: BorderRadius.circular(18),
+                  onTap: openingMangaId == null ? () => openManga(manga) : null,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: CoverArt(
+                          url: manga.coverUrl,
+                          title: manga.title,
+                        ),
+                      ),
+                      const SizedBox(height: 9),
+                      Text(
+                        manga.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      _MetaStrip(manga: manga, mode: _MetaStripMode.result),
+                    ],
+                  ),
+                ),
+                if (openingMangaId == manga.id)
+                  const Center(child: CircularProgressIndicator()),
+              ],
+            );
+          },
         );
       },
     );
@@ -275,15 +319,19 @@ class _MetaStrip extends StatelessWidget {
     if (mode == _MetaStripMode.result) {
       return SizedBox(
         width: double.infinity,
-        height: 61,
-        child: Wrap(
-          spacing: 5,
-          runSpacing: 5,
-          children: [
-            _MetaPill(Icons.star_rounded, manga.ratingLabel),
-            _MetaPill(Icons.bolt_rounded, manga.statusLabel),
-            _MetaPill(Icons.auto_stories_rounded, manga.publicationTypeLabel),
-          ],
+        height: 28,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Row(
+            children: [
+              _MetaPill(Icons.star_rounded, manga.ratingLabel),
+              const SizedBox(width: 5),
+              _MetaPill(Icons.bolt_rounded, manga.statusLabel),
+              const SizedBox(width: 5),
+              _MetaPill(Icons.auto_stories_rounded, manga.publicationTypeLabel),
+            ],
+          ),
         ),
       );
     }
@@ -381,6 +429,40 @@ class _NoResults extends StatelessWidget {
           'No manga match this search.',
           textAlign: TextAlign.center,
           style: TextStyle(color: AppColors.muted),
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchFailure extends StatelessWidget {
+  const _SearchFailure({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.search_off_rounded,
+              size: 42,
+              color: AppColors.muted,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.muted),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.tonal(onPressed: onRetry, child: const Text('Retry')),
+          ],
         ),
       ),
     );

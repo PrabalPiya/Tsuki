@@ -30,7 +30,16 @@ abstract interface class UserStore {
   Future<void> clearSession(String uid);
 }
 
-class LocalUserStore implements UserStore {
+abstract interface class BatchUserStore {
+  Future<void> saveLibraryBatch(
+    String uid,
+    Set<String> ids,
+    Map<String, Manga> manga,
+    Map<String, ReadingProgress> progress,
+  );
+}
+
+class LocalUserStore implements UserStore, BatchUserStore {
   LocalUserStore({Future<SharedPreferences>? preferences})
     : _preferences = preferences;
 
@@ -175,6 +184,19 @@ class LocalUserStore implements UserStore {
     }
     map[value.mangaId] = value.toJson();
     await p.setString(key, jsonEncode(map));
+  }
+
+  @override
+  Future<void> saveLibraryBatch(
+    String uid,
+    Set<String> ids,
+    Map<String, Manga> manga,
+    Map<String, ReadingProgress> progress,
+  ) async {
+    await saveBookmarks(uid, ids, manga);
+    for (final value in progress.values) {
+      await saveProgress(uid, value);
+    }
   }
 
   @override

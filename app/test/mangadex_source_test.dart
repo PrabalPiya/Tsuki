@@ -159,46 +159,52 @@ void main() {
     },
   );
 
-  test('matching search only requests safe MangaDex content ratings', () async {
-    final adapter = _FakeAdapter(
-      (_) => {
-        'result': 'ok',
-        'limit': 1,
-        'offset': 0,
-        'total': 1,
-        'data': [
-          {
-            'id': 'safe-id',
-            'type': 'manga',
-            'attributes': {
-              'title': {'en': 'Safe Match'},
-              'altTitles': const [],
-              'description': {'en': 'Description'},
-              'status': 'ongoing',
-              'contentRating': 'safe',
-              'links': const {},
+  test(
+    'matching search requests safe and suggestive content ratings',
+    () async {
+      final adapter = _FakeAdapter(
+        (_) => {
+          'result': 'ok',
+          'limit': 1,
+          'offset': 0,
+          'total': 1,
+          'data': [
+            {
+              'id': 'safe-id',
+              'type': 'manga',
+              'attributes': {
+                'title': {'en': 'Safe Match'},
+                'altTitles': const [],
+                'description': {'en': 'Description'},
+                'status': 'ongoing',
+                'contentRating': 'safe',
+                'links': const {},
+              },
+              'relationships': const [],
             },
-            'relationships': const [],
-          },
-        ],
-      },
-    );
-    final source = MangaDexSource(client: _dio(adapter));
+          ],
+        },
+      );
+      final source = MangaDexSource(client: _dio(adapter));
 
-    await source.findConservativeMatch(
-      const Manga(
-        id: 'anilist:1',
-        title: 'Safe Match',
-        aliases: ['Safe Match'],
-        coverUrl: '',
-        synopsis: '',
-        status: MangaStatus.ongoing,
-        chapterCount: 0,
-      ),
-    );
+      await source.findConservativeMatch(
+        const Manga(
+          id: 'anilist:1',
+          title: 'Safe Match',
+          aliases: ['Safe Match'],
+          coverUrl: '',
+          synopsis: '',
+          status: MangaStatus.ongoing,
+          chapterCount: 0,
+        ),
+      );
 
-    expect(adapter.requests.single.query['contentRating[]'], ['safe']);
-  });
+      expect(adapter.requests.single.query['contentRating[]'], [
+        'safe',
+        'suggestive',
+      ]);
+    },
+  );
 
   test(
     'conservative matching accepts exact AniList links from MangaDex',

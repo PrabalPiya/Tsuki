@@ -4,7 +4,7 @@ import '../models/manga.dart';
 import '../models/reading_progress.dart';
 import 'user_store.dart';
 
-class FirestoreUserStore implements UserStore {
+class FirestoreUserStore implements UserStore, BatchUserStore {
   FirestoreUserStore({FirebaseFirestore? firestore, UserStore? local})
     : _db = firestore ?? FirebaseFirestore.instance,
       _local = local ?? LocalUserStore();
@@ -130,6 +130,57 @@ class FirestoreUserStore implements UserStore {
         .collection('progress')
         .doc(value.mangaId)
         .set({...value.toJson(), 'updatedAt': FieldValue.serverTimestamp()});
+  }
+
+  @override
+  Future<void> saveLibraryBatch(
+    String uid,
+    Set<String> ids,
+    Map<String, Manga> manga,
+    Map<String, ReadingProgress> progress,
+  ) async {
+    if (_local is BatchUserStore) {
+      await (_local as BatchUserStore).saveLibraryBatch(
+        uid,
+        ids,
+        manga,
+        progress,
+      );
+    } else {
+      await _local.saveBookmarks(uid, ids, manga);
+      for (final value in progress.values) {
+        await _local.saveProgress(uid, value);
+      }
+    }
+
+    final user = _db.collection('users').doc(uid);
+    final operations = <void Function(WriteBatch)>[];
+    for (final entry in manga.entries) {
+      if (!entry.value.isFriendlyContent) continue;
+      operations.add((batch) {
+        batch.set(user.collection('bookmarks').doc(entry.key), {
+          'mangaId': entry.key,
+          'manga': entry.value.toJson(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      });
+    }
+    for (final entry in progress.entries) {
+      operations.add((batch) {
+        batch.set(user.collection('progress').doc(entry.key), {
+          ...entry.value.toJson(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      });
+    }
+    for (var offset = 0; offset < operations.length; offset += 450) {
+      final batch = _db.batch();
+      for (final operation in operations.skip(offset).take(450)) {
+        operation(batch);
+      }
+      await batch.commit();
+    }
+    _remoteBookmarkIds[uid] = Set<String>.unmodifiable(ids);
   }
 
   @override

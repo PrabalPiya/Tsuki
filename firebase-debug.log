@@ -74,3 +74,41 @@
 [debug] [2026-08-22T16:22:10.981Z] Checked if tokens are valid: true, expires at: 1787419280099
 [debug] [2026-08-22T16:22:10.982Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/-/androidApps/1:348316155116:android:48f1884387f456a2bb39c9/config [none]
 [debug] [2026-08-22T16:22:12.798Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/-/androidApps/1:348316155116:android:48f1884387f456a2bb39c9/config 200
+[debug] [2026-08-29T10:50:19.341Z] ----------------------------------------------------------------------
+[debug] [2026-08-29T10:50:19.365Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\blank\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js apps:list --project quiet-reader-app-26b7 --json
+[debug] [2026-08-29T10:50:19.365Z] CLI Version:   15.27.0
+[debug] [2026-08-29T10:50:19.365Z] Platform:      win32
+[debug] [2026-08-29T10:50:19.365Z] Node Version:  v24.19.0
+[debug] [2026-08-29T10:50:19.365Z] Detected Agent: codex_cli
+[debug] [2026-08-29T10:50:19.365Z] Time:          Sat Aug 29 2026 16:35:19 GMT+0545 (Nepal Time)
+[debug] [2026-08-29T10:50:19.366Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-08-29T10:50:19.394Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-08-29T10:50:19.494Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-08-29T10:50:19.495Z] > authorizing via signed-in user (blank00154@gmail.com)
+[debug] [2026-08-29T10:50:19.498Z] Checked if tokens are valid: false, expires at: 1787419280099
+[debug] [2026-08-29T10:50:19.498Z] Checked if tokens are valid: false, expires at: 1787419280099
+[debug] [2026-08-29T10:50:19.498Z] > refreshing access token with scopes: []
+[debug] [2026-08-29T10:50:19.500Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2026-08-29T10:50:19.500Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-08-29T10:50:19.999Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2026-08-29T10:50:19.999Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-08-29T10:50:20.023Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/quiet-reader-app-26b7:searchApps pageSize=100
+[debug] [2026-08-29T10:50:20.555Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2026-08-29T10:50:20.555Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}
+[debug] [2026-08-29T10:50:21.110Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/quiet-reader-app-26b7:searchApps 200
+[debug] [2026-08-29T10:50:39.070Z] ----------------------------------------------------------------------
+[debug] [2026-08-29T10:50:39.072Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\blank\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js apps:sdkconfig WEB 1:348316155116:web:d95e26e180aa156bbb39c9 --project quiet-reader-app-26b7 --json
+[debug] [2026-08-29T10:50:39.073Z] CLI Version:   15.27.0
+[debug] [2026-08-29T10:50:39.073Z] Platform:      win32
+[debug] [2026-08-29T10:50:39.073Z] Node Version:  v24.19.0
+[debug] [2026-08-29T10:50:39.073Z] Detected Agent: codex_cli
+[debug] [2026-08-29T10:50:39.073Z] Time:          Sat Aug 29 2026 16:35:39 GMT+0545 (Nepal Time)
+[debug] [2026-08-29T10:50:39.073Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-08-29T10:50:39.102Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-08-29T10:50:39.103Z] > authorizing via signed-in user (blank00154@gmail.com)
+[debug] [2026-08-29T10:50:39.117Z] Checked if tokens are valid: true, expires at: 1788004218999
+[debug] [2026-08-29T10:50:39.117Z] Checked if tokens are valid: true, expires at: 1788004218999
+[debug] [2026-08-29T10:50:39.118Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/-/webApps/1:348316155116:web:d95e26e180aa156bbb39c9/config [none]
+[debug] [2026-08-29T10:50:40.857Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/-/webApps/1:348316155116:web:d95e26e180aa156bbb39c9/config 200

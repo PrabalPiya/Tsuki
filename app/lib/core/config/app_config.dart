@@ -10,6 +10,7 @@ class AppConfig {
     required this.firebaseAppId,
     required this.firebaseApiKey,
     required this.firebaseMessagingSenderId,
+    this.firebaseAuthDomain = '',
     required this.backendBaseUrl,
     required this.remoteCatalogUrl,
   });
@@ -23,6 +24,7 @@ class AppConfig {
         app = String.fromEnvironment('FIREBASE_APP_ID'),
         key = String.fromEnvironment('FIREBASE_API_KEY'),
         sender = String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID'),
+        authDomain = String.fromEnvironment('FIREBASE_AUTH_DOMAIN'),
         backend = String.fromEnvironment('BACKEND_BASE_URL'),
         remoteCatalog = String.fromEnvironment('REMOTE_CATALOG_URL'),
         demo = bool.fromEnvironment('USE_DEMO_DATA', defaultValue: false);
@@ -33,6 +35,7 @@ class AppConfig {
       firebaseAppId: app,
       firebaseApiKey: key,
       firebaseMessagingSenderId: sender,
+      firebaseAuthDomain: authDomain,
       backendBaseUrl: backend,
       remoteCatalogUrl: remoteCatalog,
     );
@@ -45,6 +48,7 @@ class AppConfig {
       firebaseMessagingSenderId,
       backendBaseUrl,
       remoteCatalogUrl;
+  final String firebaseAuthDomain;
 
   bool get isFirebaseConfigured =>
       firebaseProjectId.isNotEmpty &&
@@ -60,6 +64,7 @@ class AppConfig {
     firebaseAppId: '',
     firebaseApiKey: '',
     firebaseMessagingSenderId: '',
+    firebaseAuthDomain: '',
     backendBaseUrl: '',
     remoteCatalogUrl: remoteCatalogUrl,
   );
@@ -70,6 +75,7 @@ class AppConfig {
     firebaseAppId: options.appId,
     firebaseApiKey: options.apiKey,
     firebaseMessagingSenderId: options.messagingSenderId,
+    firebaseAuthDomain: options.authDomain ?? '',
     backendBaseUrl: backendBaseUrl,
     remoteCatalogUrl: remoteCatalogUrl,
   );
@@ -78,5 +84,6 @@ class AppConfig {
     appId: firebaseAppId,
     apiKey: firebaseApiKey,
     messagingSenderId: firebaseMessagingSenderId,
+    authDomain: firebaseAuthDomain.isEmpty ? null : firebaseAuthDomain,
   );
 }

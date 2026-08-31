@@ -6,11 +6,11 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:tsuki/core/models/manga.dart';
-import 'package:tsuki/features/reader/data/manganato_source.dart';
+import 'package:tsuki/features/reader/data/mangakakalot_source.dart';
 
 void main() {
   test('matches a title and exposes its newest readable chapter', () async {
-    final source = ManganatoSource(client: _client(_FixtureAdapter()));
+    final source = MangakakalotSource(client: _client(_FixtureAdapter()));
     const manga = Manga(
       id: 'anilist:111025',
       title: 'MookHyang: Dark Lady',
@@ -39,14 +39,26 @@ void main() {
   });
 
   test('rejects a slug page whose title does not match', () async {
-    final source = ManganatoSource(client: _client(_FixtureAdapter()));
+    final source = MangakakalotSource(client: _client(_FixtureAdapter()));
 
     expect(await source.search('Different Manga'), isEmpty);
+  });
+
+  test('loads source metadata after a cold start', () async {
+    final source = MangakakalotSource(client: _client(_FixtureAdapter()));
+
+    final details = await source.getMangaDetails('mookhyang-dark-lady');
+
+    expect(details, isNotNull);
+    expect(details!.title, 'Mookhyang - Dark Lady');
+    expect(details.status, MangaStatus.ongoing);
+    expect(details.synopsis, contains('martial artist'));
+    expect(details.sourceMappings['mangakakalot'], 'mookhyang-dark-lady');
   });
 }
 
 Dio _client(HttpClientAdapter adapter) =>
-    Dio(BaseOptions(baseUrl: 'https://www.manganato.gg'))
+    Dio(BaseOptions(baseUrl: 'https://www.mangakakalot.gg'))
       ..httpClientAdapter = adapter;
 
 class _FixtureAdapter implements HttpClientAdapter {
@@ -100,6 +112,9 @@ class _FixtureAdapter implements HttpClientAdapter {
         <div class="info-image">
           <img alt="Mookhyang - Dark Lady" src="https://storage.waitst.com/thumb/dark-lady.webp">
         </div>
+        <div id="panel-story-info-description">Description: A martial artist awakens in another world.</div>
+        <div>Status: Ongoing</div>
+        <div>Genres: Action, Fantasy</div>
       ''',
       '/manga/mookhyang-dark-lady/chapter-297' =>
         '''

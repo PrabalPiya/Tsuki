@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+
 import '../../../core/models/chapter.dart';
 import '../../../core/models/manga.dart';
 
@@ -18,7 +20,7 @@ abstract interface class MangaSource {
   String get displayName;
   SourceCapabilities get capabilities;
   Set<String> get allowedImageHosts;
-  Future<List<Manga>> search(String query);
+  Future<List<Manga>> search(String query, {CancelToken? cancelToken});
   Future<Manga?> getMangaDetails(String sourceMangaId);
   Future<List<CanonicalChapter>> getChapters(String sourceMangaId);
   Future<ChapterPages> getChapterPages(String sourceChapterId);

@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../core/state/providers.dart';
 import '../core/theme/app_theme.dart';
 import '../features/discover/presentation/discover_screen.dart';
 
@@ -96,18 +95,15 @@ class MainShell extends ConsumerWidget {
     final currentIndex = navigationShell.currentIndex;
 
     const discoverIndex = 1;
-    const searchIndex = 2;
-
     final enteringDiscover =
         index == discoverIndex && currentIndex != discoverIndex;
-    final leavingSearch = currentIndex == searchIndex && index != searchIndex;
+
+    if (index != currentIndex) {
+      FocusManager.instance.primaryFocus?.unfocus();
+    }
 
     if (enteringDiscover) {
       ref.read(discoverResetProvider.notifier).state++;
-    }
-
-    if (leavingSearch) {
-      ref.read(searchProvider.notifier).reset();
     }
 
     navigationShell.goBranch(index, initialLocation: index == currentIndex);
